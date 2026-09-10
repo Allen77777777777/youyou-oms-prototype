@@ -5,7 +5,7 @@
 ## 在线预览与源码交付
 
 - 在线预览（受控访问）：[优优电商 OMS 高保真原型](https://youyou-oms-prototype.hearty-fawn-2662.chatgpt.site)
-- 源码通过 GitHub 私有仓库交付；获得仓库权限后可使用 `Code → Download ZIP` 下载，或通过 Git 克隆。
+- 源码仓库（私有）：[Allen77777777777/youyou-oms-prototype](https://github.com/Allen77777777777/youyou-oms-prototype)。获得仓库权限后可使用 `Code → Download ZIP` 下载，或通过 Git 克隆。
 - 原型内订单、买家、联系方式和业务编号均为虚构、脱敏的演示数据，不得作为真实生产数据使用。
 
 ## 本地运行
