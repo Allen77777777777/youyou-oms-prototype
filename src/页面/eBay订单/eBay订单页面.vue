@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
   ArrowDown,
   Coin,
@@ -37,6 +37,9 @@ import { useRoute, useRouter } from 'vue-router'
 import type { 原型标注 } from '@/类型/标注'
 import 手机商品占位图 from '@/资源/eBay订单/旗舰手机商品占位-概念图.png'
 import eBay订单详情 from './eBay订单详情.vue'
+import EbayTimezoneSwitch from './时区切换.vue'
+import { 当前eBay时区 } from './时区偏好'
+import { 获取显示时区, 转换eBay时间 } from './时间工具'
 import { eBay订单模拟数据 } from './模拟数据'
 import {
   格式化eBay站点,
@@ -73,6 +76,11 @@ const 已应用筛选条件 = reactive<eBay订单筛选条件>(创建默认筛�
 const 高级筛选展开 = ref(false)
 const 当前页 = ref(1)
 const 每页条数 = ref(20)
+watch(当前eBay时区, () => { 当前页.value = 1 })
+function 显示时间(时间: string | undefined, 原始订单: unknown) {
+  const 订单 = 原始订单 as eBay订单
+  return 转换eBay时间(时间, 获取显示时区(当前eBay时区.value, 订单.purchaseMarketplaces))
+}
 const 刷新中的订单 = ref<Set<string>>(new Set())
 const 日期快捷项 = [
   {
@@ -97,7 +105,7 @@ const 日期快捷项 = [
 
 const 店铺选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.store))])
 const 站点选项 = computed(() => [...new Set(订单列表.value.flatMap((订单) => 订单.purchaseMarketplaces))])
-const 筛选结果 = computed(() => 筛选eBay订单(订单列表.value, 已应用筛选条件))
+const 筛选结果 = computed(() => 筛选eBay订单(订单列表.value, 已应用筛选条件, 当前eBay时区.value))
 const 当前页数据 = computed(() => {
   const 起始 = (当前页.value - 1) * 每页条数.value
   return 筛选结果.value.slice(起始, 起始 + 每页条数.value)
@@ -111,7 +119,7 @@ const 当前订单 = computed(() => {
     : typeof route.query.seller === 'string' ? route.query.seller : ''
   return 订单列表.value.find((订单) => 订单.orderId === orderId && (!sellerId || 订单.sellerId === sellerId))
 })
-const 高级筛选数量 = computed(() => [筛选条件.paymentStatus, 筛选条件.cancelStatus, 筛选条件.omsStatus, 筛选条件.syncStatus].filter(Boolean).length)
+const 高级筛选数量 = computed(() => [筛选条件.omsStatus, 筛选条件.syncStatus].filter(Boolean).length)
 const 有生效筛选 = computed(() => Boolean([
   已应用筛选条件.keyword,
   已应用筛选条件.store,
@@ -148,14 +156,14 @@ const 标注 = (
 const 筛选标注 = 标注(
   'oms.ebay-order.list.filters',
   '紧凑检索与日期筛选',
-  '采用无外置字段标题的紧凑 Element Plus 筛选栏，通过明确占位和 aria-label 识别关键词、店铺、站点、平台状态及日期条件；日期类型首版支持下单时间与最晚发货时间。',
+  '采用无外置字段标题的紧凑 Element Plus 筛选栏，通过明确占位和 aria-label 识别关键词、店铺、站点、履约、付款、取消三个独立状态及日期条件；日期类型首版支持下单时间与最晚发货时间。',
   '合理假设',
   ['PRD/eBay订单功能PRD.md#EB-03'],
   [],
   {
     前置条件: ['用户已进入 OMS → 销售订单 → eBay订单，且只看到有权限访问的店铺数据。'],
     触发方式: ['输入关键词、选择筛选条件或打开更多筛选。', '点击查询提交本轮条件；回车提交关键词检索。'],
-    系统动作: ['仅在本地 eBay 专业订单投影上执行筛选，不在列表加载时逐行请求 eBay 接口。', '日期范围按业务时区解释后转换为查询条件。'],
+    系统动作: ['仅在本地 eBay 专业订单投影上执行筛选，不在列表加载时逐行请求 eBay 接口。', '付款及取消状态常显，与履约状态按 AND 组合；日期范围按当前北京／站点时区匹配自然日。'],
     成功结果: ['列表刷新为匹配结果，分页回到第 1 页。', '清空日期范围后不再附加日期条件。'],
     异常处理: ['无匹配时保留筛选条件并展示空态；不得把“暂无订单”误判为接口无数据。'],
     数据来源: ['本地 eBay 专业订单投影；字段口径见文档/集成/eBay/eBay订单功能与字段接入说明.md。'],
@@ -186,14 +194,14 @@ const 表格标注 = 标注(
 const 订单时间标注 = 标注(
   'oms.ebay-order.list.order-times',
   '订单时间',
-  '列表同时展示平台下单时间与最晚发货时间；时间保留来源时区，不再使用“履约时效”作为列名。',
+  '列表同时展示平台下单时间与最晚发货时间；时间按北京／站点时区选择转换并显示实际 UTC 偏移，不再使用“履约时效”作为列名。',
   '已确认',
   ['PRD/eBay订单功能PRD.md#EB-02'],
   [],
   {
     数据来源: ['下单时间取 Order.creationDate；最晚发货取订单级 shipByDate 派生值，行级原值在详情保留。'],
     异常处理: ['平台未返回时间时显示“—”，不得用当前时间或其他订单时间补造。'],
-    验收要点: ['检查来源时区保留、无时限订单、临期订单和多商品时限的待确认提示。'],
+    验收要点: ['检查时区切换与跨日转换、无时限订单、临期订单和多商品时限的待确认提示。'],
   },
 )
 
@@ -347,7 +355,7 @@ function 刷新单笔订单(原始订单: unknown) {
   if (刷新中的订单.value.has(订单.orderId)) return
   标记刷新中(订单.orderId, true)
   订单.sync.status = '同步中'
-  订单.sync.latestAttempt = '刚刚 · UTC+8'
+  订单.sync.latestAttempt = new Date().toISOString()
   订单.sync.message = '刷新任务已提交，正在更新订单与平台发货记录'
   ElMessage.info(`已提交 ${订单.orderId} 的异步刷新`)
 
@@ -360,7 +368,7 @@ function 刷新单笔订单(原始订单: unknown) {
       return
     }
     订单.sync.status = '已同步'
-    订单.sync.lastSuccess = '刚刚 · UTC+8'
+    订单.sync.lastSuccess = new Date().toISOString()
     订单.sync.message = '订单与平台发货记录刷新成功；OMS 状态未变更'
     ElMessage.success(`${订单.orderId} 已刷新`)
   }, 1200)
@@ -462,7 +470,23 @@ function 执行查询() {
               <ElOption label="已履约" value="FULFILLED" />
             </ElSelect>
           </ElFormItem>
-          <ElFormItem>
+            <ElFormItem>
+              <ElSelect v-model="筛选条件.paymentStatus" clearable aria-label="eBay付款状态" placeholder="eBay付款状态">
+                <ElOption label="付款失败" value="FAILED" />
+                <ElOption label="付款处理中" value="PENDING" />
+                <ElOption label="已付款" value="PAID" />
+                <ElOption label="部分退款" value="PARTIALLY_REFUNDED" />
+                <ElOption label="全额退款" value="FULLY_REFUNDED" />
+              </ElSelect>
+            </ElFormItem>
+            <ElFormItem>
+              <ElSelect v-model="筛选条件.cancelStatus" clearable aria-label="eBay取消状态" placeholder="eBay取消状态">
+                <ElOption label="无取消申请" value="NONE_REQUESTED" />
+                <ElOption label="取消处理中" value="IN_PROGRESS" />
+                <ElOption label="已取消" value="CANCELED" />
+              </ElSelect>
+            </ElFormItem>
+          <ElFormItem class="日期筛选项">
             <div class="日期筛选组合">
               <ElSelect v-model="筛选条件.dateType" aria-label="日期类型" class="日期类型选择">
                 <ElOption label="下单时间" value="creationDate" />
@@ -484,6 +508,7 @@ function 执行查询() {
               />
             </div>
           </ElFormItem>
+          <EbayTimezoneSwitch />
           <div class="筛选操作">
             <ElButton v-prototype="查询标注" type="primary" native-type="submit">查询</ElButton>
             <ElButton v-prototype="重置标注" @click="重置筛选">重置</ElButton>
@@ -497,22 +522,6 @@ function 执行查询() {
         </div>
         <Transition name="高级筛选">
           <div v-if="高级筛选展开" class="筛选高级网格">
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.paymentStatus" clearable aria-label="eBay付款状态" placeholder="eBay付款状态">
-                <ElOption label="付款失败" value="FAILED" />
-                <ElOption label="付款处理中" value="PENDING" />
-                <ElOption label="已付款" value="PAID" />
-                <ElOption label="部分退款" value="PARTIALLY_REFUNDED" />
-                <ElOption label="全额退款" value="FULLY_REFUNDED" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.cancelStatus" clearable aria-label="eBay取消状态" placeholder="eBay取消状态">
-                <ElOption label="无取消申请" value="NONE_REQUESTED" />
-                <ElOption label="取消处理中" value="IN_PROGRESS" />
-                <ElOption label="已取消" value="CANCELED" />
-              </ElSelect>
-            </ElFormItem>
             <ElFormItem>
               <ElSelect v-model="筛选条件.omsStatus" clearable aria-label="OMS处理状态" placeholder="OMS处理状态">
                 <ElOption v-for="状态 in ['待审核', '待推单', '待发货', '已发货', '异常', '不发货']" :key="状态" :label="状态" :value="状态" />
@@ -549,14 +558,14 @@ function 执行查询() {
             <div class="订单时间单元格">
               <div>
                 <span>下单</span>
-                <ElTooltip :content="row.creationDate" placement="top">
-                  <time>{{ 格式化列表时间(row.creationDate) }}</time>
+                <ElTooltip :content="显示时间(row.creationDate, row)" placement="top">
+                  <time>{{ 格式化列表时间(显示时间(row.creationDate, row)) }}</time>
                 </ElTooltip>
               </div>
               <div>
                 <span>最晚发货</span>
-                <ElTooltip :content="row.shipBy || '平台未提供最晚发货时间'" placement="top">
-                  <time>{{ 格式化列表时间(row.shipBy) }}</time>
+                <ElTooltip :content="row.shipBy ? 显示时间(row.shipBy, row) : '平台未提供最晚发货时间'" placement="top">
+                  <time>{{ 格式化列表时间(显示时间(row.shipBy, row)) }}</time>
                 </ElTooltip>
               </div>
             </div>
@@ -704,8 +713,8 @@ function 执行查询() {
               <b v-if="row.sync.status !== '已同步'" class="状态徽标" :class="`tone-${获取状态说明('sync', row.sync.status).tone}`">
                 {{ 获取状态说明('sync', row.sync.status).text }}
               </b>
-              <ElTooltip :content="row.sync.lastSuccess || '暂无成功更新时间'" placement="top">
-                <span>{{ row.sync.status === '已同步' ? '最近更新' : '上次成功' }} {{ 格式化列表时间(row.sync.lastSuccess) }}</span>
+              <ElTooltip :content="row.sync.lastSuccess ? 显示时间(row.sync.lastSuccess, row) : '暂无成功更新时间'" placement="top">
+                <span>{{ row.sync.status === '已同步' ? '最近更新' : '上次成功' }} {{ 格式化列表时间(显示时间(row.sync.lastSuccess, row)) }}</span>
               </ElTooltip>
               <ElTooltip v-if="row.sync.status !== '已同步'" :content="row.sync.message" placement="top"><small>{{ row.sync.message }}</small></ElTooltip>
             </div>
@@ -767,6 +776,7 @@ function 执行查询() {
 }
 
 .筛选面板 {
+  container-type: inline-size;
   flex: 0 0 auto;
   padding: 8px 12px;
   border-bottom: 1px solid #eef0f3;
@@ -786,13 +796,18 @@ function 执行查询() {
 .筛选主网格 {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(240px, 1.4fr) 150px 120px 140px minmax(330px, 1.2fr) max-content;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(140px, 1fr) repeat(4, minmax(130px, 1fr));
   align-items: center;
   gap: 8px;
 }
 
+.日期筛选项 { grid-column: span 3; }
+.筛选主网格 > .时区切换 { justify-self: end; }
+.筛选操作 { grid-column: span 2; }
+
 .日期筛选组合 {
   display: grid;
+  width: 100%;
   min-width: 0;
   grid-template-columns: 112px minmax(0, 1fr);
   gap: 6px;
@@ -1367,13 +1382,10 @@ function 执行查询() {
   background: white;
 }
 
-@media (max-width: 1360px) {
-  .筛选主网格 {
-    grid-template-columns: minmax(240px, 1.5fr) 146px 118px 132px minmax(330px, 1.35fr);
-  }
-
-  .筛选操作 {
-    grid-column: 1 / -1;
-  }
+@container (max-width: 1000px) {
+  .筛选主网格 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .日期筛选项 { grid-column: span 3; }
+  .筛选主网格 > .时区切换 { justify-self: start; }
+  .筛选操作 { grid-column: span 2; }
 }
 </style>

@@ -8,6 +8,7 @@ import {
   获取平台状态说明,
   获取路由摘要,
   筛选全渠道订单,
+  规范化筛选条件,
 } from './订单工具'
 import type { 全渠道订单筛选条件 } from './类型'
 
@@ -25,6 +26,14 @@ const 默认条件 = (): 全渠道订单筛选条件 => ({
 })
 
 describe('全渠道订单通用列表', () => {
+  it('损坏的查询方案不会将非文本关键词或未知日期字段带入筛选器', () => {
+    const 条件 = 规范化筛选条件({ keyword: 42, dateType: '__proto__', dateRange: ['2026-09-12', '2026-09-10'], countryCode: { value: 'US' } })
+    expect(条件.keyword).toBe('')
+    expect(条件.dateType).toBe('orderedAt')
+    expect(条件.dateRange).toEqual([])
+    expect(() => 筛选全渠道订单(全渠道订单模拟数据, 条件)).not.toThrow()
+  })
+
   it('支持系统单号、平台单号、平台 SKU、系统 SKU、履约单号和跟踪号检索', () => {
     for (const 关键词 of [
       'OMS260909000184',
@@ -54,7 +63,7 @@ describe('全渠道订单通用列表', () => {
     const 等待准入 = 空状态订单.find((订单) => 订单.fulfillmentMode === '自配送')!
     const 平台履约 = 空状态订单.find((订单) => 订单.fulfillmentMode === '平台履约')!
     expect(获取OMS状态说明(等待准入).text).toBe('未进入处理')
-    expect(获取OMS状态说明(等待准入).helper).toContain('付款证据')
+    expect(获取OMS状态说明(等待准入).helper).toContain('orderPaymentStatus')
     expect(获取OMS状态说明(平台履约).text).toBe('不适用')
   })
 
@@ -66,7 +75,8 @@ describe('全渠道订单通用列表', () => {
       sourcePending: true,
     })
     expect(Temu订单.platformOrderStatus).toBeUndefined()
-    expect(Temu订单.sync.status).toBe('未接入')
+    expect(Temu订单.sync.status).toBeUndefined()
+    expect(Temu订单.tags).toEqual([])
 
     const 占位订单 = 筛选全渠道订单(全渠道订单模拟数据, {
       ...默认条件(),

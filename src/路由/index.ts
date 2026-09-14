@@ -10,6 +10,12 @@ import 占位页面 from '@/页面/占位页面.vue'
 const 已实现页面: Record<string, RouteRecordRaw['component']> = {
   'oms-all-orders': 全渠道订单页面,
   'oms-ebay-orders': eBay订单页面,
+  'oms-shipping-confirmation': () => import('@/页面/订单标发/订单标发页面.vue'),
+  'oms-order-processing': () => import('@/页面/订单处理/订单处理页面.vue'),
+  'oms-outbound-orders': () => import('@/页面/仓配管理/三方仓出库单页面.vue'),
+  'oms-logistics-orders': () => import('@/页面/仓配管理/物流下单页面.vue'),
+  'oms-order-rules': () => import('@/页面/订单规则/订单规则页面.vue'),
+  'oms-logistics-channels': () => import('@/页面/仓配管理/物流渠道管理页面.vue'),
 }
 
 const 页面路由: RouteRecordRaw[] = 获取全部页面菜单().map((菜单) => ({

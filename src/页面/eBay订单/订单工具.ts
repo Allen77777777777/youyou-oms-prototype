@@ -1,3 +1,4 @@
+import { eBay查询日期, type eBay时区模式 } from './时间工具'
 import type { eBay订单, eBay订单筛选条件, 金额 } from './类型'
 
 export type 状态语气 = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
@@ -136,7 +137,7 @@ export function 订单检索文本(订单: eBay订单): string {
     .toLocaleLowerCase()
 }
 
-export function 筛选eBay订单(订单列表: eBay订单[], 条件: eBay订单筛选条件): eBay订单[] {
+export function 筛选eBay订单(订单列表: eBay订单[], 条件: eBay订单筛选条件, 时区模式: eBay时区模式 = 'site'): eBay订单[] {
   const 关键词 = 条件.keyword.trim().toLocaleLowerCase()
   return 订单列表.filter((订单) => {
     if (关键词 && !订单检索文本(订单).includes(关键词)) return false
@@ -145,7 +146,7 @@ export function 筛选eBay订单(订单列表: eBay订单[], 条件: eBay订单�
     if (条件.fulfillmentStatus && 订单.fulfillmentStatus !== 条件.fulfillmentStatus) return false
     if (条件.dateRange?.length === 2) {
       const 时间值 = 条件.dateType === 'shipBy' ? 订单.shipBy : 订单.creationDate
-      const 日期值 = 时间值?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+      const 日期值 = eBay查询日期(时间值, 时区模式, 订单.purchaseMarketplaces)
       if (!日期值 || 日期值 < 条件.dateRange[0] || 日期值 > 条件.dateRange[1]) return false
     }
     if (条件.paymentStatus && 订单.paymentStatus !== 条件.paymentStatus) return false

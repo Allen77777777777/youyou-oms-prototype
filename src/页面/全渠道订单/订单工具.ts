@@ -18,6 +18,24 @@ export interface 状态说明 {
   sourcePending?: boolean
 }
 
+/** 查询方案来自浏览器存储，恢复时只接受可识别的字段和值。 */
+export function 规范化筛选条件(来源: unknown): 全渠道订单筛选条件 {
+  const 值 = 来源 && typeof 来源 === 'object' ? 来源 as Record<string, unknown> : {}
+  const 文本 = (键: string) => typeof 值[键] === 'string' ? 值[键] as string : ''
+  const 日期 = 值.dateRange
+  const 有效日期 = Array.isArray(日期) && 日期.length === 2
+    && 日期.every((项) => typeof 项 === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(项))
+    && 日期[0] <= 日期[1]
+  return {
+    keyword: 文本('keyword'), platform: 文本('platform'), store: 文本('store'),
+    processingStatus: 文本('processingStatus'),
+    dateType: 值.dateType === 'shipByAt' || 值.dateType === 'lastSyncedAt' ? 值.dateType : 'orderedAt',
+    dateRange: 有效日期 ? [日期[0] as string, 日期[1] as string] : [],
+    platformStatus: 文本('platformStatus'), syncStatus: 文本('syncStatus'),
+    skuStatus: 文本('skuStatus'), countryCode: 文本('countryCode'),
+  }
+}
+
 const OMS状态语气: Record<订单处理状态, 状态语气> = {
   待审核: 'warning',
   待推单: 'info',
@@ -32,7 +50,6 @@ const 同步状态字典: Record<同步状态, 状态说明> = {
   同步中: { text: '同步中', tone: 'info' },
   同步失败: { text: '同步失败', tone: 'danger' },
   待同步: { text: '待同步', tone: 'warning' },
-  未接入: { text: '接口待接入', tone: 'neutral' },
 }
 
 const SKU状态字典: Record<SKU解析状态, 状态说明> = {
@@ -131,8 +148,8 @@ export function 获取平台状态说明(订单: 全渠道订单): 状态说明 
   }
 }
 
-export function 获取同步状态说明(状态: 同步状态): 状态说明 {
-  return 同步状态字典[状态]
+export function 获取同步状态说明(状态?: 同步状态): 状态说明 {
+  return 状态 ? 同步状态字典[状态] : { text: '—', tone: 'neutral' }
 }
 
 export function 获取SKU状态说明(状态: SKU解析状态): 状态说明 {

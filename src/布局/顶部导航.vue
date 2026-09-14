@@ -67,9 +67,10 @@ async function 打开搜索结果(路径?: string) {
           </ElDropdownMenu>
         </template>
       </ElDropdown>
-      <ElTooltip content="标注模式" placement="bottom">
-        <button class="图标按钮" :class="{ 开启: 标注状态.标注模式.value }" type="button" aria-label="标注模式" @click="标注状态.切换模式()">
+      <ElTooltip content="页面编号、交互规则与研发说明" placement="bottom">
+        <button class="标注入口" :class="{ 开启: 标注状态.标注模式.value }" type="button" aria-label="标注模式" :aria-pressed="标注状态.标注模式.value" @click="标注状态.切换模式()">
           <ElIcon :size="19"><Operation /></ElIcon>
+          <span>{{ 标注状态.标注模式.value ? '关闭标注' : '原型标注' }}</span>
         </button>
       </ElTooltip>
       <ElTooltip content="原型环境" placement="bottom-end">
@@ -134,6 +135,23 @@ async function 打开搜索结果(路径?: string) {
 .通知标记 {
   height: 38px;
 }
+
+.标注入口 {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  padding: 0 9px;
+  border: 1px solid #dce9e5;
+  border-radius: 5px;
+  background: #f5faf8;
+  color: #16856b;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.标注入口.开启 { background: #008568; border-color: #008568; color: white; }
 
 .用户入口 {
   display: grid;

@@ -1,5 +1,6 @@
 export interface 原型标注 {
   id: string
+  分类?: '页面' | '字段' | '交互' | '规则' | '待确认'
   标题: string
   说明: string
   路由?: string

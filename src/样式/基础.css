@@ -15,6 +15,7 @@
   --yy-border: #e4e7ed;
   --yy-border-light: #edf0f5;
   --yy-text-primary: #1f2329;
+  --yy-text-heading: #000000;
   --yy-text-regular: #3d4552;
   --yy-text-secondary: #77808f;
   --yy-danger: #e5484d;
@@ -23,6 +24,7 @@
   --yy-radius: 4px;
   --yy-sidebar-width: 54px;
   --yy-header-height: 44px;
+  --yy-annotation-reserve: 392px;
 }
 
 * {
@@ -38,6 +40,13 @@ body,
   margin: 0;
 }
 
+/* 评审时为索引保留空间，业务弹窗仍可打开和操作。仅标注模式生效。 */
+body[data-prototype-mode='true'] .el-overlay { right: var(--yy-annotation-reserve); }
+body[data-prototype-mode='true'] .el-overlay-dialog { right: var(--yy-annotation-reserve); left: 54px; }
+body[data-prototype-mode='true'] .el-dialog { max-width: calc(100% - 24px); }
+body[data-prototype-mode='true'] .el-drawer { max-width: calc(100% - 64px); }
+@media (max-width: 1440px) { :root { --yy-annotation-reserve: 362px; } }
+
 body {
   overflow: hidden;
   background: var(--yy-bg-page);
@@ -45,16 +54,6 @@ body {
 
 #app {
   isolation: isolate;
-}
-
-.标注抽屉 .el-drawer__body {
-  padding: 24px;
-}
-
-body[data-prototype-mode='true'] [data-prototype-id] {
-  outline: 1px dashed #409eff;
-  outline-offset: 6px;
-  cursor: help;
 }
 
 :root[data-density='compact'] {
@@ -75,4 +74,14 @@ select {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* 2026-09-14 评审：全局标题使用黑色，独立于辅助信息及状态语义色。 */
+:is(h1, h2, h3, h4, h5, h6),
+.el-dialog__title, .el-drawer__title, .el-descriptions__title,
+.el-table th.el-table__cell,
+.标注标题 strong, .标注卡片标题 strong,
+.分组标题, .明细小标题, .时间项标签,
+.商品快览标题 strong, .收件卡标题 strong, .包裹标题 strong {
+  color: var(--yy-text-heading) !important;
 }

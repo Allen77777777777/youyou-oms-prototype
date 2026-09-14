@@ -9,7 +9,7 @@ export type 平台代码 =
 
 export type 履约模式 = '自配送' | '平台履约'
 export type 订单处理状态 = '待审核' | '待推单' | '待发货' | '已发货' | '异常' | '不发货'
-export type 同步状态 = '已同步' | '同步中' | '同步失败' | '待同步' | '未接入'
+export type 同步状态 = '已同步' | '同步中' | '同步失败' | '待同步'
 export type SKU解析状态 = '待解析' | '成功' | '缺失' | '冲突' | '失效' | '查询失败'
 export type 订单日期类型 = 'orderedAt' | 'shipByAt' | 'lastSyncedAt'
 export type 快速视图 = '全部' | 履约模式
@@ -29,6 +29,8 @@ export interface 订单金额 {
 }
 
 export interface 订单商品行 {
+  /** 对应已定义的 item_image_url，未取得可信来源时不填写。 */
+  itemImageUrl?: string
   externalLineId: string
   platformItemId?: string
   platformSku?: string
@@ -100,11 +102,11 @@ export interface 操作记录 {
 }
 
 export interface 同步信息 {
-  status: 同步状态
+  status?: 同步状态
   lastSuccess?: string
   latestAttempt: string
   externalVersion?: string
-  normalizationStatus: '未接入' | '已接收' | '标准化中' | '已标准化' | '已拦截'
+  normalizationStatus?: '已接收' | '标准化中' | '已标准化' | '已拦截'
   message: string
 }
 

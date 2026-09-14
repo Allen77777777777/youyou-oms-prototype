@@ -1,31 +1,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  Back,
   CopyDocument,
   InfoFilled,
-  Link,
   Lock,
   WarningFilled,
 } from '@element-plus/icons-vue'
 import {
   ElButton,
-  ElEmpty,
   ElIcon,
   ElMessage,
   ElTable,
   ElTableColumn,
   ElTooltip,
 } from 'element-plus'
-import { useRouter } from 'vue-router'
 
 import type { 原型标注 } from '@/类型/标注'
 import {
-  格式化列表时间,
   格式化金额,
   获取OMS状态说明,
   获取SKU状态说明,
-  获取审核状态语气,
   获取同步状态说明,
   获取平台状态说明,
   获取当前路由,
@@ -33,10 +27,6 @@ import {
 import type { 全渠道订单 } from './类型'
 
 const props = defineProps<{ order: 全渠道订单 }>()
-const emit = defineEmits<{
-  openProfessional: [order: 全渠道订单]
-}>()
-const router = useRouter()
 
 const OMS状态 = computed(() => 获取OMS状态说明(props.order))
 const 平台状态 = computed(() => 获取平台状态说明(props.order))
@@ -67,7 +57,7 @@ const 详情标注 = 标注(
   '全渠道订单独立详情页签',
   '从列表进入详情时，在中台顶部页签栏打开独立业务页签；同一系统订单复用已有页签，不使用右侧抽屉承载完整详情。',
   '已确认',
-  ['PRD/全渠道订单功能PRD.md#AC-04-应用内详情页签'],
+  ['PRD/全渠道订单功能PRD.md#61-页面组成'],
   ['点击列表系统订单号、查看详情或双击行进入。', '相同系统订单号复用同一路径页签，不同订单打开不同页签。'],
 )
 
@@ -89,10 +79,11 @@ const 商品标注 = 标注(
 
 const 路由标注 = 标注(
   'oms.all-order.detail.routing',
-  '默认路由与实际履约路由',
+  '订单履约信息与仓储物流',
   '待审核阶段先保存订单头首次/默认路由；形成履约单后展示当前有效履约单的实际路由，跨仓时聚合为多值。',
   '已确认',
   ['PRD/订单单据字段标准.md#61-订单头-oms_order', 'PRD/订单领域模型设计.md#22-订单头先保存路由结果履约单保存执行快照'],
+  ['业务页面按发货仓库、仓储服务商、仓库账号、物流渠道、面单获取模式分别展示订单已保存字段。', '下方履约单的仓储物流读取各自执行快照，不覆盖订单保存值。'],
 )
 
 const 敏感信息标注 = 标注(
@@ -103,18 +94,19 @@ const 敏感信息标注 = 标注(
   ['PRD/订单单据字段标准.md#63-收件信息-oms_order_address', '文档/产品规划/OMS与eBay客服UI设计建议.md#53-订单详情'],
 )
 
-const 审核标注 = 标注(
-  'oms.all-order.detail.reviews',
-  '按审核轮次展示汇总结论',
-  '每轮审核只展示一条审核记录及 decision_note 可读汇总，不建立审核项明细。',
+const 日志标注 = 标注(
+  'oms.all-order.detail.operation-logs',
+  '订单操作日志',
+  '展示已有订单操作日志中的操作时间、操作者、操作类型、结果和内容；无记录时显示空态，不将审核轮次推造为操作日志。',
   '已确认',
-  ['PRD/订单单据字段标准.md#71-审核记录-oms_review'],
+  ['PRD/订单单据字段标准.md#123-操作日志-operation_log', 'PRD/全渠道订单功能PRD.md#19-2026-09-14-详情页评审调整'],
+  ['只读取 operationLogs 中已有日志，不生成样例补齐空态。', '审核汇总仍由审核业务保存，详情不单独展示审核记录分区。'],
 )
 
 const 追溯标注 = 标注(
   'oms.all-order.detail.trace',
-  '同步与操作追溯',
-  '原始报文不在普通页面直接铺开；本区只展示版本、标准化结果、同步时间和可读操作日志。',
+  '订单同步信息',
+  '原始报文不在普通页面直接铺开；本区只展示版本、标准化结果和同步时间；订单操作日志独立展示。',
   '已确认',
   ['PRD/订单单据字段标准.md#52-集成报文快照-integration_payload_snapshot', 'PRD/订单单据字段标准.md#123-操作日志-operation_log'],
 )
@@ -142,24 +134,6 @@ async function 复制系统订单号() {
           </div>
           <p>{{ order.platformCode }} · {{ order.storeName }} · 平台单号 {{ order.platformOrderNo }}</p>
         </div>
-        <div class="头部操作">
-          <ElButton plain @click="router.push('/oms/orders/all')">
-            <ElIcon><Back /></ElIcon>
-            返回列表
-          </ElButton>
-          <ElButton
-            v-if="order.professionalOrder"
-            plain
-            type="primary"
-            @click="emit('openProfessional', order)"
-          >
-            <ElIcon><Link /></ElIcon>
-            eBay 专业订单
-          </ElButton>
-          <ElTooltip v-else content="是否建设该平台专业订单页面，需按平台差异评审">
-            <ElButton plain disabled>平台专业订单</ElButton>
-          </ElTooltip>
-        </div>
       </header>
 
       <section v-prototype="状态标注" class="摘要带">
@@ -185,14 +159,6 @@ async function 复制系统订单号() {
         </div>
       </section>
 
-      <div v-if="order.platformCode !== 'eBay'" class="业务提示 接入占位">
-        <ElIcon><InfoFilled /></ElIcon>
-        <div>
-          <strong>平台接口待接入</strong>
-          <span>该平台尚未完成订单接口及状态映射；本页订单、状态和同步内容仅用于原型占位，不代表平台真实数据。</span>
-        </div>
-      </div>
-
       <div v-if="order.blockReason || order.noShipmentReason || order.admissionReason" class="业务提示" :class="{ 阻断: Boolean(order.blockReason) }">
         <ElIcon><WarningFilled v-if="order.blockReason" /><InfoFilled v-else /></ElIcon>
         <div>
@@ -203,8 +169,7 @@ async function 复制系统订单号() {
 
       <section class="详情分区">
         <div class="分区标题">
-          <h2>订单事实</h2>
-          <span>一行一张 OMS 标准订单</span>
+          <h2>订单信息</h2>
         </div>
         <dl class="事实网格">
           <div><dt>系统订单号</dt><dd>{{ order.systemOrderNo }}</dd></div>
@@ -270,15 +235,17 @@ async function 复制系统订单号() {
 
       <section v-prototype="路由标注" class="详情分区">
         <div class="分区标题">
-          <h2>履约与路由</h2>
-          <span>{{ order.fulfillmentMode === '平台履约' ? '平台履约，不生成 OMS 执行单据' : '订单头默认路由与当前履约快照分层展示' }}</span>
+          <h2>订单履约信息</h2>
+          <span v-if="order.fulfillmentMode === '平台履约'">平台履约</span>
         </div>
 
-        <div v-if="order.defaultRoute" class="默认路由">
-          <span>订单头首次 / 默认路由</span>
-          <strong>{{ order.defaultRoute.warehouse }} · {{ order.defaultRoute.shippingChannel }}</strong>
-          <small>{{ order.defaultRoute.warehouseProvider }} · {{ order.defaultRoute.warehouseAccount }} · {{ order.defaultRoute.labelMode }}</small>
-        </div>
+        <dl v-if="order.defaultRoute" class="仓储物流字段">
+          <div><dt>发货仓库</dt><dd>{{ order.defaultRoute.warehouse || '—' }}</dd></div>
+          <div><dt>物流渠道</dt><dd>{{ order.defaultRoute.shippingChannel || '—' }}</dd></div>
+          <div><dt>仓储服务商</dt><dd>{{ order.defaultRoute.warehouseProvider || '—' }}</dd></div>
+          <div><dt>仓库账号</dt><dd>{{ order.defaultRoute.warehouseAccount || '—' }}</dd></div>
+          <div><dt>面单获取模式</dt><dd>{{ order.defaultRoute.labelMode || '—' }}</dd></div>
+        </dl>
 
         <ElTable
           v-if="order.fulfillmentOrders.length"
@@ -295,7 +262,7 @@ async function 复制系统订单号() {
               </div>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="实际路由" min-width="252">
+          <ElTableColumn label="仓储物流" min-width="252">
             <template #default="{ row }">
               <div class="商品信息">
                 <strong>{{ row.route.warehouse }}</strong>
@@ -324,15 +291,15 @@ async function 复制系统订单号() {
         </div>
         <div v-else-if="!当前路由.length" class="无路由提示">
           <ElIcon><InfoFilled /></ElIcon>
-          当前尚未形成订单头路由；请结合准入或阻断原因核查。
+          尚未分配发货仓库和物流渠道。
         </div>
       </section>
 
       <section class="双列分区">
         <div class="详情分区 子分区">
-          <div class="分区标题"><h2>金额</h2><span>币种与口径同屏</span></div>
+          <div class="分区标题"><h2>金额信息</h2></div>
+          <div class="订单金额汇总"><span>订单金额</span><strong>{{ 格式化金额(order.amount.orderAmount) }}</strong></div>
           <dl class="金额明细">
-            <div><dt>订单金额</dt><dd>{{ 格式化金额(order.amount.orderAmount) }}</dd></div>
             <div><dt>客付运费</dt><dd>{{ 格式化金额(order.amount.buyerPaidShipping) }}</dd></div>
             <div><dt>客付税费</dt><dd>{{ 格式化金额(order.amount.buyerPaidTax) }}</dd></div>
             <div><dt>交易费</dt><dd>{{ 格式化金额(order.amount.transactionFee) }}</dd></div>
@@ -360,24 +327,8 @@ async function 复制系统订单号() {
         </div>
       </section>
 
-      <section v-prototype="审核标注" class="详情分区">
-        <div class="分区标题"><h2>审核记录</h2><span>一轮一条汇总结论</span></div>
-        <div v-if="order.reviews.length" class="审核列表">
-          <div v-for="审核 in order.reviews" :key="审核.round" class="审核记录">
-            <span class="轮次">第 {{ 审核.round }} 轮</span>
-            <div>
-              <strong>{{ 审核.type }} · {{ 审核.triggerSource }}</strong>
-              <p>{{ 审核.decisionNote || '本轮尚未形成结论' }}</p>
-              <small>{{ 审核.completedAt || '处理中' }}</small>
-            </div>
-            <b class="状态徽标" :class="'tone-' + 获取审核状态语气(审核.status)">{{ 审核.status }}</b>
-          </div>
-        </div>
-        <ElEmpty v-else :image-size="52" description="该订单尚无审核记录" />
-      </section>
-
       <section v-prototype="追溯标注" class="详情分区">
-        <div class="分区标题"><h2>同步与操作追溯</h2><span>原始内容受控保存，不写入普通日志</span></div>
+        <div class="分区标题"><h2>同步信息</h2></div>
         <div class="同步摘要">
           <b class="状态徽标" :class="'tone-' + 获取同步状态说明(order.sync.status).tone">
             {{ 获取同步状态说明(order.sync.status).text }}
@@ -385,31 +336,26 @@ async function 复制系统订单号() {
           <div><span>最近成功</span><strong>{{ order.sync.lastSuccess || '暂无成功记录' }}</strong></div>
           <div><span>最近尝试</span><strong>{{ order.sync.latestAttempt }}</strong></div>
           <div><span>外部版本</span><strong>{{ order.sync.externalVersion || '平台未提供' }}</strong></div>
-          <div><span>标准化</span><strong>{{ order.sync.normalizationStatus }}</strong></div>
+          <div><span>标准化</span><strong>{{ order.sync.normalizationStatus || '—' }}</strong></div>
         </div>
-        <p class="同步说明">{{ order.sync.message }}</p>
+        <p v-if="order.sync.message" class="同步说明">{{ order.sync.message }}</p>
 
-        <div v-if="order.operationLogs.length" class="日志列表">
-          <div v-for="(日志, 索引) in order.operationLogs" :key="日志.operatedAt + 索引" class="日志记录">
-            <span class="日志点" :class="'tone-' + (日志.operationResult === '成功' ? 'success' : 日志.operationResult === '失败' ? 'danger' : 'info')"></span>
-            <time>{{ 格式化列表时间(日志.operatedAt) }}</time>
-            <div>
-              <strong>{{ 日志.operationType }} · {{ 日志.operationResult }}</strong>
-              <p>{{ 日志.content }}</p>
-              <small>{{ 日志.operator }}</small>
-            </div>
-          </div>
-        </div>
-        <ElEmpty v-else :image-size="52" description="接口未接入，暂无真实同步与操作记录" />
       </section>
 
-      <footer class="详情底部">
-        <span>详情页展示全渠道通用订单事实；平台专业字段进入对应平台订单页签。</span>
-        <ElButton type="primary" plain @click="router.push('/oms/orders/all')">
-          <ElIcon><Back /></ElIcon>
-          返回全渠道订单
-        </ElButton>
-      </footer>
+      <section v-prototype="日志标注" class="详情分区">
+        <div class="分区标题"><h2>订单操作日志</h2><span>{{ order.operationLogs.length }} 条</span></div>
+        <ElTable :data="order.operationLogs" table-layout="fixed" class="明细表 日志表" empty-text="暂无订单操作日志">
+          <ElTableColumn prop="operatedAt" label="操作时间" width="208" />
+          <ElTableColumn prop="operator" label="操作人" width="130" />
+          <ElTableColumn prop="operationType" label="操作类型" width="138" />
+          <ElTableColumn label="操作结果" width="96">
+            <template #default="{ row }">
+              <b class="状态徽标" :class="'tone-' + (row.operationResult === '成功' ? 'success' : row.operationResult === '失败' ? 'danger' : 'info')">{{ row.operationResult }}</b>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn prop="content" label="操作内容" min-width="260" />
+        </ElTable>
+      </section>
   </article>
 </template>
 
@@ -442,8 +388,7 @@ async function 复制系统订单号() {
   min-width: 0;
 }
 
-.标题行,
-.头部操作 {
+.标题行 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -704,27 +649,19 @@ async function 复制系统订单号() {
   align-items: flex-end;
 }
 
-.默认路由 {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-  padding: 9px 11px;
-  border-left: 3px solid #409eff;
-  background: #f6f9fd;
+.仓储物流字段 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 24px;
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid #e7eaee;
+  border-radius: 4px;
+  background: #fafbfc;
 }
-
-.默认路由 span,
-.默认路由 small {
-  color: #7e8895;
-  font-size: 11px;
-}
-
-.默认路由 strong {
-  color: #35404d;
-  font-size: 12px;
-}
+.仓储物流字段 > div { min-width: 0; }
+.仓储物流字段 dt { margin-bottom: 6px; color: #66717f; font-size: 12px; }
+.仓储物流字段 dd { margin: 0; color: #303133; font-size: 13px; overflow-wrap: anywhere; }
 
 .履约表 {
   margin-top: 8px;
@@ -762,23 +699,23 @@ async function 复制系统订单号() {
   border-right: 1px solid #e9ecef;
 }
 
-.金额明细 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin: 0;
-  border-top: 1px solid #edf0f3;
-  border-left: 1px solid #edf0f3;
+.子分区 { min-width: 0; }
+.订单金额汇总 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e4e9ef;
+  border-radius: 4px;
+  background: #f7f9fc;
 }
-
-.金额明细 > div {
-  padding: 7px 9px;
-  border-right: 1px solid #edf0f3;
-  border-bottom: 1px solid #edf0f3;
-}
-
-.金额明细 dd {
-  text-align: right;
-}
+.订单金额汇总 span { font-size: 13px; color: #303133; }
+.订单金额汇总 strong { font-size: 20px; font-family: Consolas, monospace; font-variant-numeric: tabular-nums; color: #111; }
+.金额明细 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; margin: 8px 0 0; }
+.金额明细 > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 12px 0; border-bottom: 1px solid #edf0f3; }
+.金额明细 dt { margin: 0; color: #66717f; font-size: 12px; }
+.金额明细 dd { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
 
 .锁定提示 {
   display: inline-flex;
@@ -800,43 +737,6 @@ async function 复制系统订单号() {
 
 .收件信息 strong {
   color: #374250;
-}
-
-.审核列表 {
-  border-top: 1px solid #e8ebef;
-}
-
-.审核记录 {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) max-content;
-  align-items: start;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid #edf0f3;
-}
-
-.轮次 {
-  color: #7e8895;
-  font-size: 11px;
-}
-
-.审核记录 strong {
-  color: #394451;
-  font-size: 12px;
-}
-
-.审核记录 p,
-.日志记录 p {
-  margin: 4px 0;
-  color: #66717f;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.审核记录 small,
-.日志记录 small {
-  color: #939ba6;
-  font-size: 11px;
 }
 
 .同步摘要 {
@@ -877,54 +777,9 @@ async function 复制系统订单号() {
   font-size: 12px;
 }
 
-.日志列表 {
-  padding-left: 8px;
-}
-
-.日志记录 {
-  display: grid;
-  grid-template-columns: 10px 138px minmax(0, 1fr);
-  align-items: start;
-  gap: 9px;
-  padding: 8px 0;
-  border-top: 1px solid #edf0f3;
-}
-
-.日志记录 time {
-  color: #798390;
-  font-family: Consolas, monospace;
-  font-size: 11px;
-}
-
-.日志记录 strong {
-  color: #3f4a57;
-  font-size: 12px;
-}
-
-.日志点 {
-  width: 8px;
-  height: 8px;
-  margin-top: 4px;
-  border: 2px solid currentColor;
-  border-radius: 50%;
-}
-
-.详情底部 {
-  display: flex;
-  min-height: 54px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
-  background: #f8fafc;
-}
-
-.详情底部 span {
-  color: #7f8995;
-  font-size: 11px;
-}
-
 @media (max-width: 1280px) {
+  .金额明细 { grid-template-columns: 1fr; }
+  .仓储物流字段 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .摘要带 {
     grid-template-columns: 1fr 1fr;
   }

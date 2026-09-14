@@ -1,28 +1,20 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import {
   ArrowDown,
-  Collection,
   CopyDocument,
-  DocumentAdd,
   Filter,
-  InfoFilled,
   Link,
   MoreFilled,
   QuestionFilled,
   Search,
-  Setting,
 } from '@element-plus/icons-vue'
 import {
   ElButton,
-  ElCheckbox,
-  ElCheckboxGroup,
   ElDatePicker,
-  ElDialog,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
-  ElDrawer,
   ElEmpty,
   ElForm,
   ElFormItem,
@@ -35,12 +27,14 @@ import {
   ElSelect,
   ElTable,
   ElTableColumn,
+  ElTag,
   ElTooltip,
 } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import type { 原型标注 } from '@/类型/标注'
-import { 全渠道订单模拟数据 } from './模拟数据'
+import AllOrderProductImage from './商品缩略图.vue'
+import { 共享订单 } from '../订单处理/演示会话'
 import {
   格式化列表时间,
   格式化金额,
@@ -52,43 +46,12 @@ import {
   获取订单商品数量,
   获取路由摘要,
   筛选全渠道订单,
+  规范化筛选条件,
 } from './订单工具'
 import type { 全渠道订单, 全渠道订单筛选条件, 快速视图 } from './类型'
 
 const router = useRouter()
-const 订单列表 = ref<全渠道订单[]>(全渠道订单模拟数据)
-
-type 可选列键 = 'platform' | 'time' | 'items' | 'status' | 'amount' | 'route' | 'sync'
-type 方案作用域 = '系统' | '个人' | '团队'
-
-interface 查询方案 {
-  id: string
-  name: string
-  scope: 方案作用域
-  updatedAt: string
-  filters: 全渠道订单筛选条件
-  quickView: 快速视图
-  columns: 可选列键[]
-}
-
-interface 查询方案存储内容 {
-  version: 1
-  currentSchemeId: string
-  schemes: 查询方案[]
-}
-
-const 查询方案存储键 = 'uyoyou.oms.all-order.query-schemes.v1'
-
-const 可选列定义: Array<{ key: 可选列键; label: string }> = [
-  { key: 'platform', label: '平台 / 店铺' },
-  { key: 'time', label: '订单时间' },
-  { key: 'items', label: '商品摘要' },
-  { key: 'status', label: '平台状态 / OMS 状态' },
-  { key: 'amount', label: '订单金额' },
-  { key: 'route', label: '履约模式 / 当前路由' },
-  { key: 'sync', label: '数据更新' },
-]
-const 默认显示列 = 可选列定义.map((列) => 列.key)
+const 订单列表 = 共享订单
 
 const 创建默认筛选条件 = (): 全渠道订单筛选条件 => ({
   keyword: '',
@@ -110,11 +73,7 @@ const 已应用快速视图 = ref<快速视图>('全部')
 const 高级筛选展开 = ref(false)
 const 当前页 = ref(1)
 const 每页条数 = ref(20)
-const 已显示列 = ref<可选列键[]>([...默认显示列])
-const 列设置草稿 = ref<可选列键[]>([...默认显示列])
-const 列设置打开 = ref(false)
-const 列搜索词 = ref('')
-const 表格引用 = ref<{ clearSelection: () => void }>()
+const 表格引用 = ref<{ clearSelection: () => void; toggleRowSelection: (订单: 全渠道订单, 选中: boolean) => void }>()
 const 已选订单 = ref<全渠道订单[]>([])
 const 选择全部匹配 = ref(false)
 
@@ -122,94 +81,6 @@ const 复制筛选条件 = (来源: 全渠道订单筛选条件): 全渠道订�
   ...来源,
   dateRange: 来源.dateRange?.length === 2 ? [...来源.dateRange] as [string, string] : [],
 })
-
-const 查询方案列表 = ref<查询方案[]>([
-  {
-    id: 'system-default',
-    name: '系统默认方案',
-    scope: '系统',
-    updatedAt: '随产品版本更新',
-    filters: 创建默认筛选条件(),
-    quickView: '全部',
-    columns: [...默认显示列],
-  },
-])
-const 当前方案Id = ref('system-default')
-const 方案另存为打开 = ref(false)
-const 新方案 = reactive<{ name: string; scope: Exclude<方案作用域, '系统'> }>({
-  name: '',
-  scope: '个人',
-})
-
-function 格式化方案更新时间() {
-  const 当前 = new Date()
-  const 补零 = (数值: number) => String(数值).padStart(2, '0')
-  return `${当前.getFullYear()}-${补零(当前.getMonth() + 1)}-${补零(当前.getDate())} ${补零(当前.getHours())}:${补零(当前.getMinutes())}`
-}
-
-function 规范化已保存方案(原始方案: unknown): 查询方案 | undefined {
-  if (!原始方案 || typeof 原始方案 !== 'object') return undefined
-  const 方案 = 原始方案 as Partial<查询方案>
-  if (typeof 方案.id !== 'string' || typeof 方案.name !== 'string') return undefined
-  if (方案.scope !== '个人' && 方案.scope !== '团队') return undefined
-  if (方案.quickView !== '全部' && 方案.quickView !== '自配送' && 方案.quickView !== '平台履约') return undefined
-  const 可用列 = Array.isArray(方案.columns)
-    ? 方案.columns.filter((列): 列 is 可选列键 => 默认显示列.includes(列 as 可选列键))
-    : []
-  const 原始筛选 = 方案.filters && typeof 方案.filters === 'object' ? 方案.filters : 创建默认筛选条件()
-  return {
-    id: 方案.id,
-    name: 方案.name,
-    scope: 方案.scope,
-    updatedAt: typeof 方案.updatedAt === 'string' ? 方案.updatedAt : '更新时间未知',
-    filters: 复制筛选条件({ ...创建默认筛选条件(), ...原始筛选 }),
-    quickView: 方案.quickView,
-    columns: 可用列.length ? [...new Set(可用列)] : [...默认显示列],
-  }
-}
-
-function 持久化查询方案() {
-  if (typeof window === 'undefined') return
-  const 内容: 查询方案存储内容 = {
-    version: 1,
-    currentSchemeId: 当前方案Id.value,
-    schemes: 查询方案列表.value.filter((方案) => 方案.scope !== '系统'),
-  }
-  try {
-    window.localStorage.setItem(查询方案存储键, JSON.stringify(内容))
-  } catch {
-    ElMessage.warning('当前浏览器无法保存查询方案，本次设置仅在当前页面有效')
-  }
-}
-
-function 恢复查询方案() {
-  if (typeof window === 'undefined') return
-  try {
-    const 原始内容 = window.localStorage.getItem(查询方案存储键)
-    if (!原始内容) return
-    const 内容 = JSON.parse(原始内容) as Partial<查询方案存储内容>
-    if (内容.version !== 1 || !Array.isArray(内容.schemes)) return
-    const 已保存方案 = 内容.schemes
-      .map(规范化已保存方案)
-      .filter((方案): 方案 is 查询方案 => Boolean(方案))
-    查询方案列表.value.push(...已保存方案)
-    const 目标方案 = 查询方案列表.value.find((方案) => 方案.id === 内容.currentSchemeId)
-      ?? 查询方案列表.value[0]
-    if (!目标方案) return
-    当前方案Id.value = 目标方案.id
-    const 条件 = 复制筛选条件(目标方案.filters)
-    Object.assign(筛选条件, 条件)
-    Object.assign(已应用筛选条件, 条件)
-    当前快速视图.value = 目标方案.quickView
-    已应用快速视图.value = 目标方案.quickView
-    已显示列.value = [...目标方案.columns]
-    列设置草稿.value = [...目标方案.columns]
-  } catch {
-    window.localStorage.removeItem(查询方案存储键)
-  }
-}
-
-恢复查询方案()
 
 const 日期快捷项 = [
   {
@@ -233,14 +104,16 @@ const 日期快捷项 = [
 ]
 
 const 平台选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.platformCode))])
-const 店铺选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.storeName))])
+const 店铺选项 = computed(() => [...new Set(订单列表.value
+  .filter((订单) => !筛选条件.platform || 订单.platformCode === 筛选条件.platform)
+  .map((订单) => 订单.storeName))])
 const 平台状态选项 = computed(() => [
   ...[...new Set(订单列表.value
-    .filter((订单) => 订单.platformCode === 'eBay')
+    .filter((订单) => 订单.platformCode === 'eBay' && (!筛选条件.platform || 筛选条件.platform === 'eBay'))
     .map((订单) => 订单.platformOrderStatus)
     .filter((状态): 状态 is string => Boolean(状态)))]
     .map((状态) => ({ label: 状态, value: 状态 })),
-  { label: '状态映射待接入', value: '__NOT_INTEGRATED__' },
+  ...(筛选条件.platform !== 'eBay' ? [{ label: '状态映射待接入', value: '__NOT_INTEGRATED__' }] : []),
 ])
 const 国家选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.address.countryCode))])
 const 视图数量 = computed(() => ({
@@ -260,26 +133,7 @@ const 当前页数据 = computed(() => {
   return 筛选结果.value.slice(起始, 起始 + 每页条数.value)
 })
 
-const 当前方案 = computed(() => 查询方案列表.value.find((方案) => 方案.id === 当前方案Id.value) ?? 查询方案列表.value[0])
-const 可见列选项 = computed(() => {
-  const 关键词 = 列搜索词.value.trim().toLocaleLowerCase()
-  return 关键词 ? 可选列定义.filter((列) => 列.label.toLocaleLowerCase().includes(关键词)) : 可选列定义
-})
 const 已选数量 = computed(() => 选择全部匹配.value ? 筛选结果.value.length : 已选订单.value.length)
-const 方案有未保存更改 = computed(() => {
-  const 方案 = 当前方案.value
-  if (!方案) return false
-  return JSON.stringify({
-    filters: 复制筛选条件(筛选条件),
-    quickView: 当前快速视图.value,
-    columns: [...已显示列.value].sort(),
-  }) !== JSON.stringify({
-    filters: 复制筛选条件(方案.filters),
-    quickView: 方案.quickView,
-    columns: [...方案.columns].sort(),
-  })
-})
-
 const 高级筛选数量 = computed(() => [
   筛选条件.platformStatus,
   筛选条件.syncStatus,
@@ -297,6 +151,30 @@ const 有生效筛选 = computed(() => Boolean([
   已应用筛选条件.skuStatus,
   已应用筛选条件.countryCode,
 ].filter(Boolean).length || 已应用筛选条件.dateRange?.length || 已应用快速视图.value !== '全部'))
+
+const 查询待应用 = computed(() => JSON.stringify(规范化筛选条件(筛选条件)) !== JSON.stringify(规范化筛选条件(已应用筛选条件)))
+const 生效条件摘要 = computed(() => {
+  const 显示名: Record<string, string> = { keyword: '关键词', platform: '平台', store: '店铺', processingStatus: 'OMS 状态', platformStatus: '平台状态', syncStatus: '同步', skuStatus: 'SKU', countryCode: '目的地' }
+  const 条件 = Object.entries(显示名).flatMap(([键, 名称]) => {
+    const 值 = 已应用筛选条件[键 as keyof 全渠道订单筛选条件]
+    if (!值) return []
+    const 文本 = 值 === '__EMPTY__' ? '未进入订单处理' : 值 === '__NOT_INTEGRATED__' ? '状态映射待接入' : String(值)
+    return [`${名称}：${文本}`]
+  })
+  if (已应用筛选条件.dateRange?.length) 条件.push(`日期：${已应用筛选条件.dateRange.join(' 至 ')}`)
+  return 条件
+})
+
+function 平台条件变更() {
+  if (!店铺选项.value.includes(筛选条件.store)) 筛选条件.store = ''
+  if (!平台状态选项.value.some((状态) => 状态.value === 筛选条件.platformStatus)) 筛选条件.platformStatus = ''
+}
+
+async function 处理分页变化() {
+  if (!选择全部匹配.value) { 清除选择(); return }
+  await nextTick()
+  当前页数据.value.forEach((订单) => 表格引用.value?.toggleRowSelection(订单, true))
+}
 
 const 标注 = (
   id: string,
@@ -332,32 +210,22 @@ const 筛选标注 = 标注(
   '多平台通用字段筛选',
   '筛选项只使用全渠道通用订单字段；具体默认项和排列顺序仍需按真实作业频率评审。',
   '合理假设',
-  ['PRD/全渠道订单功能PRD.md#AC-01-列表查询', 'PRD/订单单据字段标准.md#6-全渠道标准订单'],
+  ['PRD/全渠道订单功能PRD.md#63-查询与筛选', 'PRD/订单单据字段标准.md#6-全渠道标准订单'],
 )
-
-const 查询方案标注 = 标注(
-  'oms.all-order.list.query-scheme',
-  '保存查询方案',
-  '全渠道订单需要保存并再次应用查询条件与列显示；个人/团队作用域已作为原型结构，团队方案权限仍待确认。',
-  '已确认',
-  ['PRD/全渠道订单功能PRD.md#AC-02-查询方案与自定义列'],
-  ['系统默认方案不可覆盖，只能另存为。', '切换方案会同时应用筛选、快捷视图与列显示。'],
-)
-
-const 列设置标注 = 标注(
-  'oms.all-order.list.column-config',
-  '自定义列',
-  '用户可调整跨平台通用字段的显隐；系统订单识别列、勾选列与操作列在原型中固定保留。列排序、冻结和宽度保存仍待确认。',
-  '已确认',
-  ['PRD/全渠道订单功能PRD.md#AC-02-查询方案与自定义列'],
-)
+Object.assign(筛选标注, {
+  分类: '交互', 触发方式: ['修改筛选后点击查询或按 Enter；重置立即生效。'],
+  系统动作: ['平台变更后联动店铺与平台状态字典，清除不兼容草稿条件。', '查询时复制筛选快照、回到第一页并清除旧选择。'],
+  成功结果: ['已生效条件显示在结果上方；尚未提交的条件显示待查询提示。'],
+  异常处理: ['无匹配结果时保留当前筛选，可重置重新查询。'],
+  验收要点: ['平台 eBay 切换 Temu 后原 eBay 店铺及状态被清除。', '重置清空折叠条件；修改筛选不提前改变结果。'],
+})
 
 const 批量标注 = 标注(
   'oms.all-order.list.batch-bar',
   '批量处理框架',
   '勾选订单后显示选中范围、跨页选择入口和资格统计框架。具体批量动作、门禁、权限和上限尚未确认，因此当前不开放提交。',
   '已确认',
-  ['PRD/全渠道订单功能PRD.md#AC-03-批量操作'],
+  ['PRD/全渠道订单功能PRD.md#13-验收标准'],
   ['表头全选默认只覆盖当前页。', '显式选择当前筛选全部后才形成跨页范围。', '选择具体动作后才能计算可执行与不可执行数量。'],
 )
 
@@ -367,7 +235,7 @@ const 表格标注 = 标注(
   '系统订单号作为主展示编号；列表保留未进入处理的自配送订单和平台履约订单，不展示 eBay 等平台专业字段。',
   '合理假设',
   ['PRD/订单单据字段标准.md#14-各功能的事实表与默认展示粒度', 'PRD/订单领域模型设计.md#21-全渠道订单承载通用事实ebay-订单承载平台专业事实'],
-  ['单击系统订单号或“查看详情”打开应用内详情页签。', '双击订单行执行相同跳转。'],
+  ['单击系统订单号或“查看详情”打开应用内详情页签。', '双击订单行执行相同跳转。', '不显示缺少规则命中证据的订单标签；商品图片绑定标准字段 item_image_url，暂无来源时使用明确的原型占位图。', '数据更新仅展示有来源的任务结果；接口接入阶段不是业务状态，无同步记录显示“—”。'],
 )
 
 const 状态标注 = 标注(
@@ -375,7 +243,7 @@ const 状态标注 = 标注(
   '平台状态投影与 OMS 六态',
   '平台状态和 OMS 处理状态分开显示。eBay 来源已确认为 orderFulfillmentStatus；尚未接入的平台显示“状态映射待接入”，该占位不写入平台状态字段。',
   '已确认',
-  ['PRD/全渠道订单功能PRD.md#AC-05-未接入平台占位', 'PRD/订单单据字段标准.md#61-订单头-oms_order'],
+  ['PRD/全渠道订单功能PRD.md#52-状态维度', 'PRD/订单单据字段标准.md#61-订单头-oms_order'],
 )
 
 const 空处理状态标注 = 标注(
@@ -399,7 +267,7 @@ const 详情入口标注 = 标注(
   '全渠道订单详情页签入口',
   '完整详情固定通过中台顶部新页签承载，不再使用右侧抽屉；相同系统订单号复用已有页签。',
   '已确认',
-  ['PRD/全渠道订单功能PRD.md#AC-04-应用内详情页签'],
+  ['PRD/全渠道订单功能PRD.md#61-页面组成'],
 )
 
 const 空态标注 = 标注(
@@ -410,6 +278,15 @@ const 空态标注 = 标注(
   ['文档/产品规划/OMS与eBay客服UI设计建议.md#8-视觉与交互基线建议'],
 )
 
+Object.assign(视图标注, { 分类: '页面', 前置条件: ['已加载授权范围内的标准订单。'], 触发方式: ['点击全部、自配送或平台履约。'], 系统动作: ['立即应用履约模式，回到第一页并清除旧勾选。'], 成功结果: ['列表只包含对应履约责任的标准订单。'], 异常处理: ['没有结果时显示空态；不把处理状态为空的订单隐藏。'], 验收要点: ['平台履约显示不适用；等待准入自配送保留在自配送视图。'] })
+Object.assign(批量标注, { 分类: '交互', 前置条件: ['选择范围只来自当前已生效查询。'], 触发方式: ['勾选当前页，或明确点击选择当前筛选全部。'], 系统动作: ['普通翻页清除当前页勾选；显式全匹配范围保留。', '修改已生效查询时清空全部选择。'], 成功结果: ['数量与当前页/当前筛选全部的范围文案一致。'], 异常处理: ['具体动作目录尚未确认，不开放任何业务提交。'], 验收要点: ['跨页选择不能由表头勾选隐式形成；改变筛选后不得保留旧范围。'] })
+Object.assign(表格标注, { 分类: '页面', 触发方式: ['查询完成或打开全渠道订单。'], 系统动作: ['一行对应一张标准订单，商品及多路由以摘要展示。'], 成功结果: ['同一系统订单不会因拆仓显示多行；表格内部可水平滚动。'], 异常处理: ['缺失字段显示占位，不用零值伪装未知金额或数量。'], 验收要点: ['1280/1440/1920 宽及打开标注侧栏后没有页面级横溢。'] })
+Object.assign(状态标注, { 分类: '字段', 触发方式: ['读取标准订单状态投影。'], 系统动作: ['平台状态与 OMS 状态独立渲染，不拼接付款、取消等专业字段。'], 成功结果: ['eBay 原值可见；未接入平台明确标识映射待接入。'], 异常处理: ['未知原值保留并提示核查，不套用其他平台字典。'], 验收要点: ['更新平台投影不能直接覆盖 OMS 六态；标发失败不回退已发货。'] })
+Object.assign(空处理状态标注, { 分类: '字段', 触发方式: ['订单 processingStatus 为空。'], 系统动作: ['先区分平台履约不适用与自配送未进入处理；仅有证据才补充准入原因。'], 成功结果: ['空值仍可查单、看详情。'], 异常处理: ['没有可靠原因时显示待核查，不默认解释未付款。'], 验收要点: ['处理状态空值不会创建待审核或不发货状态。'] })
+Object.assign(路由标注, { 分类: '字段', 触发方式: ['读取订单头与当前有效履约单。'], 系统动作: ['有有效履约单时聚合实际路由；否则读取首次/默认路由。'], 成功结果: ['跨仓时展示多仓多渠道；首次默认路由仍可追溯。'], 异常处理: ['无路由显示尚未形成路由；历史已终止履约不进入当前聚合。'], 验收要点: ['待审核有路由不等于审核通过；聚合不把多值写回单值字段。'] })
+Object.assign(详情入口标注, { 分类: '交互', 触发方式: ['点击系统订单号、查看详情或双击行。'], 系统动作: ['按稳定系统订单号打开应用内详情路由；相同订单复用页签。'], 成功结果: ['读取与订单处理相同的会话订单事实。'], 异常处理: ['来源订单不存在时显示未找到，并可返回列表。'], 验收要点: ['详情不使用抽屉承载；处理页面修改状态后详情同步。'] })
+Object.assign(空态标注, { 分类: '页面', 触发方式: ['查询返回零条记录。'], 系统动作: ['说明暂无订单还是当前条件无结果。'], 成功结果: ['可清除全部包含折叠区域的筛选。'], 异常处理: ['空结果不改变已有订单事实。'], 验收要点: ['清除筛选后恢复全部可见订单。'] })
+
 function 清除选择(提示 = false) {
   if (提示 && 已选数量.value) ElMessage.info('筛选范围已变化，原选择范围已清除')
   选择全部匹配.value = false
@@ -419,7 +296,7 @@ function 清除选择(提示 = false) {
 
 function 执行查询() {
   清除选择(true)
-  Object.assign(已应用筛选条件, 筛选条件)
+  Object.assign(已应用筛选条件, 复制筛选条件(筛选条件))
   已应用快速视图.value = 当前快速视图.value
   当前页.value = 1
 }
@@ -446,90 +323,17 @@ function 处理选择变更(订单: 全渠道订单[]) {
   已选订单.value = 订单
 }
 
+function 用户更改选择(订单: 全渠道订单[]) {
+  if (!选择全部匹配.value) return
+  选择全部匹配.value = false
+  已选订单.value = 订单
+  ElMessage.info('已切换为当前页勾选范围')
+}
+
 function 选择当前筛选全部() {
   选择全部匹配.value = true
   已选订单.value = []
-}
-
-function 列可见(列: 可选列键) {
-  return 已显示列.value.includes(列)
-}
-
-function 打开列设置() {
-  列设置草稿.value = [...已显示列.value]
-  列搜索词.value = ''
-  列设置打开.value = true
-}
-
-function 应用列设置() {
-  if (!列设置草稿.value.length) {
-    ElMessage.warning('至少保留一个可选业务列')
-    return
-  }
-  已显示列.value = [...列设置草稿.value]
-  列设置打开.value = false
-}
-
-function 恢复默认列() {
-  列设置草稿.value = [...默认显示列]
-}
-
-function 应用查询方案(方案Id: string) {
-  const 方案 = 查询方案列表.value.find((项目) => 项目.id === 方案Id)
-  if (!方案) return
-  清除选择(true)
-  const 条件 = 复制筛选条件(方案.filters)
-  Object.assign(筛选条件, 条件)
-  Object.assign(已应用筛选条件, 条件)
-  当前快速视图.value = 方案.quickView
-  已应用快速视图.value = 方案.quickView
-  已显示列.value = [...方案.columns]
-  当前页.value = 1
-  持久化查询方案()
-}
-
-function 保存当前方案() {
-  const 方案 = 当前方案.value
-  if (!方案 || 方案.scope === '系统') {
-    新方案.name = ''
-    新方案.scope = '个人'
-    方案另存为打开.value = true
-    return
-  }
-  方案.filters = 复制筛选条件(筛选条件)
-  方案.quickView = 当前快速视图.value
-  方案.columns = [...已显示列.value]
-  方案.updatedAt = 格式化方案更新时间()
-  持久化查询方案()
-  ElMessage.success('查询方案已更新')
-}
-
-function 打开另存为() {
-  新方案.name = ''
-  新方案.scope = '个人'
-  方案另存为打开.value = true
-}
-
-function 确认另存为() {
-  const 名称 = 新方案.name.trim()
-  if (!名称) {
-    ElMessage.warning('请输入方案名称')
-    return
-  }
-  const id = 'scheme-' + Date.now()
-  查询方案列表.value.push({
-    id,
-    name: 名称,
-    scope: 新方案.scope,
-    updatedAt: 格式化方案更新时间(),
-    filters: 复制筛选条件(筛选条件),
-    quickView: 当前快速视图.value,
-    columns: [...已显示列.value],
-  })
-  当前方案Id.value = id
-  持久化查询方案()
-  方案另存为打开.value = false
-  ElMessage.success('查询方案已保存')
+  当前页数据.value.forEach((订单) => 表格引用.value?.toggleRowSelection(订单, true))
 }
 
 async function 打开详情(原始订单: unknown) {
@@ -602,37 +406,7 @@ function 获取行OMS状态(原始订单: unknown) {
           <b>{{ 视图数量[视图] }}</b>
         </button>
       </nav>
-      <div class="边界说明">
-        <ElIcon><InfoFilled /></ElIcon>
-        <span>仅展示多平台通用订单事实；平台专业字段请进入对应平台订单。</span>
-      </div>
     </header>
-
-    <section v-prototype="查询方案标注" class="方案工具栏">
-      <div class="方案选择区">
-        <span class="工具栏标签"><ElIcon><Collection /></ElIcon>查询方案</span>
-        <ElSelect
-          v-model="当前方案Id"
-          class="方案选择"
-          aria-label="查询方案"
-          @change="应用查询方案"
-        >
-          <ElOption
-            v-for="方案 in 查询方案列表"
-            :key="方案.id"
-            :label="`[${方案.scope}] ${方案.name}`"
-            :value="方案.id"
-          />
-        </ElSelect>
-        <span class="方案元数据">{{ 当前方案?.scope }} · {{ 当前方案?.updatedAt }}</span>
-        <span v-if="方案有未保存更改" class="未保存提示">● 有未保存更改</span>
-      </div>
-      <div class="方案操作区">
-        <ElButton :disabled="当前方案?.scope === '系统' || !方案有未保存更改" @click="保存当前方案">保存方案</ElButton>
-        <ElButton @click="打开另存为"><ElIcon><DocumentAdd /></ElIcon>另存为</ElButton>
-        <ElButton v-prototype="列设置标注" @click="打开列设置"><ElIcon><Setting /></ElIcon>自定义列</ElButton>
-      </div>
-    </section>
 
     <section v-prototype="筛选标注" class="筛选面板">
       <ElForm :model="筛选条件" class="筛选表单" @submit.prevent="执行查询">
@@ -649,7 +423,7 @@ function 获取行OMS状态(原始订单: unknown) {
             </ElInput>
           </ElFormItem>
           <ElFormItem>
-            <ElSelect v-model="筛选条件.platform" clearable filterable aria-label="平台" placeholder="全部平台">
+            <ElSelect v-model="筛选条件.platform" clearable filterable aria-label="平台" placeholder="全部平台" @change="平台条件变更">
               <ElOption v-for="平台 in 平台选项" :key="平台" :label="平台" :value="平台" />
             </ElSelect>
           </ElFormItem>
@@ -708,7 +482,7 @@ function 获取行OMS状态(原始订单: unknown) {
             </ElFormItem>
             <ElFormItem>
               <ElSelect v-model="筛选条件.syncStatus" clearable aria-label="数据同步状态" placeholder="数据同步状态">
-                <ElOption v-for="状态 in ['已同步', '同步中', '同步失败', '待同步', '未接入']" :key="状态" :label="获取同步状态说明(状态 as any).text" :value="状态" />
+                <ElOption v-for="状态 in ['已同步', '同步中', '同步失败', '待同步']" :key="状态" :label="获取同步状态说明(状态 as any).text" :value="状态" />
               </ElSelect>
             </ElFormItem>
             <ElFormItem>
@@ -726,6 +500,11 @@ function 获取行OMS状态(原始订单: unknown) {
       </ElForm>
     </section>
 
+    <div v-if="生效条件摘要.length || 查询待应用" class="生效条件栏">
+      <span>当前结果条件</span><ElTag v-for="条件 in 生效条件摘要" :key="条件" type="info" effect="plain">{{ 条件 }}</ElTag>
+      <strong v-if="查询待应用">筛选已修改，点击查询后生效</strong>
+      <ElButton v-if="生效条件摘要.length" link type="primary" @click="重置筛选">清空条件</ElButton>
+    </div>
     <section v-if="已选数量" v-prototype="批量标注" class="批量栏">
       <div class="批量范围">
         <strong>已选 {{ 已选数量 }} 条</strong>
@@ -764,15 +543,16 @@ function 获取行OMS状态(原始订单: unknown) {
         scrollbar-always-on
         class="订单表格"
         @selection-change="处理选择变更"
+        @select="用户更改选择"
+        @select-all="用户更改选择"
         @row-dblclick="打开详情"
       >
-        <ElTableColumn type="selection" width="46" fixed="left" reserve-selection />
+        <ElTableColumn type="selection" width="46" fixed="left" />
         <ElTableColumn label="系统订单 / 平台订单" width="210" fixed="left">
           <template #default="{ row }">
             <div class="订单识别">
               <div class="系统单号行">
                 <button type="button" @click="打开详情(row)">{{ row.systemOrderNo }}</button>
-                <span v-for="标签 in row.tags" :key="标签" class="订单标签">{{ 标签 }}</span>
               </div>
               <span>平台单号 {{ row.platformOrderNo }}</span>
               <small>买家 {{ row.buyerExternalId || '平台未返回' }}</small>
@@ -780,7 +560,7 @@ function 获取行OMS状态(原始订单: unknown) {
           </template>
         </ElTableColumn>
 
-        <ElTableColumn v-if="列可见('platform')" label="平台 / 店铺" width="170">
+        <ElTableColumn label="平台 / 店铺" width="170">
           <template #default="{ row }">
             <div class="平台店铺">
               <span class="平台简称">{{ 获取行平台简称(row) }}</span>
@@ -794,7 +574,7 @@ function 获取行OMS状态(原始订单: unknown) {
           </template>
         </ElTableColumn>
 
-        <ElTableColumn v-if="列可见('time')" label="订单时间" width="184">
+        <ElTableColumn label="订单时间" width="184">
           <template #default="{ row }">
             <div class="订单时间">
               <div><span>下单</span><ElTooltip :content="row.orderedAt"><time>{{ 格式化列表时间(row.orderedAt) }}</time></ElTooltip></div>
@@ -809,9 +589,11 @@ function 获取行OMS状态(原始订单: unknown) {
           </template>
         </ElTableColumn>
 
-        <ElTableColumn v-if="列可见('items')" label="商品摘要" width="318">
+        <ElTableColumn label="商品摘要" width="318">
           <template #default="{ row }">
-            <div class="商品摘要">
+            <div class="商品摘要布局">
+              <AllOrderProductImage :src="row.items[0]?.itemImageUrl" />
+              <div class="商品摘要">
               <ElTooltip :content="row.items[0]?.platformItemTitle || '平台未返回商品标题'" placement="top">
                 <strong>{{ row.items[0]?.platformItemTitle || '平台未返回商品标题' }}</strong>
               </ElTooltip>
@@ -835,6 +617,7 @@ function 获取行OMS状态(原始订单: unknown) {
                   <div class="商品快览">
                     <header><strong>商品行快速核对</strong><span>{{ row.systemOrderNo }}</span></header>
                     <div v-for="商品 in row.items" :key="商品.externalLineId" class="商品快览行">
+                      <AllOrderProductImage :src="商品.itemImageUrl" />
                       <div>
                         <strong>{{ 商品.platformItemTitle || '平台未返回商品标题' }}</strong>
                         <span>平台 SKU {{ 商品.platformSku || '—' }}</span>
@@ -855,11 +638,12 @@ function 获取行OMS状态(原始订单: unknown) {
                   </div>
                 </ElPopover>
               </div>
+              </div>
             </div>
           </template>
         </ElTableColumn>
 
-        <ElTableColumn v-if="列可见('status')" width="232">
+        <ElTableColumn width="232">
           <template #header>
             <span v-prototype="状态标注" class="带帮助标题">平台状态 / OMS 状态 <ElIcon><QuestionFilled /></ElIcon></span>
           </template>
@@ -881,7 +665,7 @@ function 获取行OMS状态(原始订单: unknown) {
           </template>
         </ElTableColumn>
 
-        <ElTableColumn v-if="列可见('amount')" label="订单金额" width="134" align="right">
+        <ElTableColumn label="订单金额" width="134" align="right">
           <template #default="{ row }">
             <div class="金额单元格">
               <strong>{{ 格式化金额(row.amount.orderAmount) }}</strong>
@@ -891,9 +675,9 @@ function 获取行OMS状态(原始订单: unknown) {
           </template>
         </ElTableColumn>
 
-        <ElTableColumn v-if="列可见('route')" width="238">
+        <ElTableColumn width="238">
           <template #header>
-            <span v-prototype="路由标注" class="带帮助标题">履约模式 / 当前路由 <ElIcon><QuestionFilled /></ElIcon></span>
+            <span v-prototype="路由标注" class="带帮助标题">仓储物流 <ElIcon><QuestionFilled /></ElIcon></span>
           </template>
           <template #default="{ row }">
             <div class="路由单元格">
@@ -909,16 +693,16 @@ function 获取行OMS状态(原始订单: unknown) {
           </template>
         </ElTableColumn>
 
-        <ElTableColumn v-if="列可见('sync')" label="数据更新" width="176">
+        <ElTableColumn label="数据更新" width="176">
           <template #default="{ row }">
             <div class="同步单元格">
-              <b v-if="row.sync.status !== '已同步'" class="状态徽标" :class="'tone-' + 获取同步状态说明(row.sync.status).tone">
+              <b v-if="row.sync.status && row.sync.status !== '已同步'" class="状态徽标" :class="'tone-' + 获取同步状态说明(row.sync.status).tone">
                 {{ 获取同步状态说明(row.sync.status).text }}
               </b>
               <ElTooltip :content="row.sync.lastSuccess || '暂无成功同步时间'" placement="top">
                 <span>{{ row.sync.status === '已同步' ? '最近同步' : '上次成功' }} {{ 格式化列表时间(row.sync.lastSuccess) }}</span>
               </ElTooltip>
-              <small>{{ row.sync.normalizationStatus }} · {{ row.sync.message }}</small>
+              <small v-if="row.sync.status && row.sync.message">{{ row.sync.normalizationStatus }} · {{ row.sync.message }}</small>
             </div>
           </template>
         </ElTableColumn>
@@ -961,66 +745,22 @@ function 获取行OMS状态(原始订单: unknown) {
         layout="sizes, prev, pager, next"
         :page-sizes="[20, 50, 100]"
         :total="筛选结果.length"
+        @current-change="处理分页变化"
+        @size-change="当前页 = 1; 处理分页变化()"
       />
     </footer>
 
-    <ElDialog v-model="方案另存为打开" title="另存为查询方案" width="480px" append-to-body>
-      <ElForm label-position="top">
-        <ElFormItem label="方案名称" required>
-          <ElInput v-model="新方案.name" maxlength="30" show-word-limit placeholder="例如：我的日常核对" @keyup.enter="确认另存为" />
-        </ElFormItem>
-        <ElFormItem label="作用范围">
-          <ElSelect v-model="新方案.scope" aria-label="查询方案作用范围">
-            <ElOption label="仅本人" value="个人" />
-            <ElOption label="团队共享（权限待确认）" value="团队" />
-          </ElSelect>
-        </ElFormItem>
-        <div class="保存内容摘要">
-          <strong>将保存</strong>
-          <span>当前筛选条件、快捷视图与 {{ 已显示列.length }} 个可选列</span>
-          <small v-if="新方案.scope === '团队'">团队方案的创建、编辑与发布权限仍待确认。</small>
-        </div>
-      </ElForm>
-      <template #footer>
-        <ElButton @click="方案另存为打开 = false">取消</ElButton>
-        <ElButton type="primary" @click="确认另存为">保存方案</ElButton>
-      </template>
-    </ElDialog>
-
-    <ElDrawer v-model="列设置打开" title="自定义列" size="380px" append-to-body>
-      <div class="列设置说明">
-        <strong>已显示 {{ 列设置草稿.length + 2 }} / {{ 可选列定义.length + 2 }} 列</strong>
-        <span>仅包含全渠道通用字段</span>
-      </div>
-      <ElInput v-model="列搜索词" clearable placeholder="搜索字段" aria-label="搜索自定义列字段">
-        <template #prefix><ElIcon><Search /></ElIcon></template>
-      </ElInput>
-      <section class="列设置分区">
-        <h3>固定列</h3>
-        <ElCheckbox :model-value="true" disabled>系统订单 / 平台订单</ElCheckbox>
-        <ElCheckbox :model-value="true" disabled>操作</ElCheckbox>
-        <small>用于订单识别与进入详情，首版固定保留。</small>
-      </section>
-      <section class="列设置分区">
-        <h3>可选业务列</h3>
-        <ElCheckboxGroup v-model="列设置草稿" class="列选项">
-          <ElCheckbox v-for="列 in 可见列选项" :key="列.key" :value="列.key">{{ 列.label }}</ElCheckbox>
-        </ElCheckboxGroup>
-      </section>
-      <template #footer>
-        <div class="抽屉底部">
-          <ElButton @click="恢复默认列">恢复默认</ElButton>
-          <span></span>
-          <ElButton @click="列设置打开 = false">取消</ElButton>
-          <ElButton type="primary" @click="应用列设置">应用</ElButton>
-        </div>
-      </template>
-    </ElDrawer>
   </section>
 </template>
 
 <style scoped>
+.商品摘要布局 { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.商品摘要布局 > .商品摘要 { flex: 1; min-width: 0; }
+.生效条件栏 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; background: #f7faff; font-size: 12px; color: #7a8798; }
+.生效条件栏 strong { color: #ad771b; font-weight: 500; }
 .全渠道订单页面 {
+  container-type: inline-size;
+  container-name: all-order;
   display: flex;
   width: 100%;
   height: 100%;
@@ -1111,52 +851,6 @@ function 获取行OMS状态(原始订单: unknown) {
 .边界说明 span {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.方案工具栏 {
-  display: flex;
-  min-height: 42px;
-  flex: 0 0 42px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 5px 12px;
-  border-bottom: 1px solid #e8ebef;
-  background: #fff;
-}
-
-.方案选择区,
-.方案操作区 {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.工具栏标签 {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 5px;
-  color: #596574;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.方案选择 {
-  width: 230px;
-}
-
-.方案元数据 {
-  color: #858e9a;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.未保存提示 {
-  color: #ad6800;
-  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -1381,19 +1075,6 @@ function 获取行OMS状态(原始订单: unknown) {
   text-decoration: underline;
 }
 
-.订单标签 {
-  display: inline-grid;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  place-items: center;
-  border: 1px solid #f0c88e;
-  border-radius: 3px;
-  background: #fff8ec;
-  color: #a6630a;
-  font-size: 10px;
-  font-weight: 600;
-}
 
 .订单识别 > span,
 .订单识别 > small {
@@ -1574,7 +1255,7 @@ function 获取行OMS状态(原始订单: unknown) {
 
 .商品快览行 {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 126px;
+  grid-template-columns: 52px minmax(0, 1fr) 126px;
   gap: 14px;
   padding: 9px 0;
   border-bottom: 1px solid #edf0f3;
@@ -1773,65 +1454,6 @@ function 获取行OMS状态(原始订单: unknown) {
   color: #a3640b;
 }
 
-.列设置说明 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-  padding: 9px 10px;
-  border-left: 3px solid #409eff;
-  background: #f4f8fd;
-}
-
-.列设置说明 strong {
-  color: #3b4653;
-  font-size: 12px;
-}
-
-.列设置说明 span,
-.列设置分区 small {
-  color: #808b98;
-  font-size: 11px;
-}
-
-.列设置分区 {
-  margin-top: 18px;
-}
-
-.列设置分区 h3 {
-  margin: 0 0 10px;
-  color: #36414e;
-  font-size: 13px;
-}
-
-.列设置分区 > .el-checkbox {
-  display: flex;
-  margin: 0 0 8px;
-}
-
-.列设置分区 small {
-  display: block;
-  margin-top: 3px;
-}
-
-.列选项 {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.列选项 :deep(.el-checkbox) {
-  margin-right: 0;
-}
-
-.抽屉底部 {
-  display: grid;
-  grid-template-columns: max-content 1fr max-content max-content;
-  width: 100%;
-  gap: 8px;
-}
-
 @media (max-width: 1500px) {
   .筛选主网格 {
     grid-template-columns: minmax(240px, 1.45fr) 124px 160px 154px minmax(330px, 1.3fr);
@@ -1839,10 +1461,6 @@ function 获取行OMS状态(原始订单: unknown) {
 
   .筛选操作 {
     grid-column: 1 / -1;
-  }
-
-  .方案元数据 {
-    display: none;
   }
 
   .批量栏 {
@@ -1866,9 +1484,17 @@ function 获取行OMS状态(原始订单: unknown) {
     max-width: 340px;
   }
 
-  .方案选择 {
-    width: 190px;
   }
 
+@container all-order (max-width: 1200px) {
+  .筛选主网格 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .筛选主网格 > :nth-child(5) { grid-column: span 2; }
+  .筛选操作 { grid-column: 1 / -1; justify-content: flex-start; }
+  .筛选高级网格 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@container all-order (max-width: 750px) {
+  .筛选主网格 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .边界说明 { display: none; }
+  .快捷视图栏 { gap: 4px; }
+  }
 </style>

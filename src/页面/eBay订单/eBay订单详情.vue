@@ -29,6 +29,9 @@ import type { 原型标注 } from '@/类型/标注'
 import 手机商品占位图 from '@/资源/eBay订单/旗舰手机商品占位-概念图.png'
 import { 格式化eBay站点, 格式化金额, 获取状态说明, 计算商品单价 } from './订单工具'
 import type { eBay履约指令, eBay订单 } from './类型'
+import EbayTimezoneSwitch from './时区切换.vue'
+import { 当前eBay时区 } from './时区偏好'
+import { 获取显示时区, 转换eBay时间 } from './时间工具'
 
 const props = defineProps<{
   order: eBay订单
@@ -38,6 +41,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   refresh: [order: eBay订单]
 }>()
+
+function 显示时间(时间?: string) {
+  return 转换eBay时间(时间, 获取显示时区(当前eBay时区.value, props.order.purchaseMarketplaces))
+}
 
 const router = useRouter()
 const 联系信息授权弹窗 = ref(false)
@@ -149,7 +156,7 @@ const 时效标注 = 标注(
     系统动作: ['按四个独立信息单元展示 creationDate、成功付款时间、订单级 shipByDate 和预计送达范围。'],
     异常处理: ['多行时限、多笔付款、多条预计送达的订单级聚合未确认时，保留原始明细并显示待确认口径。'],
     数据来源: ['Order.creationDate、paymentSummary.payments、lineItems.lineItemFulfillmentInstructions、fulfillmentStartInstructions。'],
-    验收要点: ['检查时间来源时区、付款未成功、无时限、临期和多条配送指令场景。'],
+    验收要点: ['检查北京／站点时区联动、付款未成功、无时限、临期和多条配送指令场景。'],
   },
 )
 
@@ -349,7 +356,8 @@ async function 前往标发中心() {
             </div>
           </div>
           <div class="详情顶栏操作">
-            <span class="最近同步">最后成功更新 {{ order.sync.lastSuccess || '—' }}</span>
+            <EbayTimezoneSwitch />
+            <span class="最近同步">最后成功更新 {{ order.sync.lastSuccess ? 显示时间(order.sync.lastSuccess) : '—' }}</span>
             <ElButton v-prototype="刷新标注" :loading="refreshing" @click="emit('refresh', order)">
               <ElIcon><RefreshRight /></ElIcon>
               刷新 eBay 数据
@@ -407,29 +415,29 @@ async function 前往标发中心() {
           <div class="时间网格">
             <section class="时间项">
               <span class="时间项标签">下单时间</span>
-              <strong>{{ order.creationDate }}</strong>
-              <small>eBay 订单创建时间，保留平台来源时区</small>
+              <strong>{{ 显示时间(order.creationDate) }}</strong>
+              <small>eBay 订单创建时间，按当前选择时区显示</small>
             </section>
             <section class="时间项" :class="{ '时间项-提示': !首笔成功付款 }">
               <span class="时间项标签">买家付款</span>
-              <strong>{{ 首笔成功付款?.date || '尚无明确成功付款时间' }}</strong>
+              <strong>{{ 首笔成功付款?.date ? 显示时间(首笔成功付款?.date) : '尚无明确成功付款时间' }}</strong>
               <small>{{ 首笔成功付款 ? `${格式化金额(首笔成功付款.amount)} · ${首笔成功付款.method}` : '请查看付款明细' }}</small>
             </section>
             <section class="时间项" :class="{ '时间项-提示': order.urgency === '临期' }">
               <span class="时间项标签">最晚发货</span>
-              <strong>{{ order.shipBy || '平台未提供' }}</strong>
-              <small>{{ order.shipByLabel }}</small>
+              <strong>{{ order.shipBy ? 显示时间(order.shipBy) : '平台未提供' }}</strong>
+              <small>订单级最晚发货时间，按当前选择时区显示</small>
             </section>
             <section class="时间项 预计送达项">
               <span class="时间项标签">预计送达范围</span>
               <div class="预计送达范围">
                 <div>
                   <span>最早</span>
-                  <strong>{{ 首条配送指令?.minEstimatedDelivery || '—' }}</strong>
+                  <strong>{{ 首条配送指令?.minEstimatedDelivery ? 显示时间(首条配送指令?.minEstimatedDelivery) : '—' }}</strong>
                 </div>
                 <div>
                   <span>最晚</span>
-                  <strong>{{ 首条配送指令?.maxEstimatedDelivery || '—' }}</strong>
+                  <strong>{{ 首条配送指令?.maxEstimatedDelivery ? 显示时间(首条配送指令?.maxEstimatedDelivery) : '—' }}</strong>
                 </div>
               </div>
               <small>仅为 eBay 预计信息，不代表已签收或已妥投</small>
@@ -575,7 +583,7 @@ async function 前往标发中心() {
                   </div>
                   <div>
                     <span>eBay 平台标发时间</span>
-                    <strong>{{ 履约.shippedDate }}</strong>
+                    <strong>{{ 显示时间(履约.shippedDate) }}</strong>
                   </div>
                 </div>
                 <div class="包裹商品行">
@@ -617,7 +625,7 @@ async function 前往标发中心() {
           <div class="支付明细列表">
             <div v-for="付款 in order.payments" :key="付款.id" class="支付明细">
               <div><span>{{ 付款.method }}</span><strong>{{ 格式化金额(付款.amount) }}</strong></div>
-              <div><code>{{ 付款.status }}</code><small>{{ 付款.date || '未返回付款时间' }}</small></div>
+              <div><code>{{ 付款.status }}</code><small>{{ 付款.date ? 显示时间(付款.date) : '未返回付款时间' }}</small></div>
             </div>
           </div>
           <template v-if="order.refunds.length">
@@ -625,7 +633,7 @@ async function 前往标发中心() {
             <div class="支付明细列表">
               <div v-for="退款 in order.refunds" :key="退款.id" class="支付明细 退款">
                 <div><span>{{ 退款.status || '状态待核查' }}</span><strong>-{{ 格式化金额(退款.amount) }}</strong></div>
-                <div><code>{{ 退款.referenceId }}</code><small>{{ 退款.date }}</small></div>
+                <div><code>{{ 退款.referenceId }}</code><small>{{ 显示时间(退款.date) }}</small></div>
               </div>
             </div>
           </template>
@@ -748,6 +756,7 @@ async function 前往标发中心() {
 
 .详情顶栏操作 {
   display: flex;
+  flex-wrap: wrap;
   flex: 0 0 auto;
   align-items: center;
   gap: 12px;
@@ -826,6 +835,8 @@ async function 前往标发中心() {
   padding: 12px;
 }
 
+.详情主区 { container: ebay-detail / inline-size; }
+
 .详情主区,
 .详情侧栏 {
   display: flex;
@@ -901,6 +912,10 @@ async function 前往标发中心() {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
+}
+
+@container ebay-detail (max-width: 960px) {
+  .时间网格 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .时间项 {

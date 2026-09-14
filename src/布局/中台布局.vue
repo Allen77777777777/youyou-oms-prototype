@@ -28,12 +28,14 @@ watch(
     <PrimaryRail :已打开菜单="已打开菜单?.id" @打开菜单="切换功能菜单" />
     <section class="工作区">
       <AppHeader />
-      <main class="页面内容">
-        <RouterView />
-      </main>
+      <div class="内容与标注">
+        <main class="页面内容">
+          <RouterView />
+        </main>
+        <AnnotationDrawer />
+      </div>
     </section>
     <FeatureMenu :菜单="已打开菜单" @关闭="已打开菜单 = undefined" />
-    <AnnotationDrawer />
   </div>
 </template>
 
@@ -53,6 +55,7 @@ watch(
 }
 
 .页面内容 {
+  min-width: 0;
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -61,5 +64,13 @@ watch(
   border-radius: 8px;
   background: var(--yy-bg-panel);
   box-shadow: 0 1px 3px rgb(0 0 0 / 4%);
+}
+
+.内容与标注 {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 </style>
