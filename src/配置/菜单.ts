@@ -121,6 +121,8 @@ const OMS菜单: 菜单节点 = {
         页面('oms-outbound-orders', '三方仓出库单', '/oms/warehouse-delivery/outbound-orders', 10, '用户规划', '已确认'),
         页面('oms-logistics-orders', '物流下单', '/oms/warehouse-delivery/logistics-orders', 20, '用户规划', '已确认'),
         页面('oms-logistics-channels', '物流渠道管理', '/oms/warehouse-delivery/logistics-channels', 30, '用户规划', '已确认'),
+        页面('oms-warehouse-inventory', '三方仓库存', '/oms/warehouse-delivery/inventory', 40, '用户规划', '已确认'),
+        页面('oms-inventory-aging', '三方仓库龄', '/oms/warehouse-delivery/inventory-aging', 50, '用户规划', '已确认'),
       ],
     },
     {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Search, Refresh, ArrowRight, Document, CircleCheck, Warning } from '@element-plus/icons-vue'
 import { ElButton, ElInput, ElSelect, ElOption, ElIcon, ElTag, ElTable, ElTableColumn, ElDrawer, ElDescriptions, ElDescriptionsItem, ElAlert, ElEmpty, ElMessage, ElMessageBox, ElTimeline, ElTimelineItem, ElPagination } from 'element-plus'
 import { 共享订单 } from '../订单处理/演示会话'
@@ -9,6 +9,7 @@ import { 共享标发单 } from './演示会话'
 import type { 原型标注 } from '@/类型/标注'
 
 const router = useRouter()
+const route = useRoute()
 const 单据 = 共享标发单
 const 当前状态 = ref<标发状态 | '全部'>('全部')
 const 关键词 = ref(''); const 已查关键词 = ref(''); const 平台 = ref(''); const 已查平台 = ref(''); const 仅待核查 = ref(false)
@@ -30,6 +31,12 @@ function 标注(id: string, 标题: string, 分类: 原型标注['分类'], 说�
 function 查询() { 已查关键词.value = 关键词.value.trim(); 已查平台.value = 平台.value; 页码.value = 1; 清除勾选() }
 function 切状态(状态: 标发状态 | '全部') { 当前状态.value = 状态; 页码.value = 1; 清除勾选() }
 function 重置() { 关键词.value = ''; 已查关键词.value = ''; 平台.value = ''; 已查平台.value = ''; 仅待核查.value = false; 切状态('全部') }
+watch(() => [route.path, route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([路径, 履约号, 订单号]) => {
+  if (路径 !== '/oms/self-fulfillment/shipping-confirmation') return
+  const 编号 = typeof 履约号 === 'string' ? 履约号 : typeof 订单号 === 'string' ? 订单号 : ''
+  if (!编号) return
+  重置(); 关键词.value = 编号; 查询()
+}, { immediate: true })
 function 查看(单: 标发单) { 详情.value = 单; 抽屉.value = true }
 function 记尝试(单: 标发单, action: string, result: string, evidence: string) { 单.attempts.unshift({ time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) + ' UTC+8', action, result, evidence }) }
 async function 提交(列表: 标发单[]) {

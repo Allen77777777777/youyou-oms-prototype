@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { 共享订单, 仓库执行记录, 当前版本, 审核阻断原因, 执行演示审核, 执行演示推单, 核查演示仓库结果, 演示库存, 订单版本 } from './演示会话'
 import type { 全渠道订单 } from '../全渠道订单/类型'
-import { 展示计划数量, 提取发货时区 } from './展示工具'
+import { 展示计划数量, 提取发货时区, 命中作业关注, 展示剩余数量, type 作业行 } from './展示工具'
 
 const 初始订单 = JSON.stringify(共享订单.value)
 const 初始仓库 = JSON.stringify(仓库执行记录.value)
@@ -115,6 +115,56 @@ describe('计划数量展示', () => {
     expect(展示计划数量(商品, 3)).toBe('计划 3')
     expect(展示计划数量(商品, 0)).toBe('计划 0')
     expect(展示计划数量([{ fulfillableQuantity: 1 }, { fulfillableQuantity: 2 }])).toBe('计划 3')
+  })
+})
+
+describe('发货作业关注与数量', () => {
+  function 推仓行(): 作业行 {
+    const order = 共享订单.value.find(订单 => 订单.systemOrderNo === 'OMS260912000008')!
+    const fulfillment = order.fulfillmentOrders[0]!
+    return { key: fulfillment.fulfillmentOrderNo, order, fulfillment, execution: 仓库执行记录.value.find(执行 => 执行.履约单号 === fulfillment.fulfillmentOrderNo), stage: '待推单' }
+  }
+  it('待核查与明确失败分别筛选，不将已有请求算作可推仓', () => {
+    const 行 = 推仓行()
+    expect(命中作业关注(行, '结果待核查', ['先核查原请求'])).toBe(true)
+    expect(命中作业关注(行, '可推仓', ['先核查原请求'])).toBe(false)
+    expect(命中作业关注(行, '下单失败', [])).toBe(false)
+    行.execution!.状态 = '下单失败'
+    行.execution!.待核查 = false
+    expect(命中作业关注(行, '结果待核查', ['修复原因'])).toBe(false)
+    expect(命中作业关注(行, '下单失败', ['修复原因'])).toBe(true)
+  })
+  it('部分出库与仓库待出库可以重叠，剩余数量不能伪造为零', () => {
+    const 行 = 推仓行()
+    行.stage = '待发货'
+    行.execution!.状态 = '待出库'
+    行.fulfillment!.plannedQuantity = 3
+    行.fulfillment!.shippedQuantity = 1
+    expect(命中作业关注(行, '部分出库', [])).toBe(true)
+    expect(命中作业关注(行, '待出库', [])).toBe(true)
+    expect(展示剩余数量(行.fulfillment)).toBe('2')
+    行.fulfillment!.shippedQuantity = 4
+    expect(展示剩余数量(行.fulfillment)).toBe('数量待核查')
+    expect(展示剩余数量()).toBe('待审核确认')
+  })
+  it('没有标发记录不视为无需标发，失败筛选不改写已发货状态', () => {
+    const 行 = 推仓行()
+    行.stage = '已发货'
+    const 快照 = JSON.stringify(行)
+    expect(命中作业关注(行, '无标发记录', [])).toBe(true)
+    expect(命中作业关注(行, '无需标发', [])).toBe(false)
+    expect(命中作业关注(行, '标发失败', [], '标发失败')).toBe(true)
+    expect(命中作业关注(行, '无标发记录', [], '标发失败')).toBe(false)
+    expect(JSON.stringify(行)).toBe(快照)
+  })
+  it('可审核关注只取待审核中通过全部演示校验的订单', () => {
+    const order = 首个待审()
+    const 行: 作业行 = { key: order.systemOrderNo, order, stage: '待审核' }
+    expect(命中作业关注(行, '可审核', [])).toBe(true)
+    expect(命中作业关注(行, '可审核', ['库存未知'])).toBe(false)
+    expect(命中作业关注(行, '审核待处理', ['库存未知'])).toBe(true)
+    行.stage = '异常'
+    expect(命中作业关注(行, '可审核', [])).toBe(false)
   })
 })
 

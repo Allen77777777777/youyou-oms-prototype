@@ -16,6 +16,8 @@ const 已实现页面: Record<string, RouteRecordRaw['component']> = {
   'oms-logistics-orders': () => import('@/页面/仓配管理/物流下单页面.vue'),
   'oms-order-rules': () => import('@/页面/订单规则/订单规则页面.vue'),
   'oms-logistics-channels': () => import('@/页面/仓配管理/物流渠道管理页面.vue'),
+  'oms-warehouse-inventory': () => import('@/页面/三方仓库存/三方仓库存页面.vue'),
+  'oms-inventory-aging': () => import('@/页面/三方仓库龄/三方仓库龄页面.vue'),
 }
 
 const 页面路由: RouteRecordRaw[] = 获取全部页面菜单().map((菜单) => ({
