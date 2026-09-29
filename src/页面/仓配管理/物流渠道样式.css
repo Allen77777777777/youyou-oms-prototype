@@ -1,0 +1,94 @@
+.渠道页面 { height:100%; min-height:0; display:flex; flex-direction:column; background:white; border:1px solid var(--yy-border); border-radius:4px; overflow:hidden; font-size:13px; }
+.渠道分类 { flex-shrink:0; padding:0 16px; }
+.渠道分类 :deep(.el-tabs__header) { margin:0; }
+.渠道分类 :deep(.el-tabs__nav-wrap::after) { height:1px; background:var(--yy-border); }
+.渠道分类 :deep(.el-tabs__item) { height:47px; font-size:13px; padding:0 22px; }
+.渠道分类 :deep(.el-tabs__item small) { font-size:10px; margin-left:7px; color:#9ba4b0; background:#f3f4f6; border-radius:2px; padding:1px 4px; }
+.渠道分类 :deep(.el-tabs__content) { display:none; }
+.渠道工作区 { display:flex; flex:1; min-height:0; min-width:0; }
+.渠道导航 { width:204px; flex:0 0 204px; border-right:1px solid var(--yy-border); padding:16px 10px; overflow-y:auto; background:#fcfdff; }
+.导航标题 { display:flex; align-items:center; gap:7px; padding:0 3px; margin-bottom:16px; color:var(--yy-text-heading); }
+.导航标题 .el-icon { color:#6f7b8d; font-size:17px; }
+.导航标题 span { margin-left:auto; color:#8b96a6; font-size:12px; }
+.渠道导航 :deep(.el-input) { margin-bottom:13px; }
+.渠道导航 :deep(.el-tree) { background:transparent; --el-tree-node-hover-bg-color:#f1f5fc; --el-tree-text-color:#344054; }
+.渠道导航 :deep(.el-tree-node__content) { height:36px; border-radius:4px; font-size:13px; margin-bottom:2px; }
+.渠道导航 :deep(.el-tree-node.is-current > .el-tree-node__content) { background:#eaf3ff; color:#1681ed; }
+.渠道导航 :deep(.el-tree-node__expand-icon) { padding:6px; }
+.导航树行 { display:flex; align-items:center; gap:6px; min-width:0; flex:1; padding-right:8px; }
+.导航树行 span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.导航树行 small { margin-left:auto; color:#8490a1; font-size:11px; }
+.渠道主体 { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+.渠道筛选 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:16px 14px 13px; flex-shrink:0; }
+.渠道关键词 { width:264px; flex:0 0 264px; }
+.渠道账号筛选 { width:182px; flex:0 0 182px; }
+.渠道状态筛选 { width:113px; flex:0 0 113px; }
+.渠道国家筛选 { width:151px; flex:0 0 151px; }
+.渠道筛选 .el-button + .el-button { margin-left:0; }
+.渠道查询动作 { display:flex; gap:8px; flex-shrink:0; }
+.渠道工具栏 { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 14px; border-top:1px solid #f0f2f5; border-bottom:1px solid var(--yy-border); background:#fafbfd; flex-shrink:0; }
+.渠道工具左 { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.渠道工具左 .el-button + .el-button { margin-left:0; }
+.已选提示 { color:#818a99; font-size:12px; margin-left:5px; }
+.已选提示 b { color:#3088e8; margin:0 3px; }
+.渠道范围行 { display:flex; justify-content:space-between; gap:12px; color:#8a94a2; font-size:12px; padding:10px 14px; flex-shrink:0; }
+.渠道范围行 span:first-child { color:#44536a; display:flex; align-items:center; gap:8px; }
+.渠道范围行 .el-icon { color:#b5beca; font-size:10px; }
+.渠道表格容器 { flex:1; min-height:180px; min-width:0; }
+.渠道表格 { font-size:12px; --el-table-header-bg-color:#f7f8fb; --el-table-header-text-color:var(--yy-text-heading); --el-table-row-hover-bg-color:#f3f7ff; --el-table-border-color:#edf0f5; }
+.渠道表格 :deep(th.el-table__cell) { height:39px; font-weight:600; }
+.渠道表格 :deep(td.el-table__cell) { padding:10px 0; height:66px; }
+.渠道表格 :deep(.cell) { padding:0 11px; line-height:19px; }
+.渠道表格 :deep(.el-button.is-link) { font-size:12px; }
+.渠道表格 :deep(.el-button + .el-button) { margin-left:9px; }
+.渠道名称链接 { border:0; background:none; color:#2585e6; padding:0; cursor:pointer; font-size:13px; text-align:left; max-width:100%; word-break:break-word; }
+.渠道名称链接:hover { text-decoration:underline; }
+.渠道次行 { color:#8a94a2; font-size:11px; margin-top:3px; line-height:17px; }
+.渠道代码 { font-family:Consolas,'Microsoft YaHei',monospace; font-size:11px; }
+.渠道时间 { color:#627086; font-size:11px; font-variant-numeric:tabular-nums; }
+.渠道开关文字 { font-size:11px; margin-left:5px; color:#6b7585; }
+.渠道表格 :deep(.el-switch) { --el-switch-on-color:#409eff; height:22px; }
+.渠道表格 :deep(.el-switch__core) { min-width:29px; height:17px; }
+.渠道表格 :deep(.el-switch__action) { width:13px; height:13px; }
+.渠道表格 :deep(.el-switch.is-checked .el-switch__action) { left:calc(100% - 14px); }
+.渠道分页 { border-top:1px solid var(--yy-border); padding:12px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; flex-shrink:0; }
+.渠道分页 > span { font-size:11px; color:#99a2af; }
+.渠道分页 :deep(.el-pagination) { --el-pagination-font-size:12px; }
+.渠道空态 { display:flex; flex-direction:column; align-items:center; padding:50px 0; gap:8px; }
+.渠道配置正文 { max-height:70vh; overflow-y:auto; padding:0 14px 8px 2px; }
+.渠道配置摘要 { display:flex; justify-content:space-between; align-items:center; padding:0 2px 14px; margin-bottom:20px; border-bottom:1px solid var(--yy-border-light); color:#68778d; font-size:12px; }
+.渠道表单分区 { margin-bottom:24px; }
+.渠道表单分区 h3 { display:flex; align-items:center; flex-wrap:wrap; gap:12px; border-left:3px solid #409eff; padding-left:9px; font-size:14px; line-height:17px; margin:0 0 19px; color:var(--yy-text-heading); font-weight:600; }
+.渠道表单分区 h3 span { font-size:12px; font-weight:normal; color:#8a94a2; }
+.渠道表单三列 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); column-gap:24px; padding-left:12px; }
+.渠道跨两列 { grid-column:span 2; }
+.渠道跨三列 { grid-column:span 3; }
+.渠道编辑表单 :deep(.el-form-item) { margin-bottom:17px; min-width:0; }
+.渠道编辑表单 :deep(.el-form-item__label) { font-size:12px; color:#626f83; line-height:17px; margin-bottom:7px; }
+.渠道编辑表单 :deep(.el-radio) { margin-right:18px; }
+.渠道编辑表单 :deep(.el-radio__label) { font-size:12px; }
+.渠道编辑表单 :deep(.el-input-number) { width:100%; }
+.渠道编辑表单 :deep(.el-input-number .el-input__inner) { text-align:left; }
+.渠道数值范围 { display:flex; align-items:center; gap:12px; width:100%; }
+.渠道数值范围 > span { flex-shrink:0; color:#9099a6; }
+.渠道面单设置 { padding-left:12px; }
+.渠道面单设置 p,.渠道辅助说明 { font-size:12px; color:#8a94a2; line-height:1.8; margin:8px 0 0; }
+.渠道标发说明 { margin:0 0 12px 12px; padding:10px 12px; border:1px solid #d9e9ff; border-radius:4px; background:#f4f8ff; color:#536b8a; font-size:12px; line-height:1.7; }
+.渠道标发表 { margin-left:12px; width:calc(100% - 12px); font-size:12px; --el-table-header-bg-color:#f7f9fc; --el-table-header-text-color:var(--yy-text-heading); }
+.渠道标发表 :deep(.el-table__cell) { padding:9px 0; }
+.渠道标发表 :deep(.el-input),.渠道标发表 :deep(.el-select) { width:100%; }
+.渠道标发核验 { display:block; font-size:11px; line-height:16px; margin-top:3px; color:#b7791f; }
+.渠道弹窗页脚说明 { float:left; line-height:32px; font-size:12px; color:#98a1ae; }
+.渠道确认主文 { font-size:14px; margin:2px 0 18px; color:#58677e; }
+.渠道确认主文 strong { color:#2684e3; font-size:18px; }
+.渠道确认表 { margin-top:17px; font-size:12px; }
+.渠道结果统计 { display:flex; gap:28px; padding:8px 0 20px; font-size:13px; color:#778296; }
+.渠道结果统计 b { margin-left:5px; color:var(--yy-text-heading); }
+.渠道结果统计 .结果成功 { color:#269c64; }
+.渠道结果统计 .结果失败 { color:#e5484d; }
+.渠道导出选项 { display:flex; flex-direction:column; align-items:flex-start; margin:18px 0; }
+.渠道日志对象 { font-size:14px; color:var(--yy-text-heading); margin:0 0 20px; }
+.渠道日志对象 span { margin-left:14px; font-size:12px; color:#8490a1; }
+.渠道日志差异 { padding:16px 22px; background:#fafbfd; }
+.渠道日志差异 strong { color:var(--yy-text-heading); font-size:12px; }
+@media (max-width:1440px) { .渠道导航 { width:192px; flex-basis:192px; } .渠道关键词 { width:244px; flex-basis:244px; } .渠道筛选 { padding:13px 12px; } .渠道工具栏 { padding:9px 12px; } .渠道分页 { padding:10px 12px; justify-content:flex-end; } .渠道分页 > span { display:none; } }

@@ -40,6 +40,11 @@ describe('仓配执行门禁', () => {
 })
 describe('物流渠道草案校验', () => {
   const 渠道: 物流渠道 = { id: 'a', name: '演示', code: 'DEMO_A', provider: '万邑通', account: '演示账号 01', warehouse: '美西演示仓', providerCode: 'DEMO_A', countries: ['US'], enabled: false, labelMode: '仓库回传', updatedAt: '' }
+  it('外部代码为空不拦截保存，也不把多个空代码当成重复来源', () => {
+    const 原记录 = { ...渠道, providerCode: null }
+    expect(校验物流渠道({ ...原记录, id: 'b', code: 'DEMO_B' }, [原记录])).toBe('')
+    expect(校验物流渠道({ ...原记录, providerCode: undefined }, [])).toBe('')
+  })
   it('拒绝重复代码、重复映射以及平台面单', () => {
     expect(校验物流渠道({ ...渠道, id: 'b' }, [渠道])).toContain('代码已存在')
     expect(校验物流渠道({ ...渠道, id: 'b', code: 'DEMO_B' }, [渠道])).toContain('组合已存在')

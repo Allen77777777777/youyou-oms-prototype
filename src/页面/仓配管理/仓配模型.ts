@@ -89,14 +89,14 @@ export function 创建仓配样例(kind: 作业类型): 仓配单据[] {
 
 export interface 物流渠道 {
   id: string; name: string; code: string; provider: string; account: string; warehouse: string
-  providerCode: string; countries: string[]; enabled: boolean; labelMode: string; updatedAt: string
+  providerCode?: string | null; countries: string[]; enabled: boolean; labelMode: string; updatedAt: string
 }
 export function 校验物流渠道(channel: 物流渠道, channels: 物流渠道[]): string {
-  if (![channel.name, channel.code, channel.provider, channel.account, channel.warehouse, channel.providerCode].every(v => v.trim())) return '请完整填写渠道名称、代码、服务商、账号、仓库与服务商渠道代码'
+  if (![channel.name, channel.code, channel.provider, channel.account, channel.warehouse].every(v => v.trim())) return '请完整填写渠道名称、代码、服务商、账号与仓库'
   if (!/^[A-Z0-9_-]{2,40}$/.test(channel.code)) return '渠道代码需为 2–40 位大写字母、数字、下划线或短横线'
   if (!channel.countries.length) return '请至少选择一个目的国家或地区'
   if (channels.some(c => c.id !== channel.id && c.code === channel.code)) return '渠道代码已存在，请使用唯一代码'
-  if (channels.some(c => c.id !== channel.id && c.provider === channel.provider && c.account === channel.account && c.warehouse === channel.warehouse && c.providerCode === channel.providerCode)) return '该服务商、账号、仓库与服务商渠道代码组合已存在'
+  if (channel.providerCode && channels.some(c => c.id !== channel.id && c.provider === channel.provider && c.account === channel.account && c.warehouse === channel.warehouse && c.providerCode === channel.providerCode)) return '该服务商、账号、仓库与服务商渠道代码组合已存在'
   if (channel.labelMode !== '仓库回传') return '当前原型仅开放仓库回传面单的三方仓物流渠道'
   return ''
 }

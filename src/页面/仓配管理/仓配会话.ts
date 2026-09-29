@@ -1,11 +1,13 @@
 import { ref, watch } from 'vue'
 import { 共享订单, 仓库执行记录, 核查演示仓库结果 } from '../订单处理/演示会话'
-import { 创建仓配样例, 取得操作拦截, 执行样例动作, 演示时间, 仓储服务商, type 仓配单据, type 作业动作, type 物流渠道 } from './仓配模型'
+import { 创建仓配样例, 取得操作拦截, 执行样例动作, 演示时间, type 仓配单据, type 作业动作 } from './仓配模型'
+
+import { 创建渠道配置样例, type 渠道配置, type 渠道操作记录 } from './物流渠道配置'
 
 export const 仓库会话单据 = ref<仓配单据[]>(创建仓配样例('仓库'))
 export const 物流会话单据 = ref<仓配单据[]>(创建仓配样例('物流'))
-export const 渠道会话 = ref<物流渠道[]>(仓储服务商.flatMap((p, i) => [0, 1].map(n => ({ id: `channel-${i}-${n}`, name: `${p} · ${n ? '经济配送' : '标准配送'}`, code: `DEMO_WH_${i + 1}_${n + 1}`, provider: p, account: `演示账号 ${String(i % 3 + 1).padStart(2, '0')}`, warehouse: n ? '美东演示仓' : '美西演示仓', providerCode: `DEMO-SERVICE-${n + 1}`, countries: n ? ['US'] : ['US', 'CA'], enabled: i !== 4 || n === 0, labelMode: '仓库回传', updatedAt: '2026-09-12 09:00:00' }))))
-export const 渠道会话审计 = ref<Array<{ code: string; action: string; time: string; detail: string }>>([])
+export const 渠道会话 = ref<渠道配置[]>(创建渠道配置样例())
+export const 渠道会话审计 = ref<渠道操作记录[]>([])
 
 function 标准时间(time: string) {
   const date = new Date(time.replace(' UTC+8', '+08:00').replace(' UTC', 'Z').replace(' ', 'T'))
