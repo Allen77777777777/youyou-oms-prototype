@@ -93,7 +93,7 @@ export function 命中出库筛选(row: 仓配单据, filter: 出库筛选条件
 export function 排序出库单据(rows: 仓配单据[], sort: 列表排序条件): 仓配单据[] {
   if (!sort.field) return rows
   return 排序列表(rows, row => {
-    const d = 取得出库详情(row), value = sort.field === 'updatedAt' ? row.updatedAt : sort.field === 'createdAt' ? row.createdAt : d[sort.field as 出库筛选条件['dateType']]
+    const d = 取得出库详情(row), value = sort.field === 'updatedAt' ? row.updatedAt : sort.field === 'createdAt' ? row.createdAt : d[sort.field as Exclude<出库筛选条件['dateType'], 'createdAt'>]
     return 读取排序时刻(typeof value === 'string' ? value : undefined, true)
   }, sort.direction, row => row.id)
 }
