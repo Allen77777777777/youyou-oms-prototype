@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-10",
+  "widths": [
+    1280,
+    1440,
+    1920
+  ],
+  "pageOverflow": false,
+  "annotated1280": {
+    "contentWidth": 827,
+    "contentScrollWidth": 827
+  },
+  "final1440": {
+    "contentWidth": 1349,
+    "contentScrollWidth": 1349,
+    "allItems": 2,
+    "sections": 9
+  },
+  "verified": [
+    "详情页签复用",
+    "九区导航",
+    "库存只读弹窗",
+    "独立标发记录跳转",
+    "历史仓单不可查看反馈",
+    "原型标注"
+  ],
+  "data": "本地虚构评审数据"
+}

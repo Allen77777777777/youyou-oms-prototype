@@ -14,7 +14,7 @@ const stubs = {
 
 describe('仓库与渠道分开选择', () => {
   it('先选仓库，渠道按服务商和账号隔离，切仓清空渠道且不自动取首个', async () => {
-    const wrapper = mount(WarehouseChannelSelect, { props: { routes: 路由, warehouse: '', channel: '' }, global: { stubs } })
+    const wrapper = mount(WarehouseChannelSelect, { props: { routes: 路由, warehouse: '', channel: '' }, global: { stubs, directives: { prototype: {} } } })
     expect(wrapper.get('[aria-label="物流渠道"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[aria-label="发货仓库"]').setValue(路由仓库键(基础路由))
     expect(wrapper.emitted('update:channel')?.[0]).toEqual([''])
@@ -35,7 +35,7 @@ describe('仓库与渠道分开选择', () => {
 
   it('切换服务商同时清账号、仓库和渠道，新候选不混入同名仓的其他服务商', async () => {
     const 谷仓路由: 订单路由 = { ...基础路由, warehouseProvider: '谷仓', warehouseAccount: '账号丙', shippingChannel: '谷仓渠道', shippingChannelCode: 'GC-A' }
-    const wrapper = mount(WarehouseChannelSelect, { props: { routes: [...路由, 谷仓路由], warehouse: 路由仓库键(基础路由), channel: 'A' }, global: { stubs } })
+    const wrapper = mount(WarehouseChannelSelect, { props: { routes: [...路由, 谷仓路由], warehouse: 路由仓库键(基础路由), channel: 'A' }, global: { stubs, directives: { prototype: {} } } })
     await wrapper.get('[aria-label="仓储服务商"]').setValue('谷仓')
     expect(wrapper.emitted('update:warehouse')?.slice(-1)[0]).toEqual([''])
     expect(wrapper.emitted('update:channel')?.slice(-1)[0]).toEqual([''])

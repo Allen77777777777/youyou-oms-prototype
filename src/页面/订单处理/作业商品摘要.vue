@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { ElButton, ElTooltip } from 'element-plus'
 import OrderProductImage from '../全渠道订单/商品缩略图.vue'
+import PlatformProductTitle from '../全渠道订单/平台商品标题.vue'
 import { 格式化金额, 获取订单商品数量 } from '../全渠道订单/订单工具'
 import type { 全渠道订单 } from '../全渠道订单/类型'
 
@@ -18,9 +19,7 @@ const 展开 = ref(false)
     <article v-for="商品 in (展开 ? order.items : order.items.slice(0, 1))" :key="商品.externalLineId" class="商品明细">
       <OrderProductImage :src="商品.itemImageUrl" hover-preview />
       <div class="商品资料">
-        <ElTooltip :content="商品.platformItemTitle || 商品.systemItemName || '未提供商品名称'" placement="top">
-          <strong class="商品标题" tabindex="0">{{ 商品.platformItemTitle || 商品.systemItemName || '未提供商品名称' }}</strong>
-        </ElTooltip>
+        <PlatformProductTitle :order="order" :item="商品" compact />
         <div><span>平台 SKU</span><b>{{ 商品.platformSku || '—' }}</b></div>
         <div><span>系统 SKU</span><b>{{ 商品.systemSku || '—' }}</b></div>
         <dl class="商品金额" :aria-label="sourceOrder ? '来源订单商品行金额' : '订单商品行金额'">

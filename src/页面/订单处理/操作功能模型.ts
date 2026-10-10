@@ -296,5 +296,10 @@ export function 同步演示仓库状态(出库单号: string): 命令结果 {
     else if (正常主链 && 订单.processingStatus === '待推单' && 有效.length && 有效.every(项 => 仓库执行记录.value.some(仓单 => 仓单.履约单号 === 项.fulfillmentOrderNo && !仓单.待核查 && ['待出库', '出库异常', '已出库'].includes(仓单.状态)))) 订单.processingStatus = '待发货'
     记录操作(订单, '同步仓库状态', `${出库单号}：${原状态} → ${查找.状态}；订单当前${订单.processingStatus}；取得明确仓库事实，不自动解除异常或回退终态。仅本地演示查询。`)
   }
+  if (查找.状态 === '已出库' && 结果 === '已出库') {
+    // 该固定查询回放明确命中本出库对象；固化本次已知累计事实，不能让历史仓单读到随后变化的履约摘要。
+    const 履约 = 来源[0]?.fulfillmentOrders.find(项 => 项.fulfillmentOrderNo === 查找.履约单号)
+    if (履约) 查找.出库事实 = { planned: 查找.出库事实?.planned ?? 履约.plannedQuantity, shipped: 履约.shippedQuantity, tracking: 履约.trackingNumber || null, shippedAt: 履约.shippedAt || null }
+  }
   return { 成功: true, 信息: 结果 === '拒绝截单' && 原状态 === '取消中' ? 查找.原因 : 查找.状态 === '已取消' && 原状态 === '取消中' ? '仓库已确认截单成功，请继续处理来源订单' : `仓库状态已同步：${查找.状态}`, 对象号: 出库单号 }
 }

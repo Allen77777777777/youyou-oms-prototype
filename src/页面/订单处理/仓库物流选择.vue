@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { ElFormItem, ElOption, ElSelect } from 'element-plus'
 import type { 订单路由 } from '../全渠道订单/类型'
 import { 路由仓库键 } from './仓库物流选择模型'
+import { 关联原型标注 } from './关联原型标注'
 
 const props = defineProps<{ routes: readonly 订单路由[]; warehouse: string; channel: string }>()
 const emit = defineEmits<{ 'update:warehouse': [value: string]; 'update:channel': [value: string] }>()
@@ -23,17 +24,17 @@ function 选择账号(value: string) { 账号.value = value; emit('update:wareho
 </script>
 
 <template>
-  <div class="仓库物流字段">
-    <ElFormItem label="仓储服务商" required><ElSelect :model-value="服务商" placeholder="请选择仓储服务商" aria-label="仓储服务商" @update:model-value="选择服务商"><ElOption v-for="value in 服务商选项" :key="value" :value="value" :label="value" /></ElSelect></ElFormItem>
-    <ElFormItem label="仓库账号" required><ElSelect :model-value="账号" placeholder="请选择仓库账号" aria-label="仓库账号" @update:model-value="选择账号"><ElOption v-for="value in 账号选项" :key="value" :value="value" :label="value" /></ElSelect></ElFormItem>
-    <ElFormItem label="发货仓库" required>
+  <div v-prototype="关联原型标注.路由" class="仓库物流字段">
+    <ElFormItem v-prototype="关联原型标注.服务商账号" label="仓储服务商" required><ElSelect :model-value="服务商" placeholder="请选择仓储服务商" aria-label="仓储服务商" @update:model-value="选择服务商"><ElOption v-for="value in 服务商选项" :key="value" :value="value" :label="value" /></ElSelect></ElFormItem>
+    <ElFormItem v-prototype="关联原型标注.服务商账号" label="仓库账号" required><ElSelect :model-value="账号" placeholder="请选择仓库账号" aria-label="仓库账号" @update:model-value="选择账号"><ElOption v-for="value in 账号选项" :key="value" :value="value" :label="value" /></ElSelect></ElFormItem>
+    <ElFormItem v-prototype="关联原型标注.仓库" label="发货仓库" required>
       <ElSelect :model-value="warehouse" placeholder="请选择发货仓库" aria-label="发货仓库" @update:model-value="选择仓库">
         <ElOption v-for="[key, route] in 仓库选项" :key="key" :value="key" :label="route.warehouse">
           <span>{{ route.warehouse }}</span><small>{{ route.warehouseAccount }}</small>
         </ElOption>
       </ElSelect>
     </ElFormItem>
-    <ElFormItem label="物流渠道" required>
+    <ElFormItem v-prototype="关联原型标注.渠道" label="物流渠道" required>
       <ElSelect :model-value="channel" :disabled="!warehouse" :placeholder="warehouse ? '请选择物流渠道' : '请先选择发货仓库'" aria-label="物流渠道" no-data-text="该仓库暂无可选物流渠道" @update:model-value="emit('update:channel', $event)">
         <ElOption v-for="route in 渠道选项" :key="route.shippingChannelCode" :value="route.shippingChannelCode" :label="route.shippingChannel" />
       </ElSelect>

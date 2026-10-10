@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElTooltip } from 'element-plus'
-import type { 原型标注 } from '@/类型/标注'
+import { 订单处理标注 } from './订单处理原型标注'
 import { 合并来源订单标志, 订单标志短释义, type 订单标志, type 订单标志代码 } from './订单标志模型'
 
 const props = defineProps<{ flags: 订单标志[] }>()
@@ -18,15 +18,7 @@ function closeOnEscape(event: KeyboardEvent) {
 onMounted(() => document.addEventListener('keydown', closeOnEscape))
 onUnmounted(() => document.removeEventListener('keydown', closeOnEscape))
 function tooltip(flag: 订单标志) { return 订单标志短释义[flag.code] }
-const 标志标注: 原型标注 = {
-  id: 'oms.processing.order-flags', 标题: '订单标志展示', 说明: '依据订单标志 PRD 展示退、消、信、言；读取同源本地虚构证据，不代表真实打标、接口或订单规则已实现。',
-  分类: '字段', 锚点: 'oms.processing.order-flags', 路由: '/oms/self-fulfillment/processing', 版本: '2026-10-09', 状态: '待评审', 事实等级: '合理假设',
-  prd引用: ['PRD/订单标志功能PRD.md#3-显示位置', 'PRD/订单标志功能PRD.md#5-各标志判定条件'],
-  数据来源: ['eBay 标准订单的买家留言，及系统订单号、店铺、稳定平台订单 ID 完全匹配的独立虚构专业／消息证据。'],
-  系统动作: ['同标志只显示一次，按退、消、信、言、合、拆排序；无命中不显示占位。', '所有来源订单的投影可取并集；提示只显示对应短释义，不显示来源订单号或命中依据；底层来源仍保留，标志不改变审核资格或处理状态。'],
-  异常处理: ['证据不可靠、不完整、身份不匹配或同版本冲突不猜测；不解析原因、日志、商品数或包裹数。', '本轮不生成合／拆成功样例；缺失消息证据不等于明确无消息。'],
-  验收要点: ['22×22 像素、4 像素间距；鼠标悬停与键盘聚焦只显示 PRD 对应短释义，Esc 关闭。'],
-}
+const 标志标注 = 订单处理标注.标志
 </script>
 
 <template>

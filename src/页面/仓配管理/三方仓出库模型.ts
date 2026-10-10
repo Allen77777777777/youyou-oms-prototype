@@ -1,7 +1,21 @@
 import { 命中多选, 命中字段搜索, 校验字段搜索, 命中时间范围, 校验时间范围, 排序列表, 读取排序时刻, type 列表排序条件 } from '@/组件/筛选/筛选工具'
 import type { 全渠道订单, 脱敏收件信息, 订单路由 } from '../全渠道订单/类型'
 import { 关联演示数据 } from '../订单处理/库存关联模型'
-import { 创建仓配样例, type 仓配单据, type 历史记录, type 调用记录 } from './仓配模型'
+import { 创建仓配样例, type 仓配单据, type 历史记录, type 调用记录, type 作业动作 } from './仓配模型'
+
+export type 出库作业动作 = 作业动作 | '截单'
+export interface 出库截单影响范围 {
+  outboundNo: string; fulfillmentNo: string; provider: string; warehouse: string; account: string; status: string
+  sourceOrders: Array<出库来源订单 & { processingStatus: string | null }>
+  quantitySummary: 出库详情['quantitySummary']; isShared: boolean; versions: Record<string, number>; blocker: string
+}
+
+/** 仅补充已定义共享场景的固定虚构能力证据，不构成任何服务商的通用能力声明。 */
+export function 命中截单能力样例(row: 仓配单据): boolean {
+  return row.id === 'shared-OUT-DEMO-ACTION-SHARED' && row.no === 'OUT-DEMO-ACTION-SHARED'
+    && row.fulfillment === 'FL-DEMO-ACTION-SHARED' && row.provider === '谷仓'
+    && row.account === '谷仓 · 北美主体' && row.warehouse === '谷仓美东仓'
+}
 
 export interface 出库来源订单 { systemOrderNo: string; platformOrderNo: string; platform: string; shopId: string; shop: string }
 export interface 出库商品明细 {
@@ -14,10 +28,11 @@ export interface 出库详情 {
   warehouseStatusRaw: string | null; submittedAt: string | null; acceptedAt: string | null; operationStartedAt: string | null; shippedAt: string | null; lastSyncedAt: string | null
   actualWeight: number | null; weightUnit: string | null; length: number | null; width: number | null; height: number | null; dimensionUnit: string | null; trackingUrl: string | null; labelFileRef: string | null
   snapshotReliable: boolean; compositionReason: string; history: 历史记录[]; attempts: 调用记录[]
+  quantitySummary: { plannedQuantity: number | null; shippedQuantity: number | null; unit: string | null }
 }
 export type 出库快照 = Omit<出库详情, 'history' | 'attempts'>
 function 空详情(): 出库详情 {
-  return { sourceOrders: [], items: [], recipient: null, route: null, warehouseStatusRaw: null, submittedAt: null, acceptedAt: null, operationStartedAt: null, shippedAt: null, lastSyncedAt: null, actualWeight: null, weightUnit: null, length: null, width: null, height: null, dimensionUnit: null, trackingUrl: null, labelFileRef: null, snapshotReliable: false, compositionReason: '本次出库的逐商品分配尚未核实', history: [], attempts: [] }
+  return { sourceOrders: [], items: [], recipient: null, route: null, warehouseStatusRaw: null, submittedAt: null, acceptedAt: null, operationStartedAt: null, shippedAt: null, lastSyncedAt: null, actualWeight: null, weightUnit: null, length: null, width: null, height: null, dimensionUnit: null, trackingUrl: null, labelFileRef: null, snapshotReliable: false, compositionReason: '本次出库的逐商品分配尚未核实', history: [], attempts: [], quantitySummary: { plannedQuantity: null, shippedQuantity: null, unit: null } }
 }
 export function 取得出库详情(row: 仓配单据): 出库详情 {
   if (row.outboundDetail) return { ...row.outboundDetail, history: row.history, attempts: row.attempts }
@@ -32,9 +47,10 @@ export function 创建推单出库快照(orders: 全渠道订单[], fulfillmentN
   const fulfillment = orders[0]?.fulfillmentOrders.find(f => f.fulfillmentOrderNo === fulfillmentNo)
   const sourceOrders = orders.map(order => ({ systemOrderNo: order.systemOrderNo, platformOrderNo: order.platformOrderNo, platform: order.platformCode, shopId: order.storeId, shop: order.storeName }))
   const planned = orders.reduce((sum, order) => sum + order.items.reduce((sub, item) => sub + (item.fulfillableQuantity ?? 0), 0), 0)
-  const reliable = !!fulfillment && orders.length > 0 && planned > 0 && orders.every(order => {
+  const routes = orders.map(order => order.fulfillmentOrders.find(f => f.fulfillmentOrderNo === fulfillmentNo)?.route)
+  const reliable = !!fulfillment && orders.length > 0 && planned > 0 && new Set(routes.map(route => JSON.stringify(route))).size === 1 && new Set(orders.map(order => JSON.stringify(order.address))).size === 1 && orders.every(order => {
     const f = order.fulfillmentOrders.find(candidate => candidate.fulfillmentOrderNo === fulfillmentNo)
-    return !!f && f.plannedQuantity === planned && f.shippedQuantity === 0 && order.items.length > 0 && order.items.every(item => Number.isInteger(item.fulfillableQuantity) && item.fulfillableQuantity! >= 0 && item.fulfillableQuantity! <= item.orderedQuantity && !!item.systemSku && item.skuResolutionStatus === '成功')
+    return !!f && f.plannedQuantity === planned && f.shippedQuantity === 0 && order.items.length > 0 && new Set(order.items.map(item => item.externalLineId)).size === order.items.length && order.items.every(item => !!item.externalLineId && Number.isInteger(item.fulfillableQuantity) && item.fulfillableQuantity! >= 0 && item.fulfillableQuantity! <= item.orderedQuantity && !!item.systemSku && item.skuResolutionStatus === '成功')
   })
   const items: 出库商品明细[] = reliable ? orders.flatMap(order => order.items.filter(item => item.fulfillableQuantity! > 0).map(item => {
     const scope = 关联演示数据.scopes.filter(candidate => candidate.provider === fulfillment!.route.warehouseProvider && candidate.account === fulfillment!.route.warehouseAccount && candidate.warehouse === fulfillment!.route.warehouse)
@@ -47,11 +63,12 @@ export function 创建推单出库快照(orders: 全渠道订单[], fulfillmentN
     return { id: JSON.stringify([order.systemOrderNo, item.externalLineId]), fulfillmentItemId: null, externalLineId: item.externalLineId || null, sourceOrderNo: order.systemOrderNo, platformSku: item.platformSku ?? null, systemSku: item.systemSku ?? null, warehouseSku, goods: item.systemItemName || item.platformItemTitle || '', plannedQuantity: item.fulfillableQuantity!, shippedQuantity: 0, unit: units.length === 1 ? units[0]! : null, lineStatus: '待出库' }
   })) : []
   const { history: _history, attempts: _attempts, ...base } = 空详情()
-  return { ...base, sourceOrders, items, recipient: orders[0] && new Set(orders.map(order => JSON.stringify(order.address))).size === 1 ? JSON.parse(JSON.stringify(orders[0].address)) as 脱敏收件信息 : null, route: fulfillment ? { ...fulfillment.route } : null, submittedAt, snapshotReliable: reliable, compositionReason: reliable ? '' : '本次出库的逐商品分配尚未核实' }
+  const unit = items.length && items.every(item => !!item.unit && item.unit === items[0]!.unit) ? items[0]!.unit : null
+  return { ...base, sourceOrders, items, recipient: orders[0] && new Set(orders.map(order => JSON.stringify(order.address))).size === 1 ? JSON.parse(JSON.stringify(orders[0].address)) as 脱敏收件信息 : null, route: fulfillment ? { ...fulfillment.route } : null, submittedAt, snapshotReliable: reliable, compositionReason: reliable ? '' : '本次出库的逐商品分配尚未核实', quantitySummary: { plannedQuantity: reliable ? planned : null, shippedQuantity: reliable ? 0 : null, unit } }
 }
 export function 创建历史出库快照(orders: 全渠道订单[], fulfillmentNo: string): 出库快照 {
   const base = 创建推单出库快照(orders, fulfillmentNo, '')
-  return { ...base, items: [], snapshotReliable: false, compositionReason: '尚未取得本次出库的逐商品分配', submittedAt: null }
+  return { ...base, items: [], snapshotReliable: false, compositionReason: '尚未取得本次出库的逐商品分配', submittedAt: null, quantitySummary: { plannedQuantity: null, shippedQuantity: null, unit: null } }
 }
 
 export const 出库搜索字段 = [
@@ -60,7 +77,7 @@ export const 出库搜索字段 = [
 ]
 export interface 出库筛选条件 {
   keyword: string; searchType: string; searchMatch: 'contains' | 'exact'; provider: string[]; warehouse: string[]; account: string[]; platform: string[]; shop: string[]; channel: string[]; review: string[]
-  dates: null | string[]; dateType: 'submittedAt' | 'acceptedAt' | 'shippedAt' | 'lastSyncedAt' | 'createdAt'
+  dates: null | string[]; dateType: 'submittedAt' | 'acceptedAt' | 'operationStartedAt' | 'shippedAt' | 'lastSyncedAt' | 'createdAt' | 'updatedAt'
 }
 export function 默认出库筛选(): 出库筛选条件 { return { keyword: '', searchType: 'no', searchMatch: 'contains', provider: [], warehouse: [], account: [], platform: [], shop: [], channel: [], review: [], dates: null, dateType: 'submittedAt' } }
 export function 校验出库筛选(filter: 出库筛选条件): string | undefined { return 校验字段搜索(filter.keyword, filter.searchMatch, 'identifier') || 校验时间范围(filter.dates) }
@@ -85,7 +102,7 @@ export function 命中出库筛选(row: 仓配单据, filter: 出库筛选条件
     return 命中字段搜索(values, filter.keyword, filter.searchMatch)
   })
   const headerValue = type === 'no' ? row.no : type === 'externalNo' ? row.externalNo : type === 'fulfillment' ? row.fulfillment : row.tracking
-  const date = filter.dateType === 'createdAt' ? row.createdAt : d[filter.dateType] || undefined
+  const date = filter.dateType === 'createdAt' ? row.createdAt : filter.dateType === 'updatedAt' ? row.updatedAt : d[filter.dateType] || undefined
   return sourceMatches && (sourceField || 命中字段搜索(headerValue, filter.keyword, filter.searchMatch)) && 命中多选(filter.provider, row.provider)
     && 命中多选(filter.warehouse, 出库仓库筛选键(row)) && 命中多选(filter.account, 出库账号筛选键(row)) && 命中多选(filter.channel, 出库渠道筛选键(row))
     && (!filter.review.length || filter.review.some(item => 取得出库关注(row).includes(item))) && 命中时间范围(date, filter.dates, true)
@@ -93,7 +110,7 @@ export function 命中出库筛选(row: 仓配单据, filter: 出库筛选条件
 export function 排序出库单据(rows: 仓配单据[], sort: 列表排序条件): 仓配单据[] {
   if (!sort.field) return rows
   return 排序列表(rows, row => {
-    const d = 取得出库详情(row), value = sort.field === 'updatedAt' ? row.updatedAt : sort.field === 'createdAt' ? row.createdAt : d[sort.field as Exclude<出库筛选条件['dateType'], 'createdAt'>]
+    const d = 取得出库详情(row), value = sort.field === 'updatedAt' ? row.updatedAt : sort.field === 'createdAt' ? row.createdAt : d[sort.field as Exclude<出库筛选条件['dateType'], 'createdAt' | 'updatedAt'>]
     return 读取排序时刻(typeof value === 'string' ? value : undefined, true)
   }, sort.direction, row => row.id)
 }
@@ -115,12 +132,14 @@ export function 创建出库工作台样例(): 仓配单据[] {
       const secondNo = 'OMS261010M0002'
       sourceOrders.push({ systemOrderNo: secondNo, platformOrderNo: 'PO-261010-M0002', platform: 'Temu', shopId: 'sample-shop-Temu-2', shop: 'Temu · 北美配件店' })
       items[0]!.plannedQuantity = 1
-      items.push({ ...items[0]!, id: `${row.id}-item-2`, fulfillmentItemId: `${row.fulfillment}-item-2`, sourceOrderNo: secondNo, systemSku: goods[1]!.sku, warehouseSku: goods[1]!.wh, goods: goods[1]!.name, plannedQuantity: 1 })
+      items.push({ ...items[0]!, id: `${row.id}-item-2`, fulfillmentItemId: `${row.fulfillment}-item-2`, externalLineId: `LINE-${suffix}-2`, sourceOrderNo: secondNo, platformSku: `AUTO-${suffix}-2`, systemSku: goods[1]!.sku, warehouseSku: goods[1]!.wh, goods: goods[1]!.name, plannedQuantity: 1 })
       row.order = sourceOrders.map(source => source.systemOrderNo).join('、'); row.planned = 2; row.sku = items.map(item => item.systemSku).join('、')
     }
     const accepted = ['待出库', '出库异常', '已出库', '取消中', '已取消'].includes(row.status)
+    const raw = ({ 下单中: 'SAMPLE_CREATING', 下单失败: 'SAMPLE_REJECTED', 待出库: 'SAMPLE_ACCEPTED', 出库异常: 'SAMPLE_SHORT_PICK', 已出库: 'SAMPLE_SHIPPED', 取消中: 'SAMPLE_CANCEL_PENDING', 已取消: 'SAMPLE_CANCELED' } as Record<string, string>)[row.status] || null
     const { history: _history, attempts: _attempts, ...base } = 空详情()
-    row.outboundDetail = { ...base, sourceOrders, items, recipient: { fullName: 'J*** S***', mobilePhone: '+1 *** *** 0186', countryCode: countries[p]!.split(' ')[1]!, stateProvince: ['CA', 'NY', 'Bayern', 'England', 'NSW'][p]!, city: ['Los Angeles', 'New York', 'Munich', 'London', 'Sydney'][p]!, addressLine1: '*** Industrial Road', postalCode: ['90012', '10001', '80331', 'SW1A 1AA', '2000'][p]! }, route: { warehouse: row.warehouse, warehouseProvider: row.provider, warehouseAccount: row.account, shippingChannel: row.channel, shippingChannelCode: row.channelCode, labelMode: '仓配一体' }, warehouseStatusRaw: accepted ? `SAMPLE_${['CREATING', 'REJECTED', 'ACCEPTED', 'SHORT_PICK', 'SHIPPED', 'CANCEL_PENDING', 'CANCELED'][i % 7]}` : null, submittedAt: row.createdAt, acceptedAt: accepted ? row.createdAt : null, operationStartedAt: ['出库异常', '已出库'].includes(row.status) ? row.updatedAt : null, shippedAt: row.status === '已出库' ? row.updatedAt : null, lastSyncedAt: row.updatedAt, actualWeight: row.status === '已出库' && i === 4 ? 1.26 : null, weightUnit: row.status === '已出库' && i === 4 ? 'kg' : null, length: row.status === '已出库' && i === 4 ? 32 : null, width: row.status === '已出库' && i === 4 ? 24 : null, height: row.status === '已出库' && i === 4 ? 16 : null, dimensionUnit: row.status === '已出库' && i === 4 ? 'cm' : null, snapshotReliable: true, compositionReason: '' }
+    row.outboundDetail = { ...base, sourceOrders, items, recipient: { fullName: 'J*** S***', mobilePhone: '+1 *** *** 0186', countryCode: countries[p]!.split(' ')[1]!, stateProvince: ['CA', 'NY', 'Bayern', 'England', 'NSW'][p]!, city: ['Los Angeles', 'New York', 'Munich', 'London', 'Sydney'][p]!, addressLine1: '*** Industrial Road', postalCode: ['90012', '10001', '80331', 'SW1A 1AA', '2000'][p]! }, route: { warehouse: row.warehouse, warehouseProvider: row.provider, warehouseAccount: row.account, shippingChannel: row.channel, shippingChannelCode: row.channelCode, labelMode: '仓配一体' }, warehouseStatusRaw: raw, submittedAt: row.createdAt, acceptedAt: accepted ? row.createdAt : null, operationStartedAt: ['出库异常', '已出库'].includes(row.status) ? row.updatedAt : null, shippedAt: row.status === '已出库' ? row.updatedAt : null, lastSyncedAt: row.updatedAt, actualWeight: row.status === '已出库' && i === 4 ? 1.26 : null, weightUnit: row.status === '已出库' && i === 4 ? 'kg' : null, length: row.status === '已出库' && i === 4 ? 32 : null, width: row.status === '已出库' && i === 4 ? 24 : null, height: row.status === '已出库' && i === 4 ? 16 : null, dimensionUnit: row.status === '已出库' && i === 4 ? 'cm' : null, snapshotReliable: true, compositionReason: '' }
+    row.outboundDetail.quantitySummary = { plannedQuantity: row.planned, shippedQuantity: row.shipped, unit: '件' }
     row.history = [{ time: row.updatedAt, title: `仓库状态 · ${row.status}`, detail: row.reason || '已读取仓库作业结果，保留本次执行快照。' }, { time: row.createdAt, title: '提交仓库', detail: `按履约 ${row.fulfillment} 的商品、收件和仓库物流快照提交。` }]
     row.attempts = [{ id: `ATT-${row.id}-1`, time: row.createdAt, action: '创建仓库出库单', result: row.awaitingCheck || row.status === '下单失败' ? '失败' : '成功', reason: row.reason || '已取得明确接口结果' }]
     return row

@@ -89,6 +89,7 @@ export interface 仓库执行 {
   原因: string
   更新时间: string
   出库快照?: 出库快照
+  出库事实?: { planned: number | null; shipped: number | null; tracking: string | null; shippedAt: string | null }
 }
 export const 仓库执行记录 = ref<仓库执行[]>(共享订单.value.flatMap((订单) => 订单.fulfillmentOrders
   .filter((履约) => 履约.isActive && ['执行中', '已发货'].includes(履约.status))
@@ -96,6 +97,15 @@ export const 仓库执行记录 = ref<仓库执行[]>(共享订单.value.flatMap
 仓库执行记录.value.push({ 履约单号: 'FL-DEMO-260912-7', 订单号: [推单样例[1]!.systemOrderNo], 出库单号: 'OUT-DEMO-260912-7', 状态: '下单失败', 待核查: false, 原因: '仓库明确拒绝：当前账号未开通所选渠道。修复账号与渠道配置后再重试。', 更新时间: '2026-09-12 09:08:00 UTC+8' }, { 履约单号: 'FL-DEMO-260912-8', 订单号: [推单样例[2]!.systemOrderNo], 出库单号: 'OUT-DEMO-260912-8', 状态: '下单中', 待核查: true, 原因: '请求超时，仓库是否已建单尚待核查；不可重复推仓。', 更新时间: '2026-09-12 09:09:00 UTC+8' })
 仓库执行记录.value = 仓库执行记录.value.filter(项 => !项.履约单号.startsWith('FL-DEMO-OP-') && !项.履约单号.startsWith('FL-DEMO-ACTION-'))
 仓库执行记录.value.push(...操作样例.执行)
+export const 预置仓库评审执行身份: readonly string[] = Object.freeze(仓库执行记录.value.map(执行 => JSON.stringify([执行.出库单号, 执行.履约单号])))
+
+// 既有固定虚构样例的数量来自初始化时明确给定的履约摘要；只认领唯一出库路径一次。
+// 后续履约改路由、改组成或出现另一历史仓单，不覆盖该出库对象的原有事实。
+for (const 执行 of 仓库执行记录.value) {
+  const 同履约路径 = new Set(仓库执行记录.value.filter(项 => 项.履约单号 === 执行.履约单号).map(项 => 项.出库单号))
+  const 履约 = 共享订单.value.find(项 => 项.systemOrderNo === 执行.订单号[0])?.fulfillmentOrders.find(项 => 项.fulfillmentOrderNo === 执行.履约单号)
+  if (同履约路径.size === 1 && 履约) 执行.出库事实 = { planned: 履约.plannedQuantity, shipped: 履约.shippedQuantity, tracking: 履约.trackingNumber || null, shippedAt: 履约.shippedAt || null }
+}
 
 export const 演示库存 = ref<Record<string, '充足' | '不足' | '结果未知'>>({ [待审样例[4]!.systemOrderNo]: '结果未知' })
 Object.assign(演示库存.value, 操作样例.库存)
@@ -187,9 +197,10 @@ export function 执行演示推单(订单号: string, 履约单号: string, 期�
   if (来源.some(项 => (来源版本?.[项.systemOrderNo] ?? (来源.length === 1 ? 期望版本 : undefined)) !== 当前版本(项.systemOrderNo))) return { 成功: false, 信息: '全部来源订单版本尚未确认或已变化，请重新预检' }
   const 原因 = 推单阻断原因(订单, 履约单号)
   if (原因.length) return { 成功: false, 信息: 原因.join('；') }
-  const 出库单号 = `OUT-${履约单号}`
+  const 出库单号 = `CK-${履约单号}`
   const 提交时间 = 演示时间()
-  仓库执行记录.value.push({ 履约单号, 订单号: 来源.map(项 => 项.systemOrderNo), 出库单号, 状态: '下单中', 待核查: true, 原因: '演示请求已受理，等待读取仓库结果；提交受理不代表建仓成功。', 更新时间: 提交时间, 出库快照: 创建推单出库快照(来源, 履约单号, 提交时间) })
+  const 出库快照 = 创建推单出库快照(来源, 履约单号, 提交时间)
+  仓库执行记录.value.push({ 履约单号, 订单号: 来源.map(项 => 项.systemOrderNo), 出库单号, 状态: '下单中', 待核查: true, 原因: '演示请求已受理，等待读取仓库结果；提交受理不代表建仓成功。', 更新时间: 提交时间, 出库快照, 出库事实: { planned: 出库快照.quantitySummary.plannedQuantity, shipped: 0, tracking: null, shippedAt: null } })
   for (const 单 of 来源) 记录操作(单, '提交仓库', `创建 ${出库单号}；全部来源：${来源.map(项 => 项.systemOrderNo).join('、')}；状态为下单中，订单保持待推单。演示不调用外部接口。`)
   return { 成功: true, 信息: '推单已受理，订单保持待推单；请同步仓库状态查看结果。', 对象号: 出库单号, 待核查: true }
 }

@@ -39,8 +39,17 @@ function 查询() { const 错误 = 校验标发筛选(筛选); if (错误) retur
 function 切状态(状态: 标发状态 | '全部') { 当前状态.value = 状态; 页码.value = 1; 清除勾选() }
 function 重置() { Object.assign(筛选, 默认标发筛选()); Object.assign(已应用, 默认标发筛选()); 排序.value = { field: '', direction: 'desc' }; 仅待核查.value = false; 切状态('全部') }
 function 确认排序() { 页码.value = 1; 清除勾选() }
-watch(() => [route.path, route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([路径, 履约号, 订单号]) => {
+watch(() => [route.path, route.query.shippingConfirmationNo, route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([路径, 标发号, 履约号, 订单号]) => {
   if (路径 !== '/oms/self-fulfillment/shipping-confirmation') return
+  详情.value = undefined; 抽屉.value = false
+  if (typeof 标发号 === 'string' && 标发号) {
+    重置(); 筛选.searchType = 'no'; 筛选.searchMatch = 'exact'; 筛选.keyword = 标发号; 查询()
+    const 单 = 单据.value.find(项 => 项.no === 标发号)
+    if (!单) return void ElMessage.warning('未找到对应的订单标发记录：' + 标发号)
+    if ((typeof 履约号 === 'string' && 履约号 !== 单.fulfillmentNo) || (typeof 订单号 === 'string' && 订单号 !== 单.orderNo)) return void ElMessage.warning('标发记录与来源订单或履约单不一致，请核对后查看')
+    查看(单)
+    return
+  }
   const 编号 = typeof 履约号 === 'string' ? 履约号 : typeof 订单号 === 'string' ? 订单号 : ''
   if (!编号) return
   重置(); 筛选.searchType = typeof 履约号 === 'string' ? 'fulfillmentNo' : 'orderNo'; 筛选.searchMatch = 'exact'; 筛选.keyword = 编号; 查询()
