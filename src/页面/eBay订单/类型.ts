@@ -149,13 +149,15 @@ export interface eBay订单 {
 
 export interface eBay订单筛选条件 {
   keyword: string
-  store: string
-  marketplace: string
-  fulfillmentStatus: string
+  searchType?: string
+  searchMatch?: 'contains' | 'exact'
+  store: string | string[]
+  marketplace: string | string[]
+  fulfillmentStatus: string | string[]
   dateType: eBay订单日期类型
-  dateRange: [] | [string, string] | null
-  paymentStatus: string
-  cancelStatus: string
-  omsStatus: string
-  syncStatus: string
+  dateRange: string[] | null
+  paymentStatus: string | string[]
+  cancelStatus: string | string[]
+  omsStatus: string | string[]
+  syncStatus: string | string[]
 }

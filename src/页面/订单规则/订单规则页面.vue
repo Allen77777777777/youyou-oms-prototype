@@ -1,21 +1,32 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { Plus, Search, ArrowUp, ArrowDown, Delete, Setting, VideoPlay } from '@element-plus/icons-vue'
+import { Plus, ArrowUp, ArrowDown, Delete, Setting, VideoPlay } from '@element-plus/icons-vue'
 import { ElButton, ElInput, ElSelect, ElOption, ElIcon, ElTag, ElTable, ElTableColumn, ElDialog, ElDrawer, ElForm, ElFormItem, ElRadioGroup, ElRadioButton, ElAlert, ElEmpty, ElMessage, ElMessageBox, ElTimeline, ElTimelineItem } from 'element-plus'
 import type { 原型标注 } from '@/类型/标注'
 import { 共享订单 } from '../订单处理/演示会话'
 import { 规则动作, 条件字段名, 试算规则, type 规则类型, type 订单规则, type 条件字段 } from './规则逻辑'
 import { 共享规则, 共享规则日志 } from './演示会话'
+import MultiSelectFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
+import { 规则搜索字段, 默认规则筛选, 校验规则筛选, 命中规则筛选, 排序规则展示 } from './规则筛选'
 
 const 类型列表: 规则类型[] = ['审单规则', '分仓规则', '订单标发规则']
-const 规则 = 共享规则; const 当前类型 = ref<规则类型>('审单规则'); const 关键词 = ref(''); const 状态 = ref('')
+const 规则 = 共享规则; const 当前类型 = ref<规则类型>('审单规则')
+const 筛选 = reactive(默认规则筛选()); const 已应用 = reactive(默认规则筛选())
+const 排序 = ref<{ field: string; direction: 'asc' | 'desc' }>({ field: '', direction: 'asc' })
+const 状态选项 = [{ value: 'true', label: '演示启用' }, { value: 'false', label: '已停用' }]
+const 排序字段 = [{ value: 'priority', label: '优先级', kind: 'number' as const }, { value: 'updatedAt', label: '更新时间', kind: 'time' as const }]
 const 编辑打开 = ref(false); const 试算打开 = ref(false); const 日志打开 = ref(false); const 编辑Id = ref('')
 const 日志 = 共享规则日志
 const 编辑 = reactive<订单规则>({ id: '', name: '', type: '审单规则', enabled: false, priority: 10, mode: '全部满足', conditions: [], action: '', version: 1, updatedAt: '', note: '' })
 const 试算订单 = ref(''); const 已试算订单 = ref(''); const 已试算类型 = ref<规则类型>('审单规则'); const 试算结果 = ref<ReturnType<typeof 试算规则>>()
-const 列表 = computed(() => 规则.value.filter((项) => 项.type === 当前类型.value && 项.name.includes(关键词.value.trim()) && (!状态.value || String(项.enabled) === 状态.value)).sort((a,b) => a.priority-b.priority))
+const 列表 = computed(() => 排序规则展示(规则.value.filter((项) => 项.type === 当前类型.value && 命中规则筛选(项, 已应用)), 排序.value))
+function 查询() { const 错误 = 校验规则筛选(筛选); if (错误) return void ElMessage.warning(错误); Object.assign(已应用, JSON.parse(JSON.stringify(筛选))) }
+function 重置筛选() { Object.assign(筛选, 默认规则筛选()); Object.assign(已应用, 默认规则筛选()); 排序.value = { field: '', direction: 'asc' } }
+function 切规则组(类型: 规则类型) { 当前类型.value = 类型; 重置筛选() }
 function 标注(id: string, 标题: string, 分类: 原型标注['分类'], 说明: string, 动作: string[], 等级: 原型标注['事实等级'] = '合理假设'): 原型标注 {
-  return { id: `oms.rules.${id}`, 标题, 分类, 说明, 事实等级: 等级, 状态: '待评审', 版本: '0.3.0', 路由: '/oms/self-fulfillment/order-rules', 锚点: `oms.rules.${id}`, prd引用: ['PRD/订单规则功能PRD.md#6-功能与交互'], 前置条件: ['当前仅配置本地演示规则，不接入生产执行引擎。'], 触发方式: ['点击相应规则操作。'], 系统动作: 动作, 成功结果: ['保存版本或返回试算轨迹；订单及外部系统不发生变化。'], 异常处理: ['名称、条件或动作不完整时保留编辑内容并提示修复。', '业务门禁优先于规则命中；订单级 PAID 准入及后续非 PAID 转异常由平台适配链路负责，规则不能绕过取消、异常、平台接入或有效出库校验。'], 验收要点: 动作 }
+  return { id: `oms.rules.${id}`, 标题, 分类, 说明, 事实等级: 等级, 状态: '待评审', 版本: '2026-10-09', 路由: '/oms/self-fulfillment/order-rules', 锚点: `oms.rules.${id}`, prd引用: ['PRD/订单规则功能PRD.md#6-功能与交互', ...(id === 'filters' ? ['PRD/列表筛选组件规范.md'] : [])], 前置条件: ['当前仅配置本地演示规则，不接入生产执行引擎。'], 触发方式: ['点击相应规则操作。'], 系统动作: 动作, 成功结果: [id === 'filters' ? '筛选与显示排序仅改变展示，不改规则优先级、版本、执行顺序或首命中。' : '保存版本或返回试算轨迹；订单及外部系统不发生变化。'], 异常处理: ['名称、条件或动作不完整时保留编辑内容并提示修复。', '业务门禁优先于规则命中；订单级 PAID 准入及后续非 PAID 转异常由平台适配链路负责，规则不能绕过取消、异常、平台接入或有效出库校验。'], 验收要点: 动作 }
 }
 function 记录(text: string) { 日志.value.unshift({ time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) + ' UTC+8', text }) }
 function 打开编辑(项?: 订单规则) {
@@ -57,16 +68,22 @@ function 上下边界(项: 订单规则, 偏移: number) { const 同类 = 规则
     <header class="页首" v-prototype="标注('overview', '订单规则配置范围', '页面', '当前制作审单、分仓和订单标发规则。规则条件、动作及冲突策略仍属评审方案。', ['保持三类规则独立；分仓结果与物流选择的责任关系待确认。', '不配置平台特有原值、SKU 配对、库存同步或自动取消。'])"><div><h1>订单规则</h1><p>维护适用条件、执行顺序与命中结果</p></div><div><ElButton @click="日志打开 = true">变更记录</ElButton><ElButton type="primary" :icon="Plus" @click="打开编辑()">新建规则</ElButton></div></header>
     <ElAlert class="评审提示" title="规则配置与试算为评审方案" description="样例仅在当前会话生效。优先级、条件组合、冲突策略与执行权限待确认；试算不会自动修改订单。" type="info" :closable="false" show-icon />
     <section class="规则主体">
-      <aside v-prototype="标注('categories', '三类规则', '页面', '复用当前产品规划的三类优先规则，暂不增设独立物流规则。', ['按类型筛选与排序，跨类型不比较优先级。'])"><div class="分组标题"><ElIcon><Setting /></ElIcon>规则类型</div><button v-for="类型 in 类型列表" :key="类型" :class="{ active: 当前类型 === 类型 }" @click="当前类型 = 类型; 关键词 = ''; 状态 = ''"><span>{{ 类型 }}</span><b>{{ 规则.filter(项 => 项.type === 类型).length }}</b></button><div class="侧边说明">业务门禁始终生效<p>规则命中不代表订单可立即审核、推仓或标发。</p></div></aside>
+      <aside v-prototype="标注('categories', '三类规则', '页面', '复用当前产品规划的三类优先规则，暂不增设独立物流规则。', ['按类型筛选与排序，跨类型不比较优先级。'])"><div class="分组标题"><ElIcon><Setting /></ElIcon>规则类型</div><button v-for="类型 in 类型列表" :key="类型" :class="{ active: 当前类型 === 类型 }" @click="切规则组(类型)"><span>{{ 类型 }}</span><b>{{ 规则.filter(项 => 项.type === 类型).length }}</b></button><div class="侧边说明">业务门禁始终生效<p>规则命中不代表订单可立即审核、推仓或标发。</p></div></aside>
       <div class="规则内容"><div class="内容标题"><div><h2>{{ 当前类型 }}</h2><span>优先级数值越小越先匹配 · 仅演示顺序</span></div><ElButton :icon="VideoPlay" @click="开始试算">规则试算</ElButton></div>
-        <div class="搜索栏"><ElInput v-model="关键词" placeholder="搜索规则名称" clearable :prefix-icon="Search"/><ElSelect v-model="状态" placeholder="全部状态" clearable><ElOption label="演示启用" value="true"/><ElOption label="已停用" value="false"/></ElSelect><span>共 {{ 列表.length }} 条</span></div>
+        <div class="搜索栏 统一筛选栏" v-prototype="标注('filters', '规则列表筛选与显示排序', '交互', '按规则名称或说明指定字段查询，启用情况多选；列表显示排序独立于规则执行优先级。', ['规则组仍单选；默认仅搜索规则名称，切换说明不会扩大到其他字段。', '模糊或精确匹配、多行精确 OR，最多 1000 个去重项；启用情况多选同字段 OR，查询后应用。', '确认显示排序只重排已应用结果；默认顺序恢复原优先级升序，不改 priority、版本、执行顺序和试算首命中。'])">
+          <FieldSearch v-model="筛选.keyword" v-model:field="筛选.searchType" v-model:mode="筛选.searchMatch" :fields="规则搜索字段" aria-prefix="订单规则" @search="查询" />
+          <MultiSelectFilter v-model="筛选.enabled" :options="状态选项" placeholder="启用情况" />
+          <ElButton type="primary" @click="查询">查询</ElButton><ElButton @click="重置筛选">重置</ElButton>
+          <ListSort v-model="排序" :fields="排序字段" aria-prefix="订单规则" />
+          <span>共 {{ 列表.length }} 条</span>
+        </div>
         <ElTable :data="列表" row-key="id">
           <ElTableColumn label="优先级" width="110"><template #default="{ row }"><div class="优先级"><b>{{ row.priority }}</b><ElButton :icon="ArrowUp" link :disabled="上下边界(row as 订单规则, -1)" aria-label="上移规则" @click="调整优先级(row as 订单规则, -1)"/><ElButton :icon="ArrowDown" link :disabled="上下边界(row as 订单规则, 1)" aria-label="下移规则" @click="调整优先级(row as 订单规则, 1)"/></div></template></ElTableColumn>
           <ElTableColumn label="规则名称 / 条件" min-width="260"><template #default="{ row }"><ElButton link type="primary" @click="打开编辑(row as 订单规则)">{{ row.name }}</ElButton><div class="条件摘要"><ElTag size="small" type="info">{{ row.mode }}</ElTag><span v-for="(条件, index) in row.conditions" :key="index">{{ 条件字段名[条件.field as 条件字段] }} {{ 条件.operator }} {{ 条件.value }}{{ Number(index) < row.conditions.length - 1 ? '；' : '' }}</span></div></template></ElTableColumn>
           <ElTableColumn label="执行动作" min-width="180"><template #default="{ row }">{{ row.action }}<small>候选动作 · 通过业务门禁后适用</small></template></ElTableColumn>
           <ElTableColumn label="状态 / 版本" min-width="130"><template #default="{ row }"><ElTag :type="row.enabled ? 'success' : 'info'" effect="light">{{ row.enabled ? '演示启用' : '已停用' }}</ElTag><small>v{{ row.version }}</small></template></ElTableColumn>
           <ElTableColumn label="操作" width="125" fixed="right"><template #default="{ row }"><ElButton link type="primary" @click="打开编辑(row as 订单规则)">编辑</ElButton><ElButton link :type="row.enabled ? 'warning' : 'primary'" @click="切换启停(row as 订单规则)">{{ row.enabled ? '停用' : '启用' }}</ElButton></template></ElTableColumn>
-          <template #empty><ElEmpty description="暂无符合条件的规则" :image-size="65"><ElButton @click="关键词 = ''; 状态 = ''">清空筛选</ElButton></ElEmpty></template>
+          <template #empty><ElEmpty description="暂无符合条件的规则" :image-size="65"><ElButton @click="重置筛选">清空筛选</ElButton></ElEmpty></template>
         </ElTable>
         <div class="匹配说明" v-prototype="标注('priority', '执行顺序与冲突策略', '待确认', '数值较小优先，首条命中作为候选是原型假设，尚未形成生产执行决定。', ['上移/下移交换同类两条规则优先级并记录版本。', '停用规则在试算中显示跳过；条件命中后仍独立检查业务门禁。'])"><strong>本次试算采用的假设</strong><p>同类规则按优先级从小到大检查，首条命中作为候选结果；全部命中轨迹均保留。未命中时返回“无候选规则”，交由人工核对。</p><span>待确认：多规则叠加、默认规则、生效时间、团队权限与版本发布方式。</span></div>
       </div>
@@ -86,4 +103,8 @@ function 上下边界(项: 订单规则, 偏移: number) { const 同类 = 规则
 .规则页面{padding:20px;min-width:0;height:100%;overflow:auto;background:#f3f5f8;color:#2d3c50}.页首{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:20px}.页首 h1{font-size:21px;margin:0 0 8px}.页首 p{font-size:13px;color:#8994a4;margin:0}.评审提示{margin-bottom:18px}.规则主体{display:flex;min-width:0;background:#fff;border:1px solid #e5eaf1;border-radius:8px;overflow:hidden;min-height:510px}aside{width:180px;flex-shrink:0;background:#fbfcfe;border-right:1px solid #eaf0f5;padding:20px 12px}.分组标题{font-size:12px;display:flex;align-items:center;gap:8px;color:#929cad;padding:0 12px 18px}aside button{display:flex;justify-content:space-between;width:100%;padding:13px 12px;margin-bottom:6px;border:0;background:none;color:#58677c;font-size:13px;border-radius:5px;cursor:pointer}aside button.active{background:#eaf2ff;color:#2674d8}aside b{font-weight:400;font-size:11px}.侧边说明{border-top:1px solid #e8edf3;margin:28px 10px 0;padding-top:20px;font-size:12px;color:#7e8ca0}.侧边说明 p{font-size:11px;color:#98a3b3;line-height:1.9}.规则内容{flex:1;min-width:0}.内容标题{display:flex;justify-content:space-between;align-items:center;padding:22px 20px}.内容标题 h2{font-size:16px;margin:0 0 7px}.内容标题 span{font-size:12px;color:#8995a6}.搜索栏{display:flex;align-items:center;gap:10px;padding:0 20px 20px}.搜索栏>.el-input{width:240px}.搜索栏>.el-select{width:155px}.搜索栏>span{margin-left:auto;color:#8d99a9;font-size:12px}.el-table{font-size:12px}.el-table :deep(th.el-table__cell){background:#f8fafc;color:#7e8c9f;font-weight:500}.el-table :deep(td.el-table__cell){padding:18px 0}.优先级{display:flex;align-items:center;gap:3px}.优先级 b{font-weight:500;min-width:24px}.优先级 .el-button+.el-button{margin-left:0}.条件摘要{font-size:11px;line-height:1.9;color:#92a0b1;margin-top:8px;display:flex;flex-wrap:wrap;gap:4px}small{display:block;color:#96a0af;font-size:11px;line-height:1.8;margin-top:6px}.匹配说明{margin:24px 20px;padding:16px 18px;border:1px solid #eaf0f7;background:#f9fbfe;border-radius:6px;font-size:12px;color:#738198}.匹配说明 p{line-height:1.9;margin:8px 0}.匹配说明 span{color:#a08755;font-size:11px}.表单双列{display:grid;grid-template-columns:2fr 1fr;gap:20px}.条件编辑{width:100%;border:1px solid #e6ecf3;padding:14px;background:#f9fbfd;border-radius:6px}.条件行{display:grid;grid-template-columns:20px 1fr 90px 1.3fr 30px;gap:8px;align-items:center;margin-bottom:12px}.条件行>span{font-size:11px;color:#94a1b2}.试算选择{display:flex;gap:10px;margin-top:20px}.试算选择 .el-select{flex:1}.试算结果{border:1px solid #e6edf7;background:#f9fbfe;border-radius:6px;padding:18px;margin:24px 0}.试算结果 h3{font-size:16px;margin:10px 0}.试算结果 p{font-size:13px;color:#718197;margin-bottom:18px}.轨迹标题{font-size:14px;margin-bottom:22px}.轨迹行{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:13px}.el-timeline{padding-left:12px}.el-timeline p{font-size:12px;color:#8e9bad;line-height:1.9}.日志列表{margin-top:24px}
 @media(max-width:1300px){.规则页面{padding:16px}aside{width:154px;padding:18px 8px}.内容标题{padding:20px 16px}.搜索栏{padding:0 16px 16px;flex-wrap:wrap}.搜索栏>.el-input{width:220px}.页首{flex-wrap:wrap}}
 @media(max-width:950px){.规则主体{display:block}aside{display:flex;width:auto;gap:8px;padding:10px;border-right:0;border-bottom:1px solid #eaf0f5}.分组标题,.侧边说明{display:none}aside button{margin:0}.条件行{grid-template-columns:18px 1fr 90px 1fr 30px}}
+</style>
+<style scoped>
+.统一筛选栏{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.统一筛选栏 :deep(.el-button){height:32px;font-size:12px;margin-left:0}
 </style>

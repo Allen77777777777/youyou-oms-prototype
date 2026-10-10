@@ -4,8 +4,8 @@ export function agingAnnotation(id: string, 标题: string, 说明: string, 分�
   return {
     id: `oms.inventory-aging.${id}`, 标题, 说明, 分类, 事实等级,
     路由: '/oms/warehouse-delivery/inventory-aging', 锚点: `oms.inventory-aging.${id}`,
-    版本: 'V0.5 · 2026-09-23', 状态: '待评审',
-    prd引用: ['PRD/三方仓库龄功能PRD.md#4-页面与操作', 'PRD/三方仓库龄字段定义.md#3-两种视图的字段使用'],
+    版本: '2026-10-09 筛选规范同步', 状态: '待评审',
+    prd引用: ['PRD/三方仓库龄功能PRD.md#4-页面与操作', 'PRD/三方仓库龄字段定义.md#3-两种视图的字段使用', 'PRD/列表筛选组件规范.md'],
     前置条件: ['本地虚构快照供界面评审；真实接口、每日任务和服务端权限尚未接入。'],
     触发方式: [标题], 系统动作: [说明],
     成功结果: ['保留同一份来源明细的快照日期、来源天数、原始数量及单位；不写入当前库存。'],

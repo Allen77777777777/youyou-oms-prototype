@@ -7,6 +7,10 @@ import { agingRecords, agingBands, defaultFilters, filterAgingRecords, summarize
 import { agingAnnotation as note } from './库龄标注'
 import { createAgingWorkbook } from './库龄导出'
 import { 时间文本 } from '../三方仓库存/库存模型'
+import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
+import { 排序列表, 读取排序时刻 } from '@/组件/筛选/筛选工具'
 
 type Row = AgingDetailGroup | AgingSummary
 type ExportRow = AgingRecord | AgingSummary
@@ -19,6 +23,11 @@ const quantityColumns = [
 const view = ref<'summary' | 'detail'>('summary')
 const draft = reactive(defaultFilters()), applied = ref(defaultFilters()), autoDate = ref(true)
 const more = ref(false), extraColumns = ref(false), queryError = ref('')
+const sorting = ref({ field: '', direction: 'asc' as 'asc' | 'desc' })
+const searchFields = [{ value: 'systemSku', label: '系统 SKU', kind: 'identifier' as const }, { value: 'warehouseSku', label: '仓库 SKU', kind: 'identifier' as const }, { value: 'name', label: '商品名称', kind: 'text' as const }]
+const batchField = ref('batchNo'), batchFields = [{ value: 'batchNo', label: '批次号', kind: 'identifier' as const }]
+const sortFields = [{ value: 'warehouseSku', label: '仓库 SKU', kind: 'text' as const }, { value: 'systemSku', label: '系统 SKU', kind: 'text' as const }, { value: 'name', label: '商品名称', kind: 'text' as const }, { value: 'updatedAt', label: '最近成功更新', kind: 'time' as const }]
+watch(() => draft.keywordType, type => { draft.searchMatch = type === 'name' ? 'contains' : 'exact' })
 const page = ref(1), pageSize = ref(50), selection = ref<Row[]>([])
 const expandedKeys = ref<string[]>([])
 const table = ref<{ clearSelection: () => void }>()
@@ -32,10 +41,15 @@ const qualities = [...new Set(agingRecords.map(r => r.quality))]
 watch(() => [...draft.providers], () => { draft.accounts = draft.accounts.filter(id => accounts.value.some(a => a.id === id)); draft.warehouses = draft.warehouses.filter(id => warehouses.value.some(w => w.id === id)) })
 watch(() => [...draft.accounts], () => { draft.warehouses = draft.warehouses.filter(id => warehouses.value.some(w => w.id === id)) })
 const detailRows = computed(() => filterAgingRecords(agingRecords, applied.value))
-const rows = computed<Row[]>(() => view.value === 'summary' ? summarizeAgingRecords(detailRows.value) : groupAgingDetails(detailRows.value))
+const rows = computed<Row[]>(() => {
+  const list = view.value === 'summary' ? summarizeAgingRecords(detailRows.value) : groupAgingDetails(detailRows.value)
+  if (sorting.value.field === 'updatedAt') return 排序列表<Row>(list, row => 读取排序时刻(row.updatedAt), sorting.value.direction, row => row.id)
+  if (['warehouseSku', 'systemSku', 'name'].includes(sorting.value.field)) return 排序列表<Row>(list, row => row[sorting.value.field as 'warehouseSku' | 'systemSku' | 'name'], sorting.value.direction, row => row.id)
+  return list
+})
 const currentRows = computed(() => rows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const exportCount = computed(() => exportScope.value === 'selected' ? exportSnapshot.value.selected.length : exportSnapshot.value.all.length)
-function cloneFilters(f: AgingFilters): AgingFilters { return { ...f, providers: [...f.providers], accounts: [...f.accounts], warehouses: [...f.warehouses] } }
+function cloneFilters(f: AgingFilters): AgingFilters { return { ...f, providers: [...f.providers], accounts: [...f.accounts], warehouses: [...f.warehouses], quality: [...f.quality], issue: [...f.issue] } }
 function clearSelection() { table.value?.clearSelection(); selection.value = []; expandedKeys.value = [] }
 function toggleBatches(row: Row) { expandedKeys.value = expandedKeys.value.includes(row.id) ? expandedKeys.value.filter(id => id !== row.id) : [...expandedKeys.value, row.id] }
 function changeExpansion(_row: Row, expandedRows: Row[] | boolean) { if (Array.isArray(expandedRows)) expandedKeys.value = expandedRows.map(row => row.id) }
@@ -51,7 +65,8 @@ function query() {
   }
   applied.value = next; page.value = 1; clearSelection()
 }
-function reset() { Object.assign(draft, defaultFilters()); autoDate.value = true; query() }
+function reset() { Object.assign(draft, defaultFilters()); sorting.value = { field: '', direction: 'asc' }; autoDate.value = true; query() }
+function applySorting() { page.value = 1; clearSelection() }
 function changeView() {
   draft.batchNo = ''; draft.minAge = ''; draft.maxAge = ''
   applied.value = { ...applied.value, batchNo: '', minAge: '', maxAge: '' }
@@ -75,7 +90,7 @@ function openExport() {
   const f = applied.value
   const accountNames = new Map(agingRecords.map(r => [r.accountId, `${r.provider} · ${r.account}`]))
   const warehouseNames = new Map(agingRecords.map(r => [r.warehouseId, r.warehouse]))
-  exportSnapshot.value = { view: view.value, date: f.snapshotDate || '无可用快照', scope: [f.providers.join('、') || '全部服务商', f.accounts.map(id => accountNames.get(id) || id).join('、') || '全部账号', f.warehouses.map(id => warehouseNames.get(id) || id).join('、') || '全部仓库', f.keyword ? `${f.keywordType === 'name' ? '商品名称' : f.keywordType === 'systemSku' ? '系统 SKU' : '仓库 SKU'}：${f.keyword}` : '', f.quality ? `质量：${f.quality}` : '', f.batchNo ? `批次：${f.batchNo}` : '', f.minAge || f.maxAge ? `库龄：${f.minAge || '不限'} ～ ${f.maxAge || '不限'} 天` : ''].filter(Boolean).join(' / '), all: JSON.parse(JSON.stringify(exportRows(rows.value))), selected: JSON.parse(JSON.stringify(exportRows(selection.value))), selectedGroups: selection.value.length }
+  exportSnapshot.value = { view: view.value, date: f.snapshotDate || '无可用快照', scope: [f.providers.join('、') || '全部服务商', f.accounts.map(id => accountNames.get(id) || id).join('、') || '全部账号', f.warehouses.map(id => warehouseNames.get(id) || id).join('、') || '全部仓库', f.keyword ? `${f.keywordType === 'name' ? '商品名称' : f.keywordType === 'systemSku' ? '系统 SKU' : '仓库 SKU'}（${f.searchMatch === 'exact' ? '精确' : '模糊'}）：${f.keyword}` : '', f.quality.length ? `质量：${f.quality.join('、')}` : '', f.batchNo ? `批次（${f.batchMatch === 'exact' ? '精确' : '模糊'}）：${f.batchNo}` : '', f.minAge || f.maxAge ? `库龄：${f.minAge || '不限'} ～ ${f.maxAge || '不限'} 天` : ''].filter(Boolean).join(' / '), all: JSON.parse(JSON.stringify(exportRows(rows.value))), selected: JSON.parse(JSON.stringify(exportRows(selection.value))), selectedGroups: selection.value.length }
   exportScope.value = selection.value.length ? 'selected' : 'all'; exportOpen.value = true
 }
 async function download() {
@@ -100,21 +115,21 @@ reset()
         <ElRadioGroup v-model="view" aria-label="库龄视图" @change="changeView" v-prototype="note('view', '切换库龄视图', '保留已应用的通用筛选，清空批次号、库龄范围和勾选，回第 1 页。两个视图使用同一日期同一份来源明细。')"><ElRadioButton value="summary">分段汇总</ElRadioButton><ElRadioButton value="detail">批次明细</ElRadioButton></ElRadioGroup>
         <div class="review-note"><ElTooltip content="分段区间、展示分组与缺失值处理按 PRD V0.5 提案演示，尚待业务评审；接口未联调。"><ElTag type="info" effect="plain">{{ view === 'summary' ? '分段规则待评审' : '来源字段待联调' }}</ElTag></ElTooltip></div>
       </div>
-      <form class="filters" @submit.prevent="query" v-prototype="note('filters', '库龄条件查询', '服务商、账号、仓库联动；SKU 精确匹配，商品名称包含匹配。日期默认当前查询范围最近有数据的一天；显式选定日期无数据时不跨日补齐。')">
+      <form class="filters" @submit.prevent="query" v-prototype="note('filters', '库龄条件查询', '公共多选及字段多行搜索：分类内 OR、条件间 AND；SKU 和批次默认精确，名称默认模糊。快照仍为中文单日日期，缺日不补；排序只调整主行，不改变来源批次、质量隔离及平铺导出。')">
         <div class="filter-main">
-          <label class="filter"><span>服务商</span><ElSelect v-model="draft.providers" aria-label="服务商" multiple collapse-tags clearable placeholder="全部服务商"><ElOption v-for="p in providers" :key="p" :label="p" :value="p" /></ElSelect></label>
-          <label class="filter"><span>仓库账号</span><ElSelect v-model="draft.accounts" aria-label="仓库账号" multiple collapse-tags clearable placeholder="全部账号"><ElOption v-for="a in accounts" :key="a.id" :label="a.label" :value="a.id" /></ElSelect></label>
-          <label class="filter"><span>仓库</span><ElSelect v-model="draft.warehouses" aria-label="仓库" multiple collapse-tags clearable placeholder="全部仓库"><ElOption v-for="w in warehouses" :key="w.id" :label="w.label" :value="w.id" /></ElSelect></label>
+          <MultiFilter v-model="draft.providers" :options="providers.map(value => ({ value, label: value }))" placeholder="服务商" />
+          <MultiFilter v-model="draft.accounts" :options="accounts.map(a => ({ value: a.id, label: a.label }))" placeholder="仓库账号" />
+          <MultiFilter v-model="draft.warehouses" :options="warehouses.map(w => ({ value: w.id, label: w.label }))" placeholder="仓库" />
           <div class="filter date-filter" v-prototype="note('snapshot-date', '快照日期', '日期为实际调用海外仓接口当天，按 Asia/Shanghai 记录。查看历史和刷新列表不会改变日期，不是仓库返回的统计日期。', '字段', '已确认')"><span>快照日期</span><ElDatePicker v-model="draft.snapshotDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" :clearable="false" aria-label="快照日期" placeholder="最近有数据的日期" @change="autoDate = false" /><ElTooltip content="按当前查询范围选择最近有数据的日期"><ElButton link type="primary" @click="latest">最近快照</ElButton></ElTooltip></div>
         </div>
         <div class="search-row">
-          <ElSelect v-model="draft.keywordType" aria-label="关键词类型" class="keyword-type"><ElOption label="系统 SKU" value="systemSku" /><ElOption label="仓库 SKU" value="warehouseSku" /><ElOption label="商品名称" value="name" /></ElSelect>
-          <ElInput v-model="draft.keyword" class="keyword-input" aria-label="库龄关键词" :placeholder="draft.keywordType === 'name' ? '输入商品名称，包含查询' : '输入 SKU，精确查询'" clearable />
+          <FieldSearch v-model="draft.keyword" v-model:field="draft.keywordType" v-model:mode="draft.searchMatch" :fields="searchFields" aria-prefix="库龄" @search="query" />
           <ElButton type="primary" native-type="submit" :icon="Search">查询</ElButton><ElButton @click="reset">重置</ElButton><ElButton text :icon="more ? ArrowUp : ArrowDown" @click="more = !more">{{ more ? '收起条件' : '更多条件' }}</ElButton>
+          <ListSort v-model="sorting" :fields="sortFields" aria-prefix="库龄主行" @change="applySorting" />
         </div>
         <div v-if="more || view === 'detail'" class="more-filters">
-          <label v-if="more" class="filter"><span>库存质量</span><ElSelect v-model="draft.quality" aria-label="库存质量" clearable placeholder="全部质量"><ElOption v-for="q in qualities" :key="q" :label="q" :value="q" /></ElSelect></label>
-          <template v-if="view === 'detail'"><label class="filter"><span>批次号</span><ElInput v-model="draft.batchNo" aria-label="批次号" placeholder="输入批次号，精确查询" clearable /></label><div class="age-range" v-prototype="note('age-filter', '库龄天数范围', '仅批次明细提供，按来源非负整数天筛选，包含上下界；空值、负数和小数天不因强制取整而命中。')"><span>库龄天数</span><ElInput v-model="draft.minAge" aria-label="最小库龄天数" placeholder="最小天数" clearable /><span>至</span><ElInput v-model="draft.maxAge" aria-label="最大库龄天数" placeholder="最大天数" clearable /><span>天</span></div></template>
+          <MultiFilter v-if="more" v-model="draft.quality" :options="qualities.map(value => ({ value, label: value }))" placeholder="库存质量" />
+          <template v-if="view === 'detail'"><FieldSearch v-model="draft.batchNo" v-model:field="batchField" v-model:mode="draft.batchMatch" :fields="batchFields" aria-prefix="库龄批次" @search="query" /><div class="age-range" v-prototype="note('age-filter', '库龄天数范围', '仅批次明细提供，按来源非负整数天筛选，包含上下界；空值、负数和小数天不因强制取整而命中。')"><span>库龄天数</span><ElInput v-model="draft.minAge" aria-label="最小库龄天数" placeholder="最小天数" clearable /><span>至</span><ElInput v-model="draft.maxAge" aria-label="最大库龄天数" placeholder="最大天数" clearable /><span>天</span></div></template>
         </div>
         <p v-if="queryError" class="query-error" role="alert">{{ queryError }}</p>
       </form>
@@ -170,12 +185,12 @@ reset()
 .aging-page { height:100%; min-height:590px; min-width:0; display:flex; flex-direction:column; font-size:13px; color:#303133; }
 .view-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px 0; flex-wrap:wrap; }.review-note { display:flex; align-items:center; gap:10px; color:#9098a4; font-size:12px; }
 .filters { margin:14px 20px 0; padding:14px 16px; background:#f8fafc; border:1px solid #eef1f5; border-radius:5px; }
-.filter-main,.more-filters { display:flex; flex-wrap:wrap; gap:12px 24px; }.filter { display:flex; gap:10px; align-items:center; min-width:0; }.filter>span { min-width:56px; color:#606976; flex-shrink:0; }.filter .el-select,.filter .el-input { width:180px; flex:none; }.date-filter :deep(.el-date-editor) { width:150px; flex:none; }.date-filter .el-button { margin-left:0; }
+.filter-main,.more-filters { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }.filter { display:flex; gap:8px; align-items:center; min-width:0; }.filter>span { min-width:56px; color:#606976; flex-shrink:0; }.filter .el-select,.filter .el-input { width:130px; flex:none; }.date-filter :deep(.el-date-editor) { width:150px; flex:none; }.date-filter .el-button { margin-left:0; }
 .search-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; }.search-row .el-button+.el-button { margin-left:0; }.keyword-type { width:130px; flex:none; }.keyword-input { width:286px; flex:none; }.more-filters { margin-top:12px; padding-top:12px; border-top:1px dashed #dce2ea; }.age-range { display:flex; align-items:center; gap:10px; color:#606976; }.age-range .el-input { width:110px; }.query-error { color:#d94e45; margin:10px 0 0; }
 .batch-panel { margin:0 14px 0 82px; padding:12px 14px 16px; background:#f8fafc; border:1px solid #e8edf3; border-radius:4px; }.batch-heading { display:flex; justify-content:space-between; gap:16px; margin-bottom:10px; font-size:12px; color:var(--yy-text-heading); }.batch-heading>span:last-child { color:#8b94a2; }.batch-toggle { margin-left:6px; }.aging-table :deep(.el-table__expanded-cell) { padding:8px 0 14px !important; background:#fff; }.aging-table :deep(.batch-table th.el-table__cell) { height:36px; background:#edf2f7; }.aging-table :deep(.batch-table td.el-table__cell) { padding:9px 0; }
 .table-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:12px 20px; }.result-info { color:#7b8493; display:flex; align-items:center; gap:5px; flex-wrap:wrap; }.result-info strong { color:#303b49; font-weight:600; }.snapshot-caption { display:inline-flex; align-items:center; gap:6px; margin-left:14px; color:#8b94a2; font-size:12px; }.toolbar-actions { display:flex; align-items:center; gap:8px; }.toolbar-actions .el-button+.el-button { margin-left:0; }.toolbar-actions .el-checkbox { margin-right:8px; }
 .aging-table { flex:1; min-height:180px; margin:0 20px; min-width:0; }.aging-table :deep(.el-table th.el-table__cell) { background:#f5f7fa; color:var(--yy-text-heading); font-weight:500; height:48px; }.aging-table :deep(.el-table td.el-table__cell) { padding:10px 0; }.aging-table :deep(.el-table .cell) { padding:0 10px; }.aging-table :deep(.el-table__row:hover>td.el-table__cell) { background:#f7faff; }.product-name,.warehouse-name { font-weight:500; line-height:22px; color:var(--yy-text-heading); }.sku-line { font-size:12px; line-height:21px; white-space:nowrap; }.sku-line>span:first-child { color:#939aa5; margin-right:7px; }.sku-line .el-tag { margin-left:5px; }.secondary { color:#8b94a2; font-size:12px; line-height:21px; }.quantity { font-variant-numeric:tabular-nums; font-size:14px; font-weight:500; }.muted { color:#a3aab5; }.invalid { color:#d95145; }.band-heading { display:block; white-space:nowrap; font-size:12px; line-height:18px; }.band-heading small { display:block; color:var(--yy-text-heading); font-size:11px; font-weight:400; }.time-cell { font-size:12px; font-variant-numeric:tabular-nums; }.empty-state { padding:32px 12px; line-height:24px; }.empty-state small { display:block; color:#9199a4; }
 .aging-footer { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; padding:13px 20px; border-top:1px solid #eef1f5; }.export-details { display:grid; grid-template-columns:70px 1fr; gap:14px 12px; margin:0 0 20px; }.export-details dt { color:#7b8493; }.export-details dd { margin:0; overflow-wrap:anywhere; line-height:1.6; }.export-details small,.dialog-note { color:#9098a4; font-size:12px; }.export-options { display:flex; flex-direction:column; align-items:flex-start; }.dialog-note { line-height:1.8; }
-@media (max-width:1300px) { .filter-main,.more-filters { gap:12px 20px; }.aging-footer { justify-content:flex-end; } }
+@media (max-width:1300px) { .aging-footer { justify-content:flex-end; } }
 @media (max-width:900px) { .view-bar,.table-toolbar { align-items:flex-start; }.keyword-input { width:240px; }.aging-page { min-height:660px; } }
 </style>

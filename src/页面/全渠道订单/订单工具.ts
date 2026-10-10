@@ -8,6 +8,34 @@ import type {
   SKU解析状态,
   同步状态,
 } from './类型'
+import { 命中多选, 命中字段搜索, 命中时间范围, 校验字段搜索, 校验时间范围, 排序列表, 读取排序时刻, type 列表排序条件 } from '@/组件/筛选/筛选工具'
+
+export const 全渠道搜索字段: { value: string; label: string; kind?: 'identifier' | 'text' }[] = [
+  { value: 'platformOrderNo', label: '平台订单号' },
+  { value: 'systemOrderNo', label: '系统订单号' },
+  { value: 'platformOrderId', label: '平台订单 ID' },
+  { value: 'fulfillmentOrderNo', label: '履约单号' },
+  { value: 'trackingNumber', label: '跟踪号' },
+  { value: 'buyerExternalId', label: '买家账号', kind: 'text' },
+  { value: 'platformSku', label: '平台 SKU' },
+  { value: 'systemSku', label: '系统 SKU' },
+  { value: 'platformItemId', label: '平台商品 ID' },
+  { value: 'externalLineId', label: '平台订单行 ID' },
+  { value: 'platformItemTitle', label: '平台商品名称', kind: 'text' },
+  { value: 'systemItemName', label: '系统商品名称', kind: 'text' },
+]
+
+export function 校验全渠道订单筛选(条件: 全渠道订单筛选条件): string | undefined {
+  const 字段 = 全渠道搜索字段.find(项 => 项.value === (条件.searchType ?? 'platformOrderNo'))
+  if (!字段) return '请选择有效的搜索字段'
+  if (!['orderedAt', 'shipByAt', 'lastSyncedAt'].includes(条件.dateType)) return '请选择有效的日期类型'
+  return 校验字段搜索(条件.keyword, 条件.searchMatch ?? 'contains', 字段.kind) ?? 校验时间范围(条件.dateRange)
+}
+
+export function 排序全渠道订单(订单: 全渠道订单[], 条件: 列表排序条件): 全渠道订单[] {
+  if (!['orderedAt', 'shipByAt', 'lastSyncedAt'].includes(条件.field)) return [...订单]
+  return 排序列表(订单, 项 => 读取排序时刻(项[条件.field as 全渠道订单筛选条件['dateType']]), 条件.direction, 项 => 项.systemOrderNo)
+}
 
 export type 状态语气 = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 
@@ -22,17 +50,19 @@ export interface 状态说明 {
 export function 规范化筛选条件(来源: unknown): 全渠道订单筛选条件 {
   const 值 = 来源 && typeof 来源 === 'object' ? 来源 as Record<string, unknown> : {}
   const 文本 = (键: string) => typeof 值[键] === 'string' ? 值[键] as string : ''
+  const 多选 = (键: string) => Array.isArray(值[键]) ? [...new Set((值[键] as unknown[]).filter((项): 项 is string => typeof 项 === 'string'))] : 文本(键)
   const 日期 = 值.dateRange
-  const 有效日期 = Array.isArray(日期) && 日期.length === 2
-    && 日期.every((项) => typeof 项 === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(项))
-    && 日期[0] <= 日期[1]
+  const 有效日期 = Array.isArray(日期) && 日期.length === 2 && 日期.every((项) => typeof 项 === 'string')
+    && !校验时间范围(日期)
   return {
-    keyword: 文本('keyword'), platform: 文本('platform'), store: 文本('store'),
-    processingStatus: 文本('processingStatus'),
+    keyword: 文本('keyword'),
+    searchType: 全渠道搜索字段.some(项 => 项.value === 值.searchType) ? 值.searchType as string : 'platformOrderNo',
+    searchMatch: 值.searchMatch === 'exact' ? 'exact' : 'contains',
+    platform: 多选('platform'), store: 多选('store'), processingStatus: 多选('processingStatus'),
     dateType: 值.dateType === 'shipByAt' || 值.dateType === 'lastSyncedAt' ? 值.dateType : 'orderedAt',
     dateRange: 有效日期 ? [日期[0] as string, 日期[1] as string] : [],
-    platformStatus: 文本('platformStatus'), syncStatus: 文本('syncStatus'),
-    skuStatus: 文本('skuStatus'), countryCode: 文本('countryCode'),
+    platformStatus: 多选('platformStatus'), syncStatus: 多选('syncStatus'),
+    skuStatus: 多选('skuStatus'), countryCode: 多选('countryCode'),
   }
 }
 
@@ -197,56 +227,35 @@ export function 获取路由摘要(订单: 全渠道订单): {
   }
 }
 
-export function 订单检索文本(订单: 全渠道订单): string {
-  return [
-    订单.systemOrderNo,
-    订单.platformOrderId,
-    订单.platformOrderNo,
-    订单.platformCode,
-    订单.storeName,
-    订单.buyerExternalId,
-    ...订单.items.flatMap((商品) => [
-      商品.externalLineId,
-      商品.platformItemId,
-      商品.platformSku,
-      商品.systemSku,
-      商品.platformItemTitle,
-      商品.systemItemName,
-    ]),
-    ...订单.fulfillmentOrders.flatMap((履约单) => [
-      履约单.fulfillmentOrderNo,
-      履约单.trackingNumber,
-    ]),
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLocaleLowerCase()
-}
-
 export function 筛选全渠道订单(
   订单列表: 全渠道订单[],
   条件: 全渠道订单筛选条件,
   快速范围: 快速视图 = '全部',
 ): 全渠道订单[] {
-  const 关键词 = 条件.keyword.trim().toLocaleLowerCase()
+  if (校验全渠道订单筛选(条件)) return []
+  const 搜索字段 = 条件.searchType ?? 'platformOrderNo'
+  const 字段配置 = 全渠道搜索字段.find(项 => 项.value === 搜索字段)!
+  const 商品字段 = ['platformSku', 'systemSku', 'platformItemId', 'externalLineId', 'platformItemTitle', 'systemItemName'].includes(搜索字段)
+  const 搜索 = (值: string | undefined | string[]) => 命中字段搜索(值, 条件.keyword, 条件.searchMatch ?? 'contains', 字段配置.kind)
 
   return 订单列表.filter((订单) => {
     if (快速范围 !== '全部' && 订单.fulfillmentMode !== 快速范围) return false
-    if (关键词 && !订单检索文本(订单).includes(关键词)) return false
-    if (条件.platform && 订单.platformCode !== 条件.platform) return false
-    if (条件.store && 订单.storeName !== 条件.store) return false
-    if (条件.processingStatus === '__EMPTY__' && 订单.processingStatus) return false
-    if (条件.processingStatus && 条件.processingStatus !== '__EMPTY__' && 订单.processingStatus !== 条件.processingStatus) return false
-    if (条件.dateRange?.length === 2) {
-      const 时间值 = 订单[条件.dateType]
-      const 日期值 = 时间值?.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-      if (!日期值 || 日期值 < 条件.dateRange[0] || 日期值 > 条件.dateRange[1]) return false
+    if (!命中多选(条件.platform, 订单.platformCode)) return false
+    // 页面以稳定 storeId 查询；兼容旧调用按 storeName 传入的标量。
+    if (Array.isArray(条件.store) ? !命中多选(条件.store, 订单.storeId) : !命中多选(条件.store, 订单.storeName)) return false
+    if (!命中多选(条件.processingStatus, 订单.processingStatus || '__EMPTY__')) return false
+    if (!命中时间范围(订单[条件.dateType], 条件.dateRange)) return false
+    if (!命中多选(条件.platformStatus, 订单.platformCode === 'eBay' ? 订单.platformOrderStatus : '__NOT_INTEGRATED__')) return false
+    if (!命中多选(条件.syncStatus, 订单.sync.status)) return false
+    if (!命中多选(条件.countryCode, 订单.address.countryCode)) return false
+    if ((条件.skuStatus.length || (商品字段 && 条件.keyword.trim())) && !订单.items.some(商品 => 命中多选(条件.skuStatus, 商品.skuResolutionStatus)
+      && (!商品字段 || 搜索(商品[搜索字段 as keyof typeof 商品] as string | undefined)))) return false
+    if (!商品字段) {
+      const 值 = 搜索字段 === 'fulfillmentOrderNo' || 搜索字段 === 'trackingNumber'
+        ? 订单.fulfillmentOrders.map(履约单 => 履约单[搜索字段])
+        : 订单[搜索字段 as keyof 全渠道订单] as string | undefined
+      if (!搜索(Array.isArray(值) ? 值.filter((项): 项 is string => Boolean(项)) : 值)) return false
     }
-    if (条件.platformStatus === '__NOT_INTEGRATED__' && 订单.platformCode === 'eBay') return false
-    if (条件.platformStatus && 条件.platformStatus !== '__NOT_INTEGRATED__' && 订单.platformOrderStatus !== 条件.platformStatus) return false
-    if (条件.syncStatus && 订单.sync.status !== 条件.syncStatus) return false
-    if (条件.skuStatus && !订单.items.some((商品) => 商品.skuResolutionStatus === 条件.skuStatus)) return false
-    if (条件.countryCode && 订单.address.countryCode !== 条件.countryCode) return false
     return true
   })
 }

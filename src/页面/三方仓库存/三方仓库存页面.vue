@@ -2,20 +2,28 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Search, Refresh, Download, ArrowDown, ArrowUp, QuestionFilled, Document } from '@element-plus/icons-vue'
-import { ElButton, ElSelect, ElOption, ElInput, ElIcon, ElTable, ElTableColumn, ElPagination, ElDrawer, ElDialog, ElTooltip, ElTag, ElMessage, ElRadioGroup, ElRadio, ElDatePicker, ElAlert, ElConfigProvider } from 'element-plus'
+import { ElButton, ElSelect, ElOption, ElInput, ElIcon, ElTable, ElTableColumn, ElPagination, ElDrawer, ElDialog, ElTooltip, ElTag, ElMessage, ElRadioGroup, ElRadio, ElAlert, ElConfigProvider } from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import type { 原型标注 } from '@/类型/标注'
 import { 库存样例, 数量定义, 初始筛选, 校验筛选, 查询库存, 数据提示, 空值说明, 数量文本, 时间文本, type 库存记录, type 数量键 } from './库存模型'
 import { 生成库存工作簿 } from './库存导出'
+import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import DateRange from '@/组件/筛选/时间范围.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
+import { 排序列表, 读取排序时刻 } from '@/组件/筛选/筛选工具'
 
 const InventoryColumn = ElTableColumn<库存记录>
 const route = useRoute()
 const 草稿 = reactive(初始筛选()), 已应用 = ref(初始筛选())
-const 更多条件 = ref(false), 批量打开 = ref(false), 批量文本 = ref(''), 查询错误 = ref('')
-const 页码 = ref(1), 页大小 = ref(50), 选择 = ref<库存记录[]>([]), 表格 = ref<{ clearSelection: () => void; clearSort: () => void }>()
+const 更多条件 = ref(false), 查询错误 = ref('')
+const 页码 = ref(1), 页大小 = ref(50), 选择 = ref<库存记录[]>([]), 表格 = ref<{ clearSelection: () => void; clearSort: () => void; sort: (prop: string, order: string) => void }>()
 const 详情 = ref<库存记录>(), 详情打开 = ref(false), 定义打开 = ref(false), 导出打开 = ref(false), 导出范围 = ref('all'), 导出中 = ref(false)
 const 刷新中 = ref(false), 读取时间 = ref(new Date().toISOString())
-const 排序 = ref<{ prop: string; order: string | null }>({ prop: '', order: null })
+const 排序 = ref({ field: '', direction: 'asc' as 'asc' | 'desc' })
+const 搜索字段 = [{ value: 'systemSku', label: '系统 SKU', kind: 'identifier' as const }, { value: 'warehouseSku', label: '仓库 SKU', kind: 'identifier' as const }, { value: 'name', label: '商品名称', kind: 'text' as const }]
+const 排序字段 = [...数量定义.map(d => ({ value: d.key, label: d.label, kind: 'number' as const })), { value: 'updatedAt', label: '最近成功更新', kind: 'time' as const }]
+watch(() => 草稿.keywordType, 类型 => { 草稿.searchMatch = 类型 === 'name' ? 'contains' : 'exact' })
 const 服务商选项 = [...new Set(库存样例.map(r => r.provider))]
 const 账号选项 = computed(() => [...new Map(库存样例.filter(r => !草稿.providers.length || 草稿.providers.includes(r.provider)).map(r => [r.accountId, { id: r.accountId, label: `${r.provider} · ${r.account}` }])).values()])
 const 仓库选项 = computed(() => [...new Map(库存样例.filter(r => (!草稿.providers.length || 草稿.providers.includes(r.provider)) && (!草稿.accounts.length || 草稿.accounts.includes(r.accountId))).map(r => [r.warehouseId, { id: r.warehouseId, label: r.warehouse }])).values()])
@@ -24,28 +32,28 @@ watch(() => [...草稿.providers], () => { 草稿.accounts = 草稿.accounts.fil
 watch(() => [...草稿.accounts], () => { 草稿.warehouses = 草稿.warehouses.filter(id => 仓库选项.value.some(w => w.id === id)) })
 const 结果 = computed(() => {
   const rows = 查询库存(库存样例, 已应用.value)
-  const key = 数量定义.find(d => d.key === 排序.value.prop)?.key
-  if (key && 排序.value.order) return [...rows].sort((a, b) => { const x = a.quantities[key], y = b.quantities[key]; return x === null ? (y === null ? 0 : 1) : y === null ? -1 : (x - y) * (排序.value.order === 'ascending' ? 1 : -1) })
+  const key = 数量定义.find(d => d.key === 排序.value.field)?.key
+  if (key) return 排序列表(rows, r => r.quantities[key] ?? undefined, 排序.value.direction, r => r.id)
+  if (排序.value.field === 'updatedAt') return 排序列表(rows, r => 读取排序时刻(r.updatedAt), 排序.value.direction, r => r.id)
   return rows
 })
 const 当前页 = computed(() => 结果.value.slice((页码.value - 1) * 页大小.value, 页码.value * 页大小.value))
 const 导出条数 = computed(() => 导出范围.value === 'all' ? 结果.value.length : 选择.value.length)
 function 标注(id: string, 标题: string, 说明: string, 分类: 原型标注['分类'] = '交互'): 原型标注 {
-  return { id: `oms.warehouse-inventory.${id}`, 标题, 说明, 分类, 路由: '/oms/warehouse-delivery/inventory', 锚点: `oms.warehouse-inventory.${id}`, 版本: '2026-09-23', 状态: '待评审', 事实等级: id === 'source' ? '已确认' : '合理假设',
-    prd引用: ['PRD/三方仓库存功能PRD.md#4-页面与交互', 'PRD/三方仓库存功能PRD.md#52-库存业务字段'],
+  return { id: `oms.warehouse-inventory.${id}`, 标题, 说明, 分类, 路由: '/oms/warehouse-delivery/inventory', 锚点: `oms.warehouse-inventory.${id}`, 版本: id === 'filters' ? '2026-10-09' : '2026-09-23', 状态: '待评审', 事实等级: id === 'source' ? '已确认' : '合理假设',
+    prd引用: ['PRD/三方仓库存功能PRD.md#4-页面与交互', 'PRD/三方仓库存功能PRD.md#52-库存业务字段', 'PRD/列表筛选组件规范.md'],
     前置条件: ['页面使用 62 条虚构库存记录，尚未连接中台或海外仓。'], 触发方式: [标题], 系统动作: [说明], 成功结果: ['按来源记录展示，不合并多个 SKU，不在 OMS 加减库存。'],
     异常处理: ['真实零与未取得、未提供分别展示；来源失败保留原数量和时间。'], 数据来源: ['本地虚构数据；正式来源为既有中台承接的三方仓库存。'], 权限与审计: ['原型未实现服务端权限或审计，生产版须按组织、账号与仓库控制。'], 验收要点: ['标注开关不阻断查询、详情或导出；所有中文数量字段无三方仓前缀。'] }
 }
 function 清空选择() { 表格.value?.clearSelection(); 选择.value = [] }
-function 查询() { 查询错误.value = 校验筛选(草稿); if (查询错误.value) return; 已应用.value = structuredClone({ ...草稿, providers: [...草稿.providers], accounts: [...草稿.accounts], warehouses: [...草稿.warehouses], dates: [...草稿.dates] }); 页码.value = 1; 清空选择() }
-function 重置() { Object.assign(草稿, 初始筛选()); 查询(); 排序.value = { prop: '', order: null }; 表格.value?.clearSort() }
+function 查询() { 查询错误.value = 校验筛选(草稿); if (查询错误.value) return; 已应用.value = { ...草稿, providers: [...草稿.providers], accounts: [...草稿.accounts], warehouses: [...草稿.warehouses], country: [...草稿.country], mapping: [...草稿.mapping], issue: [...草稿.issue], dates: 草稿.dates ? [...草稿.dates] : null }; 页码.value = 1; 清空选择() }
+function 重置() { Object.assign(草稿, 初始筛选()); 查询(); 排序.value = { field: '', direction: 'asc' }; 表格.value?.clearSort() }
 function 翻页() { 清空选择() }
 function 改页大小() { 页码.value = 1; 清空选择() }
-function 改排序(v: { prop: string | null; order: string | null }) { 排序.value = { prop: v.prop || '', order: v.order }; 页码.value = 1; 清空选择() }
+function 改排序(v: { prop: string | null; order: string | null }) { 排序.value = { field: v.order ? v.prop || '' : '', direction: v.order === 'descending' ? 'desc' : 'asc' }; 页码.value = 1; 清空选择() }
+function 应用排序() { if (数量定义.some(d => d.key === 排序.value.field)) 表格.value?.sort(排序.value.field, 排序.value.direction === 'asc' ? 'ascending' : 'descending'); else { const next = { ...排序.value }; 表格.value?.clearSort(); 排序.value = next }; 页码.value = 1; 清空选择() }
 function 查看(r: 库存记录) { 详情.value = r; 详情打开.value = true }
 async function 刷新() { if (刷新中.value) return; 刷新中.value = true; await new Promise(resolve => setTimeout(resolve, 250)); 读取时间.value = new Date().toISOString(); 刷新中.value = false; ElMessage.success('已刷新列表，来源数据时间保持不变') }
-function 打开批量() { 批量文本.value = 草稿.keyword; 批量打开.value = true }
-function 应用批量() { const f = { ...草稿, keyword: 批量文本.value }; const error = 校验筛选(f); if (error) return void ElMessage.error(error); 草稿.keyword = [...new Set(批量文本.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))].join('\n'); 批量打开.value = false; 查询() }
 function 打开导出() { 导出范围.value = 选择.value.length ? 'selected' : 'all'; 导出打开.value = true }
 async function 导出() {
   if (!导出条数.value || 导出中.value) return
@@ -62,24 +70,23 @@ watch(() => route.query, q => {
 
 <template>
   <section class="inventory-page" v-prototype="标注('source', '库存来源与页面范围', '只做一套三方仓来源库存；列表展示全部八项数量，不设置共享库存分类。', '页面')">
-    <form class="filters" @submit.prevent="查询" v-prototype="标注('filters', '库存条件查询', '服务商、账号、仓库逐级联动，SKU 精确匹配；组合筛选作用于完整结果，查询回到第 1 页。')">
+    <form class="filters" @submit.prevent="查询" v-prototype="标注('filters', '库存条件查询', '公共多选、字段多行搜索、中文秒级时间与排序；分类内 OR、条件间 AND，草稿查询后生效。SKU 默认精确、名称默认模糊；数量排序与表头共享状态，查询清空选择。')">
       <div class="filter-main">
-        <label class="filter"><span>服务商</span><ElSelect v-model="草稿.providers" aria-label="服务商" multiple collapse-tags clearable placeholder="全部服务商"><ElOption v-for="p in 服务商选项" :key="p" :label="p" :value="p" /></ElSelect></label>
-        <label class="filter"><span>仓库账号</span><ElSelect v-model="草稿.accounts" aria-label="仓库账号" multiple collapse-tags clearable placeholder="全部账号"><ElOption v-for="a in 账号选项" :key="a.id" :label="a.label" :value="a.id" /></ElSelect></label>
-        <label class="filter"><span>仓库</span><ElSelect v-model="草稿.warehouses" aria-label="仓库" multiple collapse-tags clearable placeholder="全部仓库"><ElOption v-for="w in 仓库选项" :key="w.id" :label="w.label" :value="w.id" /></ElSelect></label>
+        <MultiFilter v-model="草稿.providers" :options="服务商选项.map(value => ({ value, label: value }))" placeholder="服务商" />
+        <MultiFilter v-model="草稿.accounts" :options="账号选项.map(a => ({ value: a.id, label: a.label }))" placeholder="仓库账号" />
+        <MultiFilter v-model="草稿.warehouses" :options="仓库选项.map(w => ({ value: w.id, label: w.label }))" placeholder="仓库" />
       </div>
       <div class="search-row">
-        <ElSelect v-model="草稿.keywordType" aria-label="关键词类型" class="keyword-type"><ElOption label="系统 SKU" value="systemSku" /><ElOption label="仓库 SKU" value="warehouseSku" /><ElOption label="商品名称" value="name" /></ElSelect>
-        <ElInput v-model="草稿.keyword" aria-label="库存关键词" :placeholder="草稿.keywordType === 'name' ? '输入商品名称，支持包含查询' : '输入 SKU，精确查询'" clearable class="keyword-input" />
-        <ElButton v-if="草稿.keywordType !== 'name'" text @click="打开批量">批量输入</ElButton>
+        <FieldSearch v-model="草稿.keyword" v-model:field="草稿.keywordType" v-model:mode="草稿.searchMatch" :fields="搜索字段" aria-prefix="库存" @search="查询" />
         <ElButton type="primary" :icon="Search" native-type="submit">查询</ElButton><ElButton @click="重置">重置</ElButton>
         <ElButton text :icon="更多条件 ? ArrowUp : ArrowDown" @click="更多条件 = !更多条件">{{ 更多条件 ? '收起条件' : '更多条件' }}</ElButton>
+        <ListSort v-model="排序" :fields="排序字段" aria-prefix="库存" @change="应用排序" />
       </div>
       <div v-if="更多条件" class="more-filters">
-        <label class="filter"><span>国家 / 地区</span><ElSelect v-model="草稿.country" clearable aria-label="仓库国家" placeholder="全部国家"><ElOption v-for="c in ['美国', '英国', '德国', '加拿大']" :key="c" :value="c" /></ElSelect></label>
-        <label class="filter"><span>映射情况</span><ElSelect v-model="草稿.mapping" clearable aria-label="映射情况" placeholder="全部"><ElOption v-for="m in ['已映射', '未映射', '映射冲突']" :key="m" :value="m" /></ElSelect></label>
-        <label class="filter"><span>数据提示</span><ElSelect v-model="草稿.issue" clearable aria-label="数据提示" placeholder="全部"><ElOption v-for="i in 提示选项" :key="i" :value="i" /></ElSelect></label>
-        <label class="filter date-filter"><span>最近成功更新</span><ElDatePicker v-model="草稿.dates" @update:model-value="草稿.dates = $event || []" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" /></label>
+        <MultiFilter v-model="草稿.country" :options="['美国', '英国', '德国', '加拿大'].map(value => ({ value, label: value }))" placeholder="仓库国家" />
+        <MultiFilter v-model="草稿.mapping" :options="['已映射', '未映射', '映射冲突'].map(value => ({ value, label: value }))" placeholder="映射情况" />
+        <MultiFilter v-model="草稿.issue" :options="提示选项.map(value => ({ value, label: value }))" placeholder="数据提示" />
+        <div class="filter date-filter"><span>最近成功更新</span><DateRange v-model="草稿.dates" aria-prefix="库存最近成功更新" /></div>
         <div class="quantity-filter"><span>数量条件</span><ElSelect v-model="草稿.metric" aria-label="数量指标"><ElOption v-for="d in 数量定义" :key="d.key" :label="d.label" :value="d.key" /></ElSelect><ElSelect v-model="草稿.operator" aria-label="数量运算符" clearable placeholder="不限"><ElOption label="等于" value="eq" /><ElOption label="大于" value="gt" /><ElOption label="小于" value="lt" /><ElOption label="区间" value="range" /></ElSelect><ElInput v-model="草稿.minimum" aria-label="数量条件值" placeholder="数值" :disabled="!草稿.operator" /><template v-if="草稿.operator === 'range'"><span>至</span><ElInput v-model="草稿.maximum" aria-label="数量结束值" placeholder="结束值" /></template></div>
       </div>
       <p v-if="查询错误" class="query-error" role="alert">{{ 查询错误 }}</p>
@@ -116,7 +123,6 @@ watch(() => route.query, q => {
       <template #footer><ElButton :icon="Document" @click="定义打开 = true">字段说明</ElButton><ElButton @click="详情打开 = false">关闭</ElButton></template>
     </ElDrawer>
     <ElDrawer v-model="定义打开" title="库存字段说明" size="min(760px, calc(100vw - 80px))" append-to-body><div class="definitions"><p class="definition-intro">库存数量直接取三方仓来源数据。以下为业务字段定义，各仓实际口径待核验。</p><section><h3>库存单位</h3><p>数量使用的计量单位，如件、箱。保留来源单位，不自行换算。</p></section><section v-for="d in 数量定义" :key="d.key"><h3>{{ d.label }}</h3><p>{{ d.definition }}</p></section><ElAlert title="字段不是互斥分类" description="在库描述存量，可用和占用描述分配，次品描述质量，冻结描述管控，待上架描述作业阶段；不能相加推算库存。" :closable="false" type="info" /></div></ElDrawer>
-    <ElDialog v-model="批量打开" title="批量输入 SKU" width="520px" append-to-body><p class="dialog-note">每行一个，最多 200 个；自动去重，按当前 SKU 类型精确查询。</p><ElInput v-model="批量文本" type="textarea" :rows="9" aria-label="批量 SKU" placeholder="DEMO-BRK-001&#10;DEMO-FLT-002" /><template #footer><ElButton @click="批量打开 = false">取消</ElButton><ElButton type="primary" @click="应用批量">应用并查询</ElButton></template></ElDialog>
     <ElDialog v-model="导出打开" title="导出库存" width="500px" append-to-body><div class="export-body"><ElRadioGroup v-model="导出范围"><ElRadio value="all">当前筛选全部（{{ 结果.length }} 条）</ElRadio><ElRadio value="selected" :disabled="!选择.length">当前页勾选（{{ 选择.length }} 条）</ElRadio></ElRadioGroup><p>导出 <strong>{{ 导出条数 }}</strong> 条原始粒度记录，格式为 XLSX。</p><p class="dialog-note">包含全部数量字段、单位、空值说明与数据时间。文件标记为虚构原型数据；不生成库存合计。</p></div><template #footer><ElButton @click="导出打开 = false">取消</ElButton><ElButton type="primary" :disabled="!导出条数" :loading="导出中" @click="导出">确认导出</ElButton></template></ElDialog>
   </section>
 </template>
@@ -124,16 +130,15 @@ watch(() => route.query, q => {
 <style scoped>
 .inventory-page { height:100%; min-height:560px; display:flex; flex-direction:column; min-width:0; color:#303133; font-size:13px; }
 .filters { margin:16px 20px 0; padding:14px 16px; background:#f8fafc; border:1px solid #eef1f5; border-radius:5px; }
-.filter-main { display:flex; flex-wrap:wrap; gap:12px 24px; }
-.filter { display:flex; align-items:center; gap:10px; min-width:0; }.filter>span { flex-shrink:0; color:#606976; min-width:64px; }.filter .el-select { flex:none; width:200px; min-width:0; }
+.filter-main { display:flex; flex-wrap:wrap; gap:8px; }
+.filter { display:flex; align-items:center; gap:8px; min-width:0; }.filter>span { flex-shrink:0; color:#606976; min-width:64px; }
 .search-row { display:flex; align-items:center; margin-top:12px; gap:8px; flex-wrap:wrap; }.search-row .el-button+.el-button { margin-left:0; }
-.keyword-type { width:132px; }.keyword-input { width:300px; flex:none; }
-.more-filters { display:flex; flex-wrap:wrap; gap:14px 24px; margin-top:14px; padding-top:14px; border-top:1px dashed #dce2ea; }
-.date-filter { width:552px; }.date-filter :deep(.el-date-editor) { flex:1; min-width:0; width:auto; }.quantity-filter { width:100%; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }.quantity-filter>.el-select { width:130px; }.quantity-filter>.el-input { width:125px; }
+.more-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; padding-top:12px; border-top:1px dashed #dce2ea; }
+.date-filter { flex:none; }.quantity-filter { width:100%; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }.quantity-filter>.el-select { width:130px; }.quantity-filter>.el-input { width:100px; }
 .query-error { color:#d94e45; margin:10px 0 0; }.table-toolbar { padding:13px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; }.record-count { white-space:nowrap; color:#7b8493; }.record-count strong { color:#303b49; font-weight:600; }.toolbar-actions { display:flex; gap:8px; align-items:center; }.toolbar-actions .el-button+.el-button { margin-left:0; }.read-time { color:#929aa5; font-size:12px; margin-right:8px; }
 .inventory-table { flex:1; min-height:180px; margin:0 20px; min-width:0; }.inventory-table :deep(.el-table th.el-table__cell) { background:#f5f7fa; color:var(--yy-text-heading); font-weight:500; height:42px; }.inventory-table :deep(.el-table td.el-table__cell) { padding:11px 0; }.inventory-table :deep(.el-table .cell) { padding:0 10px; }.inventory-table :deep(.el-table__row:hover>td.el-table__cell) { background:#f7faff; }
 .product-name,.warehouse-name { font-weight:500; line-height:22px; color:#303a49; }.sku-line { font-size:12px; line-height:21px; white-space:nowrap; }.sku-line>span:first-child { color:#939aa5; margin-right:5px; }.sku-line .el-tag { margin-left:5px; }.secondary { color:#8b94a2; font-size:12px; line-height:21px; }.disabled-text { color:#bd7b20; }.quantity-heading { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; font-size:12px; }.help-icon { color:#a4acb9; font-size:12px; }.quantity { font-variant-numeric:tabular-nums; font-weight:500; font-size:14px; }.quantity-null { color:#afb6c0; }.quantity-zero { color:#9098a4; }.quantity-negative { color:#da4e43!important; }.time-cell { font-size:12px; font-variant-numeric:tabular-nums; }.inventory-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid #eef1f5; }.empty-state { padding:35px; color:#7d8795; }.empty-state small { display:block; margin:7px; }
 .detail-body { font-size:13px; }.detail-title { display:flex; align-items:center; justify-content:space-between; padding-bottom:22px; }.detail-title h2 { margin:0 0 7px; font-size:19px; color:var(--yy-text-heading); }.detail-title span { color:#7b8493; }.detail-section { margin-top:24px; }.detail-section h3,.definitions h3 { font-size:14px; color:var(--yy-text-heading); margin:0 0 16px; }.detail-grid { display:grid; grid-template-columns:90px 1fr 90px 1fr; gap:16px 10px; background:#f8fafc; padding:18px; border-radius:5px; }.detail-grid dt,.time-grid dt { color:#7b8493; }.detail-grid dd,.time-grid dd { margin:0; overflow-wrap:anywhere; }.section-heading { display:flex; justify-content:space-between; align-items:baseline; }.section-heading>span { color:#7b8493; }.quantity-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }.quantity-card { border:1px solid #e9edf2; border-radius:5px; padding:16px; min-height:103px; }.card-label { display:flex; align-items:center; gap:6px; color:#657080; }.card-label .el-icon { color:#a2aab5; }.quantity-card strong { display:block; font-size:25px; margin-top:12px; color:#303b49; font-weight:500; }.quantity-card small { display:block; color:#a0a6b0; margin-top:4px; }.detail-note,.dialog-note { font-size:12px; color:#8a939f; line-height:1.8; }.time-grid { display:grid; grid-template-columns:150px 1fr; gap:14px; padding:16px 0; border-top:1px solid #edf0f4; }.definitions section { padding:16px 0; border-bottom:1px solid #eef1f5; }.definitions h3 { margin-bottom:8px; }.definitions p { line-height:1.8; color:#657080; margin:0; }.definition-intro { background:#f6f8fb; padding:14px; }.definitions .el-alert { margin-top:20px; }.export-body .el-radio-group { display:flex; flex-direction:column; align-items:flex-start; }.export-body { line-height:1.8; }
-@media (max-width:1300px) { .read-time { display:none; }.filter-main,.more-filters { gap:12px 20px; } }
+@media (max-width:1300px) { .read-time { display:none; } }
 @media (max-width:1000px) { .date-filter { max-width:100%; }.quantity-filter { flex-wrap:wrap; }.quantity-grid { grid-template-columns:repeat(2,1fr); } }
 </style>

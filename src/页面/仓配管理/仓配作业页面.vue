@@ -2,10 +2,15 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Search, Refresh, Document, CircleCheck, Warning, Clock, ArrowRight } from '@element-plus/icons-vue'
-import { ElAlert, ElButton, ElDatePicker, ElDescriptions, ElDescriptionsItem, ElDialog, ElDrawer, ElEmpty, ElIcon, ElInput, ElMessage, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTag, ElTimeline, ElTimelineItem, ElTooltip } from 'element-plus'
+import { ElAlert, ElButton, ElDescriptions, ElDescriptionsItem, ElDialog, ElDrawer, ElEmpty, ElIcon, ElMessage, ElPagination, ElTable, ElTableColumn, ElTag, ElTimeline, ElTimelineItem, ElTooltip } from 'element-plus'
 import type { 原型标注 } from '@/类型/标注'
 import { 仓库状态, 物流状态, 仓储服务商, type 作业类型, type 作业动作, type 仓配单据 } from './仓配模型'
 import { 仓库会话单据, 物流会话单据, 仓配会话操作拦截 as 取得操作拦截, 执行仓配会话动作 as 执行样例动作 } from './仓配会话'
+import MultiSelectFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import TimeRange from '@/组件/筛选/时间范围.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
+import { 仓配搜索字段, 默认仓配筛选, 校验仓配筛选, 命中仓配筛选, 排序仓配单据 } from './仓配筛选'
 
 const props = defineProps<{ 类型: 作业类型 }>()
 const route = useRoute()
@@ -15,8 +20,13 @@ const 前缀 = 是仓库 ? 'oms.outbound' : 'oms.logistics'
 const 单据 = 是仓库 ? 仓库会话单据 : 物流会话单据
 const 状态集 = 是仓库 ? 仓库状态 : 物流状态
 const 当前状态 = ref('全部')
-const 筛选 = reactive({ keyword: '', provider: '', review: '', dates: [] as string[] })
-const 已应用 = reactive({ ...筛选 })
+const 筛选 = reactive(默认仓配筛选())
+const 已应用 = reactive(默认仓配筛选())
+const 排序 = ref<{ field: string; direction: 'asc' | 'desc' }>({ field: '', direction: 'desc' })
+const 编号字段 = 仓配搜索字段.map(项 => 项.value === 'no' ? { ...项, label: 是仓库 ? '出库单号' : '物流单号' } : 项)
+const 服务商选项 = 仓储服务商.map(项 => ({ value: 项, label: 项 }))
+const 关注选项 = [{ value: '待核查', label: '外部结果待核查' }, { value: '执行中', label: '执行中' }, { value: '明确失败', label: '明确失败 / 业务异常' }]
+const 排序字段 = [{ value: 'createdAt', label: '创建时间', kind: 'time' as const }, { value: 'updatedAt', label: '最近更新时间', kind: 'time' as const }]
 const 当前页 = ref(1)
 const 每页 = ref(10)
 const 勾选 = ref<仓配单据[]>([])
@@ -41,8 +51,8 @@ const 作业标注说明: Record<string, Partial<原型标注>> = {
     验收要点: [是仓库 ? '按同一履约从订单处理跳转后能够找到共享出库单；刷新列表不产生外部写或额外业务单。' : '物流单只来自独立 API 流程虚构样例，不为每张仓配一体出库单自动生成物流单；刷新不产生新单。'],
   },
   filters: {
-    前置条件: ['列表已经加载；关键词、服务商、处理关注和创建日期可单独使用或组合使用。'],
-    系统动作: ['对业务单号、来源履约/订单、外部单号、跟踪号和 SKU 作不区分大小写的包含匹配；日期按 UTC+8 创建日比较。', '应用查询回到第 1 页并清空选择；重置清空所有查询条件和状态页签。'],
+    前置条件: ['列表已经加载；指定字段、服务商多选、处理关注多选和创建时间可单独使用或组合使用。'],
+    系统动作: ['默认只搜索本页业务单号；指定单一字段后采用模糊或精确匹配，多行按精确 OR，最多 1000 个去重项。', '服务商及处理关注同字段 OR、字段间 AND；多选确定仅写筛选草稿，查询才应用。创建时间按明确 UTC+8 比较起止秒。', '排序确认只重排已应用结果、回第 1 页并清空勾选，不应用未查询草稿；默认顺序恢复会话数据顺序。', '应用查询回到第 1 页并清空选择；重置清空所有查询条件和状态页签。'],
     成功结果: ['表格及页签数量对应当前匹配集；顶部指标与“全量需关注”提示仍统计全部会话单据。'],
     异常处理: ['外部待核查为独立查询标记，不另建业务状态；当前搜索仅执行本地过滤，生产权限和服务端分页尚未接入。'],
     验收要点: ['用跨页来源编号查询可找到目标；叠加不匹配服务商后为空；重置后恢复列表，原勾选已清空。'],
@@ -96,20 +106,14 @@ const 作业标注说明: Record<string, Partial<原型标注>> = {
 }
 function 标注(id: string, title: string, explanation: string, extra: Partial<原型标注> = {}): 原型标注 {
   const 细则 = 作业标注说明[id] || {}
-  const 结果: 原型标注 = { id: `${前缀}.${id}`, 标题: title, 说明: explanation, 分类: id === 'overview' ? '页面' : id === 'states' ? '规则' : id.includes('snapshot') || id === 'table' ? '字段' : '交互', 事实等级: '合理假设', 版本: '2026-09-12', 状态: '待评审', prd引用: [`PRD/${是仓库 ? '三方仓出库单功能PRD.md#4-统一状态及操作资格' : '物流下单功能PRD.md#3-状态及逆向规则'}`], ...细则, ...extra }
+  const 结果: 原型标注 = { id: `${前缀}.${id}`, 标题: title, 说明: explanation, 分类: id === 'overview' ? '页面' : id === 'states' ? '规则' : id.includes('snapshot') || id === 'table' ? '字段' : '交互', 事实等级: '合理假设', 版本: '2026-10-09', 状态: '待评审', prd引用: [`PRD/${是仓库 ? '三方仓出库单功能PRD.md#4-统一状态及操作资格' : '物流下单功能PRD.md#3-状态及逆向规则'}`, ...(id === 'filters' ? ['PRD/列表筛选组件规范.md'] : [])], ...细则, ...extra }
   for (const key of ['前置条件', '触发方式', '系统动作', '成功结果', '异常处理', '数据来源', '权限与审计', '验收要点'] as const) {
     结果[key] = [...new Set([...(细则[key] || []), ...(extra[key] || [])])]
   }
   return 结果
 }
-const 过滤结果 = computed(() => 单据.value.filter(row => {
-  const keyword = 已应用.keyword.trim().toLowerCase()
-  return (!keyword || [row.no, row.order, row.fulfillment, row.externalNo, row.tracking, row.sku].some(v => v.toLowerCase().includes(keyword))) &&
-    (!已应用.provider || row.provider === 已应用.provider) &&
-    (!已应用.review || (已应用.review === '待核查' ? row.awaitingCheck : 已应用.review === '执行中' ? ['下单中', '取消中', '待出库'].includes(row.status) : !row.awaitingCheck && row.reason !== '')) &&
-    (!已应用.dates?.length || (row.createdAt.slice(0, 10) >= 已应用.dates[0]! && row.createdAt.slice(0, 10) <= 已应用.dates[1]!))
-}))
-const 可见单据 = computed(() => 过滤结果.value.filter(r => 当前状态.value === '全部' || r.status === 当前状态.value))
+const 过滤结果 = computed(() => 单据.value.filter(row => 命中仓配筛选(row, 已应用)))
+const 可见单据 = computed(() => 排序仓配单据(过滤结果.value.filter(r => 当前状态.value === '全部' || r.status === 当前状态.value), 排序.value))
 const 分页数据 = computed(() => 可见单据.value.slice((当前页.value - 1) * 每页.value, 当前页.value * 每页.value))
 const 待核查数 = computed(() => 单据.value.filter(r => r.awaitingCheck).length)
 const 失败数 = computed(() => 单据.value.filter(r => ['下单失败', '出库异常'].includes(r.status)).length)
@@ -117,9 +121,11 @@ const 处理中数 = computed(() => 单据.value.filter(r => ['下单中', '取�
 const 完成数 = computed(() => 单据.value.filter(r => r.status === (是仓库 ? '已出库' : '下单成功')).length)
 const 可执行数量 = computed(() => 目标单据.value.filter(r => !取得操作拦截(r, 当前动作.value)).length)
 const 状态颜色 = (s: string) => ['已出库', '下单成功'].includes(s) ? 'success' : ['下单失败', '出库异常'].includes(s) ? 'danger' : ['已取消', '已作废'].includes(s) ? 'info' : 'warning'
-function 查询() { Object.assign(已应用, { ...筛选, dates: [...(筛选.dates || [])] }); 当前页.value = 1; 表格.value?.clearSelection() }
-function 重置() { Object.assign(筛选, { keyword: '', provider: '', review: '', dates: [] }); 当前状态.value = '全部'; 查询() }
-function 快速查看(status = '全部', review = '') { 重置(); 当前状态.value = status; 筛选.review = review; 查询() }
+function 清除选择() { 勾选.value = []; 表格.value?.clearSelection() }
+function 查询() { const 错误 = 校验仓配筛选(筛选); if (错误) return void ElMessage.warning(错误); Object.assign(已应用, JSON.parse(JSON.stringify(筛选))); 当前页.value = 1; 清除选择() }
+function 重置() { Object.assign(筛选, 默认仓配筛选()); 排序.value = { field: '', direction: 'desc' }; 当前状态.value = '全部'; 查询() }
+function 确认排序() { 当前页.value = 1; 清除选择() }
+function 快速查看(status = '全部', review = '') { 重置(); 当前状态.value = status; 筛选.review = review ? [review] : []; 查询() }
 function 查看(row: 仓配单据) { 详情.value = row; 详情页签.value = '业务详情'; 详情打开.value = true }
 function 准备动作(action: 作业动作, rows = 勾选.value) {
   if (!rows.length) return void ElMessage.warning('请先选择需要处理的单据')
@@ -137,7 +143,7 @@ watch([当前状态, 每页], () => { 当前页.value = 1; 表格.value?.clearSe
 watch(当前页, () => 表格.value?.clearSelection())
 watch(() => [route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([fulfillment, order]) => {
   const keyword = typeof fulfillment === 'string' ? fulfillment : typeof order === 'string' ? order : ''
-  if (keyword) { 重置(); 筛选.keyword = keyword; 查询() }
+  if (keyword) { 重置(); 筛选.searchType = typeof fulfillment === 'string' ? 'fulfillment' : 'order'; 筛选.searchMatch = 'exact'; 筛选.keyword = keyword; 查询() }
 }, { immediate: true })
 </script>
 
@@ -156,12 +162,12 @@ watch(() => [route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([fulfi
     </div>
 
     <section class="仓配卡片">
-      <div v-prototype="标注('filters', '筛选与稳定编号查询', '按业务编号、来源履约、服务商、创建日期和失败性质查询；搜索与重置清空跨页选择。', { 触发方式: ['输入条件后点击搜索或按 Enter。'], 成功结果: ['按全部已应用条件取交集；状态角标按筛选结果统计。'], 异常处理: ['无匹配记录显示空结果及重置入口。'], 验收要点: ['重置恢复全部数据；翻页和换状态不保留不可见行的选择。'] })" class="仓配筛选">
-        <label class="宽查询"><span>单据查询</span><ElInput v-model="筛选.keyword" clearable placeholder="业务单号 / 履约单 / 订单 / SKU / 跟踪号" :prefix-icon="Search" @keyup.enter="查询" /></label>
-        <label><span>{{ 是仓库 ? '仓储服务商' : '来源仓储服务商' }}</span><ElSelect v-model="筛选.provider" clearable placeholder="全部服务商"><ElOption v-for="p in 仓储服务商" :key="p" :label="p" :value="p" /></ElSelect></label>
-        <label><span>处理关注</span><ElSelect v-model="筛选.review" clearable placeholder="全部"><ElOption label="外部结果待核查" value="待核查" /><ElOption label="执行中" value="执行中" /><ElOption label="明确失败 / 业务异常" value="明确失败" /></ElSelect></label>
-        <label class="日期查询"><span>创建日期</span><ElDatePicker v-model="筛选.dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" /></label>
-        <div class="仓配筛选按钮"><ElButton type="primary" :icon="Search" @click="查询">搜索</ElButton><ElButton @click="重置">重置</ElButton></div>
+      <div v-prototype="标注('filters', '筛选与稳定编号查询', '按指定字段、服务商、创建时间和失败性质查询；搜索与重置清空跨页选择，排序只重排已应用结果。', { 触发方式: ['输入条件后点击搜索或按 Enter。'], 成功结果: ['按全部已应用条件取交集；状态角标按筛选结果统计。'], 异常处理: ['无匹配记录显示空结果及重置入口。'], 验收要点: ['重置恢复全部数据；翻页和换状态不保留不可见行的选择。'] })" class="仓配筛选 统一筛选栏">
+        <FieldSearch v-model="筛选.keyword" v-model:field="筛选.searchType" v-model:mode="筛选.searchMatch" :fields="编号字段" :aria-prefix="标题" @search="查询" />
+        <MultiSelectFilter v-model="筛选.provider" :options="服务商选项" :placeholder="是仓库 ? '仓储服务商' : '来源仓储服务商'" />
+        <MultiSelectFilter v-model="筛选.review" :options="关注选项" placeholder="处理关注" />
+        <div class="创建时间筛选"><span>创建时间</span><TimeRange v-model="筛选.dates" :aria-prefix="`${标题}创建时间`" /></div>
+        <div class="仓配筛选按钮"><ElButton type="primary" :icon="Search" @click="查询">搜索</ElButton><ElButton @click="重置">重置</ElButton><ListSort v-model="排序" :fields="排序字段" :aria-prefix="标题" @change="确认排序" /></div>
       </div>
 
       <nav v-prototype="标注('states', '独立业务状态与失败性质', 是仓库 ? '七种出库状态单独保存。请求超时保留下单中或取消中，不能归入仓内出库异常。' : '五种物流状态单独保存。结果无法确认归入下单失败，以原因标记待核查。', { 事实等级: '已确认', 交互规则: ['点击页签按业务状态过滤；待核查是失败性质或接口核查标记，不新增业务状态。'], 异常处理: ['失败原因与下一步必须可见，业务状态不直接覆盖订单处理状态。'] })" class="仓配状态栏">
@@ -223,3 +229,10 @@ watch(() => [route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([fulfi
 </template>
 
 <style scoped src="./仓配样式.css"></style>
+<style scoped>
+.统一筛选栏{align-items:center;gap:8px;padding:12px 18px;flex-wrap:wrap;min-width:0}
+.统一筛选栏 .仓配筛选按钮{margin-left:0;gap:8px;align-items:center}
+.统一筛选栏 .仓配筛选按钮 :deep(.el-button+.el-button){margin-left:0}
+.创建时间筛选{display:flex;align-items:center;gap:6px;flex:none;min-width:0;font-size:12px;color:var(--el-text-color-regular)}
+.统一筛选栏 :deep(.el-button){height:32px;font-size:12px}
+</style>

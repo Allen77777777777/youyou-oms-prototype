@@ -33,8 +33,24 @@ describe('三方仓库存原始来源与查询', () => {
   })
   it('拒绝非法数量区间及超限 SKU，未映射仍可按仓库 SKU 查到', () => {
     expect(校验筛选({ ...初始筛选(), operator: 'range', minimum: '10', maximum: '2' })).not.toBe('')
-    expect(校验筛选({ ...初始筛选(), keyword: Array.from({ length: 201 }, (_, i) => `sku-${i}`).join('\n') })).not.toBe('')
+    expect(校验筛选({ ...初始筛选(), keyword: Array.from({ length: 1001 }, (_, i) => `sku-${i}`).join('\n') })).not.toBe('')
     expect(查询库存(库存样例, { ...初始筛选(), keywordType: 'warehouseSku', keyword: 库存样例[1]!.warehouseSku })[0]?.mapping).toBe('未映射')
+  })
+  it('国家、映射和数据提示各自多选 OR，维度间 AND，来源行不合并', () => {
+    const rows = 查询库存(库存样例, { ...初始筛选(), country: ['美国', '英国'], mapping: ['未映射', '映射冲突'], issue: ['未映射', '映射冲突'] })
+    expect(rows.map(row => row.id)).toEqual([库存样例[1]!.id, 库存样例[7]!.id])
+    expect(查询库存(库存样例, { ...初始筛选(), country: ['德国'], mapping: ['未映射', '映射冲突'] })).toEqual([])
+  })
+  it('名称多行精确查询与SKU模糊是只读可选模式，精确名称保留词内空格', () => {
+    const rows = [{ ...库存样例[0]!, id: 'a', name: 'Brake Pad' }, { ...库存样例[0]!, id: 'b', name: 'Oil Filter' }, { ...库存样例[0]!, id: 'c', name: 'Brake Pad Kit' }]
+    expect(查询库存(rows, { ...初始筛选(), keywordType: 'name', searchMatch: 'exact', keyword: 'brake pad\nOil Filter\nBRAKE PAD' }).map(row => row.id)).toEqual(['a', 'b'])
+    expect(查询库存(rows, { ...初始筛选(), searchMatch: 'contains', keyword: 'brk' })).toHaveLength(3)
+  })
+  it('秒级北京时间包括所选结束整秒，缺失来源及无效区间不命中', () => {
+    const rows = ['2026-09-23T02:30:00Z', '2026-09-23T02:30:01.999Z', '2026-09-23T02:30:02Z', ''].map((updatedAt, i) => ({ ...库存样例[0]!, id: String(i), updatedAt }))
+    expect(查询库存(rows, { ...初始筛选(), dates: ['2026-09-23 10:30:00', '2026-09-23 10:30:01'] }).map(row => row.id)).toEqual(['0', '1'])
+    expect(校验筛选({ ...初始筛选(), dates: ['2026-09-23 10:30:02', '2026-09-23 10:30:00'] })).not.toBe('')
+    expect(校验筛选({ ...初始筛选(), dates: ['2026-09-23 10:30:00'] })).not.toBe('')
   })
 })
 

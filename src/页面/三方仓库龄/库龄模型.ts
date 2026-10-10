@@ -1,3 +1,5 @@
+import { 命中多选, 命中字段搜索, 校验字段搜索 } from '@/组件/筛选/筛选工具'
+
 export interface AgingRecord {
   id: string
   organization: string
@@ -47,11 +49,13 @@ export interface AgingFilters {
   snapshotDate: string
   keywordType: 'systemSku' | 'warehouseSku' | 'name'
   keyword: string
-  quality: string
+  searchMatch: 'contains' | 'exact'
+  quality: string[]
   batchNo: string
+  batchMatch: 'contains' | 'exact'
   minAge: string
   maxAge: string
-  issue: string
+  issue: string[]
 }
 
 export type AgingSummary = Pick<AgingRecord,
@@ -75,7 +79,7 @@ export type AgingDetailGroup = Omit<AgingSummary, 'recordIds' | 'bands' | 'unkno
 }
 
 export function defaultFilters(): AgingFilters {
-  return { providers: [], accounts: [], warehouses: [], snapshotDate: '', keywordType: 'systemSku', keyword: '', quality: '', batchNo: '', minAge: '', maxAge: '', issue: '' }
+  return { providers: [], accounts: [], warehouses: [], snapshotDate: '', keywordType: 'systemSku', keyword: '', searchMatch: 'exact', quality: [], batchNo: '', batchMatch: 'exact', minAge: '', maxAge: '', issue: [] }
 }
 
 export function latestSnapshotDate(rows: AgingRecord[]): string {
@@ -83,7 +87,10 @@ export function latestSnapshotDate(rows: AgingRecord[]): string {
 }
 
 export function validateAgingFilters(filters: AgingFilters): string {
-  if (filters.keywordType !== 'name' && new Set(filters.keyword.split(/\r?\n/).map(word => word.trim()).filter(Boolean)).size > 200) return '批量 SKU 最多 200 个，请减少查询内容。'
+  const 搜索错误 = 校验字段搜索(filters.keyword, filters.searchMatch ?? (filters.keywordType === 'name' ? 'contains' : 'exact'), filters.keywordType === 'name' ? 'text' : 'identifier')
+  if (搜索错误) return 搜索错误
+  const 批次错误 = 校验字段搜索(filters.batchNo, filters.batchMatch ?? 'exact', 'identifier')
+  if (批次错误) return 批次错误
   if ([filters.minAge, filters.maxAge].some(value => value.trim() !== '' && (!/^\d+$/.test(value.trim()) || !Number.isSafeInteger(Number(value))))) return '库龄范围请输入非负整数天。'
   if (filters.minAge.trim() !== '' && filters.maxAge.trim() !== '' && Number(filters.minAge) > Number(filters.maxAge)) return '库龄结束天数应大于或等于起始天数。'
   if (filters.snapshotDate && !/^\d{4}-\d{2}-\d{2}$/.test(filters.snapshotDate)) return '请选择有效的快照日期。'
@@ -133,15 +140,15 @@ function compareAgingRecords(a: AgingRecord, b: AgingRecord): number {
 }
 
 export function filterAgingRecords(rows: AgingRecord[], filters: AgingFilters): AgingRecord[] {
-  const words = filters.keyword.split(/\r?\n/).map(word => word.trim()).filter(Boolean)
+  if (validateAgingFilters(filters)) return []
   const scoped = rows.filter(row =>
-    (!filters.providers.length || filters.providers.includes(row.provider)) &&
-    (!filters.accounts.length || filters.accounts.includes(row.accountId)) &&
-    (!filters.warehouses.length || filters.warehouses.includes(row.warehouseId)) &&
-    (!words.length || (filters.keywordType === 'name' ? row.name.includes(filters.keyword.trim()) : words.includes(row[filters.keywordType]))) &&
-    (!filters.quality || row.quality === filters.quality) &&
-    (!filters.batchNo.trim() || row.batchNo === filters.batchNo.trim()) &&
-    (!filters.issue || agingIssues(row).includes(filters.issue)) &&
+    命中多选(filters.providers, row.provider) &&
+    命中多选(filters.accounts, row.accountId) &&
+    命中多选(filters.warehouses, row.warehouseId) &&
+    命中字段搜索(row[filters.keywordType], filters.keyword, filters.searchMatch ?? (filters.keywordType === 'name' ? 'contains' : 'exact'), filters.keywordType === 'name' ? 'text' : 'identifier') &&
+    命中多选(filters.quality, row.quality) &&
+    命中字段搜索(row.batchNo, filters.batchNo, filters.batchMatch ?? 'exact', 'identifier') &&
+    (!filters.issue.length || filters.issue.some(issue => agingIssues(row).includes(issue))) &&
     (!filters.minAge.trim() || (isValidAge(row.agingDays) && row.agingDays >= Number(filters.minAge))) &&
     (!filters.maxAge.trim() || (isValidAge(row.agingDays) && row.agingDays <= Number(filters.maxAge))),
   )

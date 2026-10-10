@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import {
   ArrowDown,
   CopyDocument,
@@ -7,19 +7,15 @@ import {
   Link,
   MoreFilled,
   QuestionFilled,
-  Search,
 } from '@element-plus/icons-vue'
 import {
   ElButton,
-  ElDatePicker,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
   ElEmpty,
   ElForm,
-  ElFormItem,
   ElIcon,
-  ElInput,
   ElMessage,
   ElOption,
   ElPagination,
@@ -33,6 +29,11 @@ import {
 import { useRouter } from 'vue-router'
 
 import type { 原型标注 } from '@/类型/标注'
+import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import TimeRange from '@/组件/筛选/时间范围.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
+import { 命中多选 } from '@/组件/筛选/筛选工具'
 import AllOrderProductImage from './商品缩略图.vue'
 import { 共享订单 } from '../订单处理/演示会话'
 import {
@@ -47,27 +48,34 @@ import {
   获取路由摘要,
   筛选全渠道订单,
   规范化筛选条件,
+  全渠道搜索字段,
+  校验全渠道订单筛选,
+  排序全渠道订单,
 } from './订单工具'
 import type { 全渠道订单, 全渠道订单筛选条件, 快速视图 } from './类型'
 
 const router = useRouter()
 const 订单列表 = 共享订单
 
-const 创建默认筛选条件 = (): 全渠道订单筛选条件 => ({
+const 创建默认筛选条件 = () => ({
   keyword: '',
-  platform: '',
-  store: '',
-  processingStatus: '',
-  dateType: 'orderedAt',
-  dateRange: [],
-  platformStatus: '',
-  syncStatus: '',
-  skuStatus: '',
-  countryCode: '',
+  searchType: 'platformOrderNo',
+  searchMatch: 'contains' as 'contains' | 'exact',
+  platform: [] as string[],
+  store: [] as string[],
+  processingStatus: [] as string[],
+  dateType: 'orderedAt' as 全渠道订单筛选条件['dateType'],
+  dateRange: null as string[] | null,
+  platformStatus: [] as string[],
+  syncStatus: [] as string[],
+  skuStatus: [] as string[],
+  countryCode: [] as string[],
 })
 
-const 筛选条件 = reactive<全渠道订单筛选条件>(创建默认筛选条件())
-const 已应用筛选条件 = reactive<全渠道订单筛选条件>(创建默认筛选条件())
+const 筛选条件 = reactive(创建默认筛选条件())
+const 已应用筛选条件 = reactive(创建默认筛选条件())
+const 排序 = ref({ field: 'orderedAt', direction: 'desc' as 'asc' | 'desc' })
+const 排序字段 = [{ value: 'orderedAt', label: '下单时间' }, { value: 'shipByAt', label: '最晚发货' }, { value: 'lastSyncedAt', label: '最近同步' }]
 const 当前快速视图 = ref<快速视图>('全部')
 const 已应用快速视图 = ref<快速视图>('全部')
 const 高级筛选展开 = ref(false)
@@ -79,54 +87,37 @@ const 选择全部匹配 = ref(false)
 
 const 复制筛选条件 = (来源: 全渠道订单筛选条件): 全渠道订单筛选条件 => ({
   ...来源,
-  dateRange: 来源.dateRange?.length === 2 ? [...来源.dateRange] as [string, string] : [],
+  ...Object.fromEntries(Object.entries(来源).filter(([, 值]) => Array.isArray(值)).map(([键, 值]) => [键, [...值 as string[]]])),
 })
 
-const 日期快捷项 = [
-  {
-    text: '近 7 天',
-    value: () => {
-      const 结束 = new Date()
-      const 开始 = new Date()
-      开始.setDate(开始.getDate() - 6)
-      return [开始, 结束]
-    },
-  },
-  {
-    text: '近 30 天',
-    value: () => {
-      const 结束 = new Date()
-      const 开始 = new Date()
-      开始.setDate(开始.getDate() - 29)
-      return [开始, 结束]
-    },
-  },
-]
-
-const 平台选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.platformCode))])
-const 店铺选项 = computed(() => [...new Set(订单列表.value
-  .filter((订单) => !筛选条件.platform || 订单.platformCode === 筛选条件.platform)
-  .map((订单) => 订单.storeName))])
+const 平台选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.platformCode))].map(值 => ({ value: 值, label: 值 })))
+const 店铺选项 = computed(() => [...new Map(订单列表.value
+  .filter((订单) => 命中多选(筛选条件.platform, 订单.platformCode))
+  .map((订单) => [订单.storeId, { value: 订单.storeId, label: 订单.storeName }])).values()])
 const 平台状态选项 = computed(() => [
   ...[...new Set(订单列表.value
-    .filter((订单) => 订单.platformCode === 'eBay' && (!筛选条件.platform || 筛选条件.platform === 'eBay'))
+    .filter((订单) => 订单.platformCode === 'eBay' && 命中多选(筛选条件.platform, 'eBay'))
     .map((订单) => 订单.platformOrderStatus)
     .filter((状态): 状态 is string => Boolean(状态)))]
     .map((状态) => ({ label: 状态, value: 状态 })),
-  ...(筛选条件.platform !== 'eBay' ? [{ label: '状态映射待接入', value: '__NOT_INTEGRATED__' }] : []),
+  ...(!筛选条件.platform.length || 筛选条件.platform.some(值 => 值 !== 'eBay') ? [{ label: '状态映射待接入', value: '__NOT_INTEGRATED__' }] : []),
 ])
-const 国家选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.address.countryCode))])
+const 国家选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.address.countryCode))].map(值 => ({ value: 值, label: 值 })))
+const OMS状态选项 = [{ value: '__EMPTY__', label: '未进入处理 / 不适用' }, ...['待审核', '待推单', '待发货', '已发货', '异常', '不发货'].map(值 => ({ value: 值, label: 值 }))]
+const 同步状态选项 = (['已同步', '同步中', '同步失败', '待同步'] as const).map(值 => ({ value: 值, label: 获取同步状态说明(值).text }))
+const SKU状态选项 = (['成功', '待解析', '缺失', '冲突', '失效', '查询失败'] as const).map(值 => ({ value: 值, label: 获取SKU状态说明(值).text }))
+watch(店铺选项, 选项 => { 筛选条件.store = 筛选条件.store.filter(值 => 选项.some(项 => 项.value === 值)) })
+watch(平台状态选项, 选项 => { 筛选条件.platformStatus = 筛选条件.platformStatus.filter(值 => 选项.some(项 => 项.value === 值)) })
 const 视图数量 = computed(() => ({
   全部: 订单列表.value.length,
   自配送: 订单列表.value.filter((订单) => 订单.fulfillmentMode === '自配送').length,
   平台履约: 订单列表.value.filter((订单) => 订单.fulfillmentMode === '平台履约').length,
 }))
 
-const 筛选结果 = computed(() => 筛选全渠道订单(
-  订单列表.value,
-  已应用筛选条件,
-  已应用快速视图.value,
-))
+const 筛选结果 = computed(() => {
+  const 结果 = 筛选全渠道订单(订单列表.value, 已应用筛选条件, 已应用快速视图.value)
+  return 排序全渠道订单(结果, 排序.value)
+})
 
 const 当前页数据 = computed(() => {
   const 起始 = (当前页.value - 1) * 每页条数.value
@@ -139,7 +130,7 @@ const 高级筛选数量 = computed(() => [
   筛选条件.syncStatus,
   筛选条件.skuStatus,
   筛选条件.countryCode,
-].filter(Boolean).length)
+].filter(值 => 值.length).length)
 
 const 有生效筛选 = computed(() => Boolean([
   已应用筛选条件.keyword,
@@ -150,25 +141,21 @@ const 有生效筛选 = computed(() => Boolean([
   已应用筛选条件.syncStatus,
   已应用筛选条件.skuStatus,
   已应用筛选条件.countryCode,
-].filter(Boolean).length || 已应用筛选条件.dateRange?.length || 已应用快速视图.value !== '全部'))
+].filter(值 => 值.length).length || 已应用筛选条件.dateRange?.length || 已应用快速视图.value !== '全部'))
 
 const 查询待应用 = computed(() => JSON.stringify(规范化筛选条件(筛选条件)) !== JSON.stringify(规范化筛选条件(已应用筛选条件)))
 const 生效条件摘要 = computed(() => {
-  const 显示名: Record<string, string> = { keyword: '关键词', platform: '平台', store: '店铺', processingStatus: 'OMS 状态', platformStatus: '平台状态', syncStatus: '同步', skuStatus: 'SKU', countryCode: '目的地' }
+  const 显示名: Record<string, string> = { keyword: 全渠道搜索字段.find(项 => 项.value === 已应用筛选条件.searchType)?.label ?? '平台订单号', platform: '平台', store: '店铺', processingStatus: 'OMS 状态', platformStatus: '平台状态', syncStatus: '同步', skuStatus: 'SKU', countryCode: '目的地' }
   const 条件 = Object.entries(显示名).flatMap(([键, 名称]) => {
     const 值 = 已应用筛选条件[键 as keyof 全渠道订单筛选条件]
-    if (!值) return []
-    const 文本 = 值 === '__EMPTY__' ? '未进入订单处理' : 值 === '__NOT_INTEGRATED__' ? '状态映射待接入' : String(值)
+    if (!值 || !值.length) return []
+    const 显示值 = (项: string) => 项 === '__EMPTY__' ? '未进入订单处理' : 项 === '__NOT_INTEGRATED__' ? '状态映射待接入' : 键 === 'store' ? 订单列表.value.find(订单 => 订单.storeId === 项)?.storeName ?? 项 : 项
+    const 文本 = Array.isArray(值) ? 值.map(显示值).join('、') : 值
     return [`${名称}：${文本}`]
   })
   if (已应用筛选条件.dateRange?.length) 条件.push(`日期：${已应用筛选条件.dateRange.join(' 至 ')}`)
   return 条件
 })
-
-function 平台条件变更() {
-  if (!店铺选项.value.includes(筛选条件.store)) 筛选条件.store = ''
-  if (!平台状态选项.value.some((状态) => 状态.value === 筛选条件.platformStatus)) 筛选条件.platformStatus = ''
-}
 
 async function 处理分页变化() {
   if (!选择全部匹配.value) { 清除选择(); return }
@@ -189,7 +176,7 @@ const 标注 = (
   说明,
   路由: '/oms/orders/all',
   锚点: id,
-  版本: '0.2.0',
+  版本: '0.3.0',
   状态: '待评审',
   事实等级,
   prd引用,
@@ -207,17 +194,17 @@ const 视图标注 = 标注(
 
 const 筛选标注 = 标注(
   'oms.all-order.list.filters',
-  '多平台通用字段筛选',
-  '筛选项只使用全渠道通用订单字段；具体默认项和排列顺序仍需按真实作业频率评审。',
+  '通用多选、字段搜索与排序',
+  '复用公共筛选组件，分类多选；默认平台订单号模糊搜索，可切换既有编号、买家及商品字段并逐字段多行精确查询。日期以北京时间解释到秒，排序只作用于已应用结果。',
   '合理假设',
-  ['PRD/全渠道订单功能PRD.md#63-查询与筛选', 'PRD/订单单据字段标准.md#6-全渠道标准订单'],
+  ['PRD/全渠道订单功能PRD.md#20-2026-10-09-统一列表筛选组件', 'PRD/列表筛选组件规范.md', 'PRD/订单单据字段标准.md#6-全渠道标准订单'],
 )
 Object.assign(筛选标注, {
   分类: '交互', 触发方式: ['修改筛选后点击查询或按 Enter；重置立即生效。'],
-  系统动作: ['平台变更后联动店铺与平台状态字典，清除不兼容草稿条件。', '查询时复制筛选快照、回到第一页并清除旧选择。'],
+  系统动作: ['分类同字段 OR、字段之间 AND，商品搜索和 SKU 解析状态须命中同一商品。', '平台多选后联动店铺与平台状态字典，清除不兼容草稿。', '查询时逐个复制数组形成快照、回到第一页并清除旧选择。', '多行应用校验最多1000项后精确查询；取消不提交。排序确定只重排已应用结果并清选，取消不生效。'],
   成功结果: ['已生效条件显示在结果上方；尚未提交的条件显示待查询提示。'],
-  异常处理: ['无匹配结果时保留当前筛选，可重置重新查询。'],
-  验收要点: ['平台 eBay 切换 Temu 后原 eBay 店铺及状态被清除。', '重置清空折叠条件；修改筛选不提前改变结果。'],
+  异常处理: ['非法、不完整或倒置时间及超限精确搜索阻断，保留当前已应用结果；来源时间非法或无时区时不命中时间条件。', '无匹配结果时保留当前筛选，可重置重新查询。'],
+  验收要点: ['分类取消、外部点击或 Esc 不提交；平台多选后仅清不兼容值。', '重置清空折叠条件、恢复平台订单号模糊搜索及默认排序；修改草稿不提前改变结果。', '覆盖同商品约束、北京跨日与含起止秒、已应用快照和排序清选。'],
 })
 
 const 批量标注 = 标注(
@@ -295,6 +282,8 @@ function 清除选择(提示 = false) {
 }
 
 function 执行查询() {
+  const 错误 = 校验全渠道订单筛选(筛选条件)
+  if (错误) { ElMessage.warning(错误); return }
   清除选择(true)
   Object.assign(已应用筛选条件, 复制筛选条件(筛选条件))
   已应用快速视图.value = 当前快速视图.value
@@ -312,7 +301,8 @@ function 重置筛选() {
   清除选择(true)
   const 默认值 = 创建默认筛选条件()
   Object.assign(筛选条件, 默认值)
-  Object.assign(已应用筛选条件, 默认值)
+  Object.assign(已应用筛选条件, 复制筛选条件(默认值))
+  排序.value = { field: 'orderedAt', direction: 'desc' }
   当前快速视图.value = '全部'
   已应用快速视图.value = '全部'
   当前页.value = 1
@@ -411,90 +401,33 @@ function 获取行OMS状态(原始订单: unknown) {
     <section v-prototype="筛选标注" class="筛选面板">
       <ElForm :model="筛选条件" class="筛选表单" @submit.prevent="执行查询">
         <div class="筛选主网格">
-          <ElFormItem>
-            <ElInput
-              v-model="筛选条件.keyword"
-              clearable
-              aria-label="全渠道订单关键词"
-              placeholder="系统单号 / 平台单号 / SKU / 履约单 / 跟踪号"
-              @keyup.enter="执行查询"
-            >
-              <template #prefix><ElIcon><Search /></ElIcon></template>
-            </ElInput>
-          </ElFormItem>
-          <ElFormItem>
-            <ElSelect v-model="筛选条件.platform" clearable filterable aria-label="平台" placeholder="全部平台" @change="平台条件变更">
-              <ElOption v-for="平台 in 平台选项" :key="平台" :label="平台" :value="平台" />
+          <MultiFilter v-model="筛选条件.platform" :options="平台选项" placeholder="平台" :width="130" />
+          <MultiFilter v-model="筛选条件.store" :options="店铺选项" placeholder="店铺" :width="150" />
+          <MultiFilter v-model="筛选条件.processingStatus" :options="OMS状态选项" placeholder="OMS处理状态" :width="150" />
+          <FieldSearch v-model="筛选条件.keyword" v-model:field="筛选条件.searchType" v-model:mode="筛选条件.searchMatch" :fields="全渠道搜索字段" aria-prefix="全渠道订单" @search="执行查询" />
+          <div class="日期筛选组合">
+            <ElSelect v-model="筛选条件.dateType" aria-label="全渠道订单日期类型" class="日期类型选择">
+              <ElOption v-for="字段 in 排序字段" :key="字段.value" :label="字段.label" :value="字段.value" />
             </ElSelect>
-          </ElFormItem>
-          <ElFormItem>
-            <ElSelect v-model="筛选条件.store" clearable filterable aria-label="店铺" placeholder="全部店铺">
-              <ElOption v-for="店铺 in 店铺选项" :key="店铺" :label="店铺" :value="店铺" />
-            </ElSelect>
-          </ElFormItem>
-          <ElFormItem>
-            <ElSelect v-model="筛选条件.processingStatus" clearable aria-label="OMS处理状态" placeholder="OMS处理状态">
-              <ElOption label="未进入处理 / 不适用" value="__EMPTY__" />
-              <ElOption v-for="状态 in ['待审核', '待推单', '待发货', '已发货', '异常', '不发货']" :key="状态" :label="状态" :value="状态" />
-            </ElSelect>
-          </ElFormItem>
-          <ElFormItem>
-            <div class="日期筛选组合">
-              <ElSelect v-model="筛选条件.dateType" aria-label="日期类型" class="日期类型选择">
-                <ElOption label="下单时间" value="orderedAt" />
-                <ElOption label="最晚发货" value="shipByAt" />
-                <ElOption label="最近同步" value="lastSyncedAt" />
-              </ElSelect>
-              <ElDatePicker
-                v-model="筛选条件.dateRange"
-                class="日期范围选择"
-                type="daterange"
-                unlink-panels
-                clearable
-                format="YYYY-MM-DD"
-                value-format="YYYY-MM-DD"
-                range-separator="至"
-                start-placeholder="开始日期"
-                end-placeholder="结束日期"
-                aria-label="订单日期范围"
-                :shortcuts="日期快捷项"
-              />
-            </div>
-          </ElFormItem>
+            <TimeRange v-model="筛选条件.dateRange" aria-prefix="全渠道订单北京时间" />
+          </div>
+          <ListSort v-model="排序" :fields="排序字段" aria-prefix="全渠道订单" @change="当前页 = 1; 清除选择(true)" />
           <div class="筛选操作">
             <ElButton type="primary" native-type="submit">查询</ElButton>
             <ElButton @click="重置筛选">重置</ElButton>
             <ElButton @click="高级筛选展开 = !高级筛选展开">
-              <ElIcon><Filter /></ElIcon>
-              更多筛选
+              <ElIcon><Filter /></ElIcon>更多筛选
               <b v-if="高级筛选数量">{{ 高级筛选数量 }}</b>
               <ElIcon class="展开箭头" :class="{ 展开: 高级筛选展开 }"><ArrowDown /></ElIcon>
             </ElButton>
           </div>
         </div>
-
         <Transition name="高级筛选">
           <div v-if="高级筛选展开" class="筛选高级网格">
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.platformStatus" clearable filterable aria-label="平台订单状态" placeholder="平台订单状态原值">
-                <ElOption v-for="状态 in 平台状态选项" :key="状态.value" :label="状态.label" :value="状态.value" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.syncStatus" clearable aria-label="数据同步状态" placeholder="数据同步状态">
-                <ElOption v-for="状态 in ['已同步', '同步中', '同步失败', '待同步']" :key="状态" :label="获取同步状态说明(状态 as any).text" :value="状态" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.skuStatus" clearable aria-label="SKU解析状态" placeholder="SKU解析状态">
-                <ElOption v-for="状态 in ['成功', '待解析', '缺失', '冲突', '失效', '查询失败']" :key="状态" :label="获取SKU状态说明(状态 as any).text" :value="状态" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.countryCode" clearable filterable aria-label="目的国家或地区" placeholder="目的国家 / 地区">
-                <ElOption v-for="国家 in 国家选项" :key="国家" :label="国家" :value="国家" />
-              </ElSelect>
-            </ElFormItem>
+            <MultiFilter v-model="筛选条件.platformStatus" :options="平台状态选项" placeholder="平台订单状态" :width="150" />
+            <MultiFilter v-model="筛选条件.syncStatus" :options="同步状态选项" placeholder="数据同步状态" :width="140" />
+            <MultiFilter v-model="筛选条件.skuStatus" :options="SKU状态选项" placeholder="SKU解析状态" :width="140" />
+            <MultiFilter v-model="筛选条件.countryCode" :options="国家选项" placeholder="目的国家 / 地区" :width="150" />
           </div>
         </Transition>
       </ElForm>
@@ -861,42 +794,13 @@ function 获取行OMS状态(原始订单: unknown) {
   background: #fafbfc;
 }
 
-.筛选表单 :deep(.el-form-item) {
-  min-width: 0;
-  margin: 0;
-}
-
-.筛选表单 :deep(.el-select),
-.筛选表单 :deep(.el-date-editor) {
-  width: 100%;
-}
-
-.筛选主网格 {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(250px, 1.4fr) 128px 168px 158px minmax(342px, 1.25fr) max-content;
-  align-items: center;
-  gap: 8px;
-}
-
-.日期筛选组合 {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 6px;
-}
-
-.日期类型选择,
-.日期范围选择 {
-  min-width: 0;
-}
-
-.筛选操作 {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  white-space: nowrap;
-}
+.筛选表单 :deep(.el-form-item) { min-width: 0; margin: 0; }
+.筛选主网格 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.日期筛选组合 { display: flex; width: 400px; flex: 0 0 400px; align-items: center; }
+.日期类型选择 { width: 94px; flex: 0 0 94px; min-width: 0; }
+.日期类型选择 :deep(.el-select__wrapper) { padding-inline: 8px; border-radius: 4px 0 0 4px; }
+.日期类型选择 :deep(.el-select__selected-item) { font-size: 12px; }
+.筛选操作 { display: flex; align-items: center; gap: 0; white-space: nowrap; }
 
 .筛选操作 b {
   display: inline-grid;
@@ -917,15 +821,7 @@ function 获取行OMS状态(原始订单: unknown) {
   transform: rotate(180deg);
 }
 
-.筛选高级网格 {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #dfe3e8;
-}
+.筛选高级网格 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #dfe3e8; }
 
 .高级筛选-enter-active,
 .高级筛选-leave-active {
@@ -1455,14 +1351,6 @@ function 获取行OMS状态(原始订单: unknown) {
 }
 
 @media (max-width: 1500px) {
-  .筛选主网格 {
-    grid-template-columns: minmax(240px, 1.45fr) 124px 160px 154px minmax(330px, 1.3fr);
-  }
-
-  .筛选操作 {
-    grid-column: 1 / -1;
-  }
-
   .批量栏 {
     min-height: 74px;
     flex-basis: 74px;
@@ -1486,14 +1374,7 @@ function 获取行OMS状态(原始订单: unknown) {
 
   }
 
-@container all-order (max-width: 1200px) {
-  .筛选主网格 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .筛选主网格 > :nth-child(5) { grid-column: span 2; }
-  .筛选操作 { grid-column: 1 / -1; justify-content: flex-start; }
-  .筛选高级网格 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 @container all-order (max-width: 750px) {
-  .筛选主网格 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .边界说明 { display: none; }
   .快捷视图栏 { gap: 4px; }
   }

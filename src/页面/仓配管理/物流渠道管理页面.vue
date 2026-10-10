@@ -8,6 +8,12 @@ import ChannelFieldHelp from './渠道字段说明.vue'
 import { 仓储服务商, 演示时间 } from './仓配模型'
 import { 渠道会话, 渠道会话审计 } from './仓配会话'
 import { 渠道国家, 创建空白标发设置, 创建渠道配置样例, 复制渠道, 校验渠道配置, 渠道变更摘要, 追加渠道日志, 批量渠道启停, 同步渠道清单, 渠道CSV, type 渠道配置, type 渠道处理结果 } from './物流渠道配置'
+import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import DateRange from '@/组件/筛选/时间范围.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
+import { 排序列表, 读取排序时刻 } from '@/组件/筛选/筛选工具'
+import { 默认渠道筛选, 校验渠道筛选, 查询物流渠道, 读取渠道同步范围 } from './物流渠道筛选模型'
 
 const 渠道列表 = 渠道会话
 const 账号列表 = computed(() => [...new Map(渠道列表.value.map(r => [r.accountId, { id: r.accountId, label: `${r.provider} · ${r.account}`, provider: r.provider }])).values()])
@@ -20,15 +26,25 @@ const 导航数据 = computed<导航节点[]>(() => [{ id: 'all', label: '全部
 })])
 watch(导航搜索, v => 树.value?.filter(v))
 function 过滤导航(value: string, data: Record<string, unknown>) { return !value || `${data.label} ${data.provider || ''}`.toLowerCase().includes(value.trim().toLowerCase()) }
-const 筛选 = reactive({ keyword: '', accountId: '', state: '', country: '' }), 已应用 = reactive({ ...筛选 })
+const 筛选 = reactive(默认渠道筛选()), 已应用 = reactive(默认渠道筛选()), 查询错误 = ref('')
+const 排序 = ref({ field: '', direction: 'asc' as 'asc' | 'desc' })
+const 搜索字段 = [{ value: 'name', label: '渠道名称', kind: 'text' as const }, { value: 'code', label: '渠道代码', kind: 'identifier' as const }]
+const 排序字段 = [{ value: 'name', label: '渠道名称', kind: 'text' as const }, { value: 'code', label: '渠道代码', kind: 'text' as const }, { value: 'updatedAt', label: '更新时间', kind: 'time' as const }]
+watch(() => 筛选.keywordType, 类型 => { 筛选.searchMatch = 类型 === 'name' ? 'contains' : 'exact' })
 const 页码 = ref(1), 页大小 = ref(20), 选择 = ref<渠道配置[]>([]), 表格 = ref<{ clearSelection: () => void }>()
 const 可选账号 = computed(() => 账号列表.value.filter(r => !当前导航.value.provider || r.provider === 当前导航.value.provider))
-const 查询结果 = computed(() => 渠道列表.value.filter(r => (!当前导航.value.provider || r.provider === 当前导航.value.provider) && (!当前导航.value.warehouseId || r.warehouseId === 当前导航.value.warehouseId) && (!已应用.keyword.trim() || [r.name, r.code].some(s => s.toLowerCase().includes(已应用.keyword.trim().toLowerCase()))) && (!已应用.accountId || r.accountId === 已应用.accountId) && (!已应用.state || r.enabled === (已应用.state === '启用')) && (!已应用.country || (已应用.country === 'unknown' ? !r.countries.length : r.countries.includes(已应用.country)))))
+const 查询结果 = computed(() => {
+  const rows = 查询物流渠道(渠道列表.value, 已应用, 当前导航.value)
+  if (排序.value.field === 'updatedAt') return 排序列表(rows, row => 读取排序时刻(row.updatedAt, true), 排序.value.direction, row => row.id)
+  if (['name', 'code'].includes(排序.value.field)) return 排序列表(rows, row => row[排序.value.field as 'name' | 'code'], 排序.value.direction, row => row.id)
+  return rows
+})
 const 当前页 = computed(() => 查询结果.value.slice((页码.value - 1) * 页大小.value, 页码.value * 页大小.value))
 function 清空选择() { 选择.value = []; 表格.value?.clearSelection() }
-function 查询() { Object.assign(已应用, 筛选); 页码.value = 1; 清空选择() }
-function 重置() { Object.assign(筛选, { keyword: '', accountId: '', state: '', country: '' }); 查询() }
-function 选择导航(node: 导航节点) { 当前导航.value = node; 筛选.accountId = ''; 已应用.accountId = ''; 页码.value = 1; 清空选择() }
+function 查询() { 查询错误.value = 校验渠道筛选(筛选); if (查询错误.value) return; Object.assign(已应用, { ...筛选, accountId: [...筛选.accountId], state: [...筛选.state], country: [...筛选.country], dates: 筛选.dates ? [...筛选.dates] : null }); 页码.value = 1; 清空选择() }
+function 重置() { Object.assign(筛选, 默认渠道筛选()); 排序.value = { field: '', direction: 'asc' }; 查询() }
+function 应用排序() { 页码.value = 1; 清空选择() }
+function 选择导航(node: 导航节点) { 当前导航.value = node; 筛选.accountId = []; 已应用.accountId = []; 页码.value = 1; 清空选择() }
 function 翻页() { 清空选择() }
 function 改每页() { 页码.value = 1; 清空选择() }
 function 刷新() { 查询(); ElMessage.success('已按当前条件刷新列表') }
@@ -80,8 +96,8 @@ const 同步中 = ref(false)
 async function 同步渠道() {
   if (同步中.value) return
   // 固定点击时的来源范围，不使用列表结果、勾选或分页作为 API 查询范围。
-  const { provider, warehouseId } = 当前导航.value, accountId = 已应用.accountId
-  const sources = 创建渠道配置样例(true).filter(r => (!provider || r.provider === provider) && (!warehouseId || r.warehouseId === warehouseId) && (!accountId || r.accountId === accountId))
+  const navigation = { provider: 当前导航.value.provider, warehouseId: 当前导航.value.warehouseId }, accountIds = [...已应用.accountId]
+  const sources = 读取渠道同步范围(创建渠道配置样例(true), navigation, accountIds)
   if (!sources.length) { ElMessage.info('当前范围没有可同步的仓库账号'); return }
   同步中.value = true
   try {
@@ -93,7 +109,7 @@ async function 同步渠道() {
 }
 const 导出打开 = ref(false), 导出范围 = ref('all'), 导出全部 = ref<渠道配置[]>([]), 导出已选 = ref<渠道配置[]>([]), 导出说明 = ref('')
 const 导出数据 = computed(() => 导出范围.value === 'all' ? 导出全部.value : 导出已选.value)
-function 打开导出() { 导出全部.value = 复制渠道(查询结果.value); 导出已选.value = 复制渠道(选择.value); 导出范围.value = 选择.value.length ? 'selected' : 'all'; 导出说明.value = `${当前导航.value.provider || '全部服务商'} / ${当前导航.value.warehouseId ? 当前导航.value.label : '全部仓库'}；关键词：${已应用.keyword || '全部'}；账号：${账号列表.value.find(a => a.id === 已应用.accountId)?.label || '全部'}${已应用.accountId ? `（${已应用.accountId}）` : ''}；状态：${已应用.state || '全部'}；目的国家：${已应用.country === 'unknown' ? '未配置' : 渠道国家.find(c => c.code === 已应用.country)?.name || '全部'}`; 导出打开.value = true }
+function 打开导出() { 导出全部.value = 复制渠道(查询结果.value); 导出已选.value = 复制渠道(选择.value); 导出范围.value = 选择.value.length ? 'selected' : 'all'; 导出说明.value = `${当前导航.value.provider || '全部服务商'} / ${当前导航.value.warehouseId ? 当前导航.value.label : '全部仓库'}；${已应用.keywordType === 'name' ? '渠道名称' : '渠道代码'}（${已应用.searchMatch === 'exact' ? '精确' : '模糊'}）：${已应用.keyword || '全部'}；账号：${已应用.accountId.map(id => `${账号列表.value.find(a => a.id === id)?.label || id}（${id}）`).join('、') || '全部'}；状态：${已应用.state.join('、') || '全部'}；目的国家：${已应用.country.map(code => code === 'unknown' ? '未配置' : 渠道国家.find(c => c.code === code)?.name || code).join('、') || '全部'}；更新时间：${已应用.dates?.join(' 至 ') || '不限'}`; 导出打开.value = true }
 function 导出() {
   if (!导出数据.value.length) return
   const count = 导出数据.value.length, url = URL.createObjectURL(new Blob([渠道CSV(导出数据.value)], { type: 'text/csv;charset=utf-8;' }))
@@ -103,7 +119,7 @@ function 导出() {
 function 数值输入(key: 'minWeight' | 'maxWeight' | 'maxLength' | 'maxWidth' | 'maxHeight', value: number | undefined | null) { 草稿[key] = value ?? null }
 const 标注细则: Record<string, Partial<原型标注>> = {
   overview: { 分类: '页面', 前置条件: ['从 OMS → 仓配管理 → 物流渠道管理进入。'], 触发方式: ['进入三方仓物流分类。'], 系统动作: ['加载当前浏览器会话的 60 条虚构渠道；四类入口仅开放三方仓物流。'], 成功结果: ['账号、仓库与来源身份完整区分；切中台页签保留编辑，刷新浏览器恢复初始样例。'], 验收要点: ['API 对接物流、自定义物流、平台物流均不可进入。'] },
-  filters: { 触发方式: ['左侧选择服务商或仓库；输入关键词并点击查询或按 Enter。'], 系统动作: ['导航范围、渠道名称/渠道代码模糊搜索、稳定账号 ID、启停、目的国取交集；查询回首页并清除勾选。'], 成功结果: ['表格展示当前页，页脚显示命中总数。'], 异常处理: ['国家未配置单独筛选，不视为全球可达。'], 验收要点: ['同名账号不跨服务商串行；重置保留当前导航范围。'] },
+  filters: { 版本: '2026-10-09', 触发方式: ['导航限定范围；公共多选确定后写草稿，查询才应用；字段搜索支持名称/内部代码模糊、精确与多行；排序确定立即重排。'], 系统动作: ['账号、启停、目的国家分类内 OR、字段间 AND；更新时间使用中文北京时间秒级范围。查询回首页并清除勾选。', '同步只按导航与已应用账号数组 OR，不受搜索、启停、国家、时间、排序、勾选和分页限制；外部渠道代码不进入任何搜索。'], 成功结果: ['表格展示当前页，页脚显示命中总数；排序不提交未应用草稿。'], 异常处理: ['国家未配置不视为全球可达；无效时间或超额精确输入不替换上次查询。'], 验收要点: ['同名账号按稳定 ID 隔离，多账号同步范围完整；重置保留导航，固定紧凑控件按组换行。'], prd引用: ['PRD/物流渠道管理功能PRD.md#42-筛选与分页', 'PRD/列表筛选组件规范.md'] },
   navigation: { 触发方式: ['搜索服务商或仓库，展开服务商并选择节点。'], 系统动作: ['以服务商→仓库缩小范围，账号通过右侧稳定 ID 筛选；切节点清空账号和勾选。'], 验收要点: ['同名美西仓分属不同服务商，筛选结果不能合并。'] },
   mapping: { 分类: '字段', 触发方式: ['点击详情、编辑或日志。'], 系统动作: ['一行代表服务商、账号、仓库及来源渠道的独立组合；渠道代码为原型生成的 DEMO 码。', '仓库在左侧导航定位，列表不重复展示适用仓库；详情和导出保留来源仓库身份。', '业务列按最小宽度弹性分配剩余空间，宽屏填满右侧内容区；勾选、状态和操作列维持固定宽度，窄屏在表格内部横向滚动。'], 异常处理: ['不以同名渠道、同名账号或来源代码单独合并记录。'], 验收要点: ['同名渠道跨账号分别编辑与记日志。'] },
   scope: { 分类: '规则', 事实等级: '已确认', 触发方式: ['查看面单设置。'], 系统动作: ['本期固定仓配一体、仓库提供面单；仓配分离为后续范围。', '页面以业务含义解释两种模式：仓配一体由仓库提供面单并发货；仓配分离由卖家提供面单，仓库按面单发货。'], 异常处理: ['没有自传面单、API 购买面单或平台面单操作。'], 验收要点: ['不能切换到其他面单模式。'] },
@@ -123,7 +139,7 @@ const 标注细则: Record<string, Partial<原型标注>> = {
   sync: {
     前置条件: ['生产接入复用已实现的海外仓授权；具体渠道 API、请求参数及页面映射见五仓对接 PRD 第 3 节，真实账号范围、来源唯一键、完整清单及仓库面单能力仍须联调。'],
     触发方式: ['点击“同步渠道”即发起海外仓渠道查询，获取并刷新最新物流渠道信息（2026-09-29 用户确认）。'],
-    系统动作: ['生产目标：由服务端读取既有授权，调用对应海外仓的物流渠道 API，完整取得本次范围内的渠道信息后更新来源资料，再刷新列表。', '本轮范围方案（合理假设）：按当前左侧服务商/仓库及已应用的账号筛选查询；未限定账号时查询范围内全部既有授权账号，全部三方仓节点查询全部范围。关键词、启停、目的国家、勾选及分页不缩小 API 查询范围。', '按已核验来源身份幂等匹配，更新来源名称和成功同步时间；新增默认停用且标发映射为空，保留已有渠道人工维护的名称、备注、启停、限制及各平台标发设置。', '当前原型：按钮直接模拟上述流程，处理中阻止重复点击；使用本地虚构来源，尚未调用真实 API。'],
+    系统动作: ['生产目标：由服务端读取既有授权，调用对应海外仓的物流渠道 API，完整取得本次范围内的渠道信息后更新来源资料，再刷新列表。', '本轮范围方案（合理假设）：按当前左侧服务商/仓库及已应用的账号多选数组 OR 查询；未限定账号时查询范围内全部既有授权账号，全部三方仓节点查询全部范围。搜索字段及关键词、启停、目的国家、更新时间、排序、勾选及分页不缩小 API 查询范围；未查询的账号草稿不生效。', '按已核验来源身份幂等匹配，更新来源名称和成功同步时间；新增默认停用且标发映射为空，保留已有渠道人工维护的名称、备注、启停、限制及各平台标发设置。', '当前原型：按钮直接模拟上述流程，处理中阻止重复点击；使用本地虚构来源，尚未调用真实 API。'],
     成功结果: ['展示总数、成功、失败及跳过明细，按当前查询条件刷新列表；重复同步不重复新增。'],
     异常处理: ['生产要求：授权失效、超时或分页未取全时提示原因和可执行的下一步；失败范围保留旧资料及最后成功时间，修复后重试。', '来源身份冲突不取首条覆盖；一次清单未返回某渠道不删除旧记录。'],
     数据来源: ['五仓对接 PRD 第 3 节按系统字段、系统定义、API字段下载、API字段释义维护映射。外部渠道代码仅作为后台可空字段保存，不进入业务界面、搜索、日志或导出；缺少外部代码不单独阻止同步，来源身份仍须完整。4PX 目的地条件、西邮参数拼写等文档差异及真实账号能力待核验，当前仍使用虚构渠道资料。'],
@@ -154,12 +170,15 @@ function 标注(id: string, 标题: string, 说明: string): 原型标注 {
           </ElTree>
         </aside>
         <main class="渠道主体">
-          <form class="渠道筛选" @submit.prevent="查询" v-prototype="标注('filters', '组合筛选及分页', '关键词支持渠道名称和渠道代码；所有筛选取交集，查询清除勾选并回到首页。')">
-            <ElInput v-model="筛选.keyword" aria-label="渠道查询" :prefix-icon="Search" clearable placeholder="渠道名称 / 代码" class="渠道关键词" />
-            <ElSelect v-model="筛选.accountId" aria-label="仓库账号" clearable placeholder="全部仓库账号" class="渠道账号筛选"><ElOption v-for="a in 可选账号" :key="a.id" :label="a.label" :value="a.id" /></ElSelect>
-            <ElSelect v-model="筛选.state" aria-label="启停状态" clearable placeholder="启停状态" class="渠道状态筛选"><ElOption label="启用" value="启用" /><ElOption label="停用" value="停用" /></ElSelect>
-            <ElSelect v-model="筛选.country" aria-label="目的国家" clearable placeholder="目的国家 / 地区" class="渠道国家筛选"><ElOption v-for="c in 渠道国家" :key="c.code" :value="c.code" :label="c.name" /><ElOption label="未配置" value="unknown" /></ElSelect>
+          <form class="渠道筛选" @submit.prevent="查询" v-prototype="标注('filters', '组合筛选及分页', '账号、启停、国家采用公共多选；指定字段文本可多行精确 OR，更新时间含起止秒；排序仅重排已应用结果，查询清除勾选并回第一页。')">
+            <MultiFilter v-model="筛选.accountId" :options="可选账号.map(a => ({ value: a.id, label: a.label }))" placeholder="仓库账号" />
+            <MultiFilter v-model="筛选.state" :options="['启用', '停用'].map(value => ({ value, label: value }))" placeholder="启停状态" />
+            <MultiFilter v-model="筛选.country" :options="[...渠道国家.map(c => ({ value: c.code, label: c.name })), { value: 'unknown', label: '未配置' }]" placeholder="目的国家" />
+            <FieldSearch v-model="筛选.keyword" v-model:field="筛选.keywordType" v-model:mode="筛选.searchMatch" :fields="搜索字段" aria-prefix="物流渠道" @search="查询" />
+            <div class="渠道时间筛选"><span>更新时间</span><DateRange v-model="筛选.dates" aria-prefix="物流渠道更新时间" /></div>
             <div class="渠道查询动作"><ElButton type="primary" native-type="submit">查询</ElButton><ElButton @click="重置">重置</ElButton></div>
+            <ListSort v-model="排序" :fields="排序字段" aria-prefix="物流渠道" @change="应用排序" />
+            <p v-if="查询错误" class="渠道查询错误" role="alert">{{ 查询错误 }}</p>
           </form>
           <div class="渠道工具栏">
             <div class="渠道工具左"><ElButton type="primary" :icon="Refresh" :loading="同步中" @click="同步渠道" v-prototype="标注('sync', '调用海外仓 API 刷新物流渠道', '点击按钮即调用海外仓 API 获取最新物流渠道并刷新列表；接口和字段映射参见五仓对接 PRD 第 3 节。当前原型为本地模拟，真实接口待联调。')">同步渠道</ElButton><ElButton :disabled="!选择.length" @click="打开启停(true)">批量启用</ElButton><ElButton :disabled="!选择.length" @click="打开启停(false)">批量停用</ElButton><ElButton :icon="Download" :disabled="!查询结果.length" @click="打开导出" v-prototype="标注('export', '导出范围确认', '可导出当前筛选结果或本页已选，打开确认即固定数据快照。')">导出</ElButton><span class="已选提示">已选 <b>{{ 选择.length }}</b> 项</span></div>

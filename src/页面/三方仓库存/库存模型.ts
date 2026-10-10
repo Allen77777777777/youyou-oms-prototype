@@ -1,3 +1,5 @@
+import { 命中多选, 命中字段搜索, 校验字段搜索, 命中时间范围, 校验时间范围 } from '@/组件/筛选/筛选工具'
+
 export const 数量定义 = [
   { key: 'available', label: '可用数量', code: 'available_qty', definition: '仓库认定尚可分配给新出库需求的商品数量，不代表已为某一 OMS 订单预留。' },
   { key: 'reserved', label: '占用数量', code: 'reserved_qty', definition: '已分配或预留给订单、出库任务等业务，尚未完成出库且不能重复分配的商品数量。' },
@@ -54,21 +56,24 @@ Object.assign(库存样例[11]!, { presence: '本次未确认', issues: ['本次
 库存样例[5]!.warehouseSku = 库存样例[0]!.warehouseSku
 export interface 库存筛选 {
   providers: string[]; accounts: string[]; warehouses: string[]; keywordType: 'systemSku' | 'warehouseSku' | 'name'; keyword: string
-  country: string; mapping: string; issue: string; metric: 数量键; operator: '' | 'eq' | 'gt' | 'lt' | 'range'; minimum: string; maximum: string; dates: string[]
+  searchMatch: 'contains' | 'exact'; country: string[]; mapping: string[]; issue: string[]; metric: 数量键; operator: '' | 'eq' | 'gt' | 'lt' | 'range'; minimum: string; maximum: string; dates: null | string[]
 }
-export function 初始筛选(): 库存筛选 { return { providers: [], accounts: [], warehouses: [], keywordType: 'systemSku', keyword: '', country: '', mapping: '', issue: '', metric: 'available', operator: '', minimum: '', maximum: '', dates: [] } }
+export function 初始筛选(): 库存筛选 { return { providers: [], accounts: [], warehouses: [], keywordType: 'systemSku', keyword: '', searchMatch: 'exact', country: [], mapping: [], issue: [], metric: 'available', operator: '', minimum: '', maximum: '', dates: null } }
 export function 校验筛选(f: 库存筛选): string {
-  if (f.keywordType !== 'name' && new Set(f.keyword.split(/\r?\n/).map(s => s.trim()).filter(Boolean)).size > 200) return '批量 SKU 最多 200 个，请减少查询内容。'
+  const 搜索错误 = 校验字段搜索(f.keyword, f.searchMatch ?? (f.keywordType === 'name' ? 'contains' : 'exact'), f.keywordType === 'name' ? 'text' : 'identifier')
+  if (搜索错误) return 搜索错误
+  const 时间错误 = 校验时间范围(f.dates)
+  if (时间错误) return 时间错误
   if (f.operator && (!f.minimum.trim() || !Number.isFinite(Number(f.minimum)))) return '请输入有效的数量条件。'
   if (f.operator === 'range' && (!f.maximum.trim() || !Number.isFinite(Number(f.maximum)) || Number(f.minimum) > Number(f.maximum))) return '数量区间结束值应大于或等于起始值。'
   return ''
 }
 export function 查询库存(rows: 库存记录[], f: 库存筛选): 库存记录[] {
-  const words = f.keyword.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-  return rows.filter(r => (!f.providers.length || f.providers.includes(r.provider)) && (!f.accounts.length || f.accounts.includes(r.accountId)) && (!f.warehouses.length || f.warehouses.includes(r.warehouseId))
-    && (!words.length || (f.keywordType === 'name' ? r.name.includes(f.keyword.trim()) : words.includes(r[f.keywordType])))
-    && (!f.country || r.country === f.country) && (!f.mapping || r.mapping === f.mapping) && (!f.issue || 数据提示(r).includes(f.issue))
-    && (!f.dates.length || (!!r.updatedAt && Date.parse(r.updatedAt) >= Date.parse(`${f.dates[0]}T00:00:00+08:00`) && Date.parse(r.updatedAt) <= Date.parse(`${f.dates[1]}T23:59:59.999+08:00`)))
+  if (校验筛选(f)) return []
+  return rows.filter(r => 命中多选(f.providers, r.provider) && 命中多选(f.accounts, r.accountId) && 命中多选(f.warehouses, r.warehouseId)
+    && 命中字段搜索(r[f.keywordType], f.keyword, f.searchMatch ?? (f.keywordType === 'name' ? 'contains' : 'exact'), f.keywordType === 'name' ? 'text' : 'identifier')
+    && 命中多选(f.country, r.country) && 命中多选(f.mapping, r.mapping) && (!f.issue.length || f.issue.some(issue => 数据提示(r).includes(issue)))
+    && 命中时间范围(r.updatedAt, f.dates)
     && (!f.operator || (r.quantities[f.metric] !== null && ({ eq: (v: number) => v === Number(f.minimum), gt: (v: number) => v > Number(f.minimum), lt: (v: number) => v < Number(f.minimum), range: (v: number) => v >= Number(f.minimum) && v <= Number(f.maximum) }[f.operator])(r.quantities[f.metric]!))))
 }
 export function 数据提示(r: 库存记录): string[] { return [...r.issues, ...(Object.values(r.quantities).some(v => v === null) ? ['部分字段未提供'] : [])] }

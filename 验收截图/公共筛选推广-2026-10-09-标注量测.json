@@ -1,0 +1,71 @@
+[
+  {
+    "page": "全渠道订单",
+    "filterTitles": [],
+    "visibleMarkerCount": 4
+  },
+  {
+    "page": "eBay订单",
+    "filterTitles": [
+      "- button \"标注 3：提交查询\": \"3\"",
+      "- button \"标注 4：重置筛选\": \"4\""
+    ],
+    "visibleMarkerCount": 11
+  },
+  {
+    "page": "订单处理",
+    "filterTitles": [
+      "- button \"标注 3：多选查询与排序\": \"3\""
+    ],
+    "visibleMarkerCount": 15
+  },
+  {
+    "page": "订单标发",
+    "filterTitles": [
+      "- button \"标注 3：标发列表筛选与排序\": \"3\""
+    ],
+    "visibleMarkerCount": 4
+  },
+  {
+    "page": "订单规则",
+    "filterTitles": [
+      "- button \"标注 3：规则列表筛选与显示排序\": \"3\""
+    ],
+    "visibleMarkerCount": 4
+  },
+  {
+    "page": "三方仓出库单",
+    "filterTitles": [
+      "- button \"标注 2：筛选与稳定编号查询\": \"2\""
+    ],
+    "visibleMarkerCount": 5
+  },
+  {
+    "page": "物流下单",
+    "filterTitles": [
+      "- button \"标注 2：筛选与稳定编号查询\": \"2\""
+    ],
+    "visibleMarkerCount": 5
+  },
+  {
+    "page": "物流渠道管理",
+    "filterTitles": [
+      "- button \"标注 3：组合筛选及分页\": \"3\""
+    ],
+    "visibleMarkerCount": 6
+  },
+  {
+    "page": "三方仓库存",
+    "filterTitles": [
+      "- button \"标注 2：库存条件查询\": \"2\""
+    ],
+    "visibleMarkerCount": 12
+  },
+  {
+    "page": "三方仓库龄",
+    "filterTitles": [
+      "- button \"标注 3：库龄条件查询\": \"3\""
+    ],
+    "visibleMarkerCount": 13
+  }
+]

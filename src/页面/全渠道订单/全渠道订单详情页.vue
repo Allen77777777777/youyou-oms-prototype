@@ -16,6 +16,10 @@ import {
 } from 'element-plus'
 
 import type { 原型标注 } from '@/类型/标注'
+import OrderFlags from '../订单处理/订单标志组件.vue'
+import OrderNotes from '../订单处理/订单备注组件.vue'
+import { 计算订单标志 } from '../订单处理/订单标志模型'
+import { 订单标志演示证据 } from '../订单处理/订单标志演示'
 import {
   格式化金额,
   获取OMS状态说明,
@@ -31,6 +35,7 @@ const props = defineProps<{ order: 全渠道订单 }>()
 const OMS状态 = computed(() => 获取OMS状态说明(props.order))
 const 平台状态 = computed(() => 获取平台状态说明(props.order))
 const 当前路由 = computed(() => 获取当前路由(props.order))
+const 当前标志 = computed(() => 计算订单标志(props.order, 订单标志演示证据))
 
 const 标注 = (
   id: string,
@@ -140,6 +145,7 @@ async function 复制系统订单号() {
         <div>
           <span>OMS 处理状态</span>
           <b class="状态徽标" :class="'tone-' + OMS状态?.tone">{{ OMS状态?.text }}</b>
+          <OrderFlags :flags="当前标志" />
           <small>{{ OMS状态?.helper || '当前履约阶段' }}</small>
         </div>
         <div>
@@ -340,6 +346,10 @@ async function 复制系统订单号() {
         </div>
         <p v-if="order.sync.message" class="同步说明">{{ order.sync.message }}</p>
 
+      </section>
+
+      <section class="详情分区">
+        <OrderNotes :order-no="order.systemOrderNo" mode="detail" />
       </section>
 
       <section v-prototype="日志标注" class="详情分区">

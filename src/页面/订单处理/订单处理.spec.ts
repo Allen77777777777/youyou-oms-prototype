@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { 共享订单, 仓库执行记录, 当前版本, 审核阻断原因, 执行演示审核, 执行演示推单, 核查演示仓库结果, 演示库存, 订单版本 } from './演示会话'
 import type { 全渠道订单 } from '../全渠道订单/类型'
-import { 展示计划数量, 提取发货时区, 命中作业关注, 展示剩余数量, type 作业行 } from './展示工具'
+import { 获取作业路由, 命中作业仓库, 展示计划数量, 提取发货时区, 命中作业关注, 展示剩余数量, type 作业行 } from './展示工具'
 
 const 初始订单 = JSON.stringify(共享订单.value)
 const 初始仓库 = JSON.stringify(仓库执行记录.value)
@@ -98,7 +98,7 @@ describe('订单处理受控演示命令', () => {
     expect(部分履约.reviews[0]!.decisionNote).toContain('IN_PROGRESS')
     expect(部分履约.items.length).toBeGreaterThan(1)
     expect(部分履约.items.every((商品) => 商品.fulfillableQuantity === undefined)).toBe(true)
-    expect(展示计划数量(部分履约.items)).toBe('计划待核实')
+    expect(展示计划数量(部分履约.items)).toBe('待发数量待核实')
     const 结果 = 执行演示审核(部分履约.systemOrderNo, 当前版本(部分履约.systemOrderNo))
     expect(结果.成功).toBe(false)
     expect(结果.信息).toContain('人工核实已履约范围和剩余数量')
@@ -108,13 +108,15 @@ describe('订单处理受控演示命令', () => {
   })
 })
 
-describe('计划数量展示', () => {
+describe('待发数量与履约计划展示', () => {
   it('部分数量未核实不显示部分合计，已明确的履约计划优先且保留零值', () => {
     const 商品 = [{ fulfillableQuantity: 2 }, {}]
-    expect(展示计划数量(商品)).toBe('计划待核实')
-    expect(展示计划数量(商品, 3)).toBe('计划 3')
-    expect(展示计划数量(商品, 0)).toBe('计划 0')
-    expect(展示计划数量([{ fulfillableQuantity: 1 }, { fulfillableQuantity: 2 }])).toBe('计划 3')
+    expect(展示计划数量(商品)).toBe('待发数量待核实')
+    expect(展示计划数量(商品, 3)).toBe('计划发货 3 件')
+    expect(展示计划数量(商品, 0)).toBe('计划发货 0 件')
+    expect(展示计划数量([{ fulfillableQuantity: 1 }, { fulfillableQuantity: 2 }])).toBe('待发数量 3 件')
+    expect(展示计划数量([{ fulfillableQuantity: 0 }])).toBe('待发数量 0 件')
+    expect(展示计划数量([])).toBe('待发数量待核实')
   })
 })
 
@@ -180,5 +182,37 @@ describe('来源时间的时区展示', () => {
     [undefined, '平台未提供'],
   ])('保留 %s 的来源时区为 %s', (来源, 预期) => {
     expect(提取发货时区(来源)).toBe(预期)
+  })
+})
+
+describe('列表当前路由及仓库筛选', () => {
+  it('订单主行保留同仓同渠道不同账号，并命中第二个实际仓库', () => {
+    const 订单 = 首个待审()
+    const 路由 = { ...订单.defaultRoute! }
+    订单.fulfillmentOrders = [
+      { fulfillmentOrderNo: 'F-1', isActive: true, status: '执行中', route: 路由, plannedQuantity: 1, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'F-2', isActive: true, status: '执行中', route: { ...路由, warehouseAccount: '另一账号' }, plannedQuantity: 1, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'F-3', isActive: true, status: '执行中', route: { ...路由, warehouse: '第二仓' }, plannedQuantity: 1, shippedQuantity: 0 },
+    ]
+    const 行: 作业行 = { key: 订单.systemOrderNo, order: 订单, stage: '异常' }
+    expect(获取作业路由(行)).toHaveLength(3)
+    expect(获取作业路由(行).map(项 => 项.warehouseAccount)).toContain('另一账号')
+    expect(命中作业仓库(行, '第二仓')).toBe(true)
+    expect(获取作业路由({ ...行, stage: '待审核' })).toEqual([订单.defaultRoute])
+  })
+  it('履约主行只读本次执行快照，缺失字段不借用默认或兄弟路由', () => {
+    const 订单 = 首个待审()
+    const 履约 = { fulfillmentOrderNo: 'F-EMPTY', isActive: true, status: '执行中' as const, route: { ...订单.defaultRoute!, warehouse: '', shippingChannel: '' }, plannedQuantity: 1, shippedQuantity: 0 }
+    const 行: 作业行 = { key: 履约.fulfillmentOrderNo, order: 订单, fulfillment: 履约, stage: '待发货' }
+    expect(获取作业路由(行)).toEqual([履约.route])
+    expect(命中作业仓库(行, 订单.defaultRoute!.warehouse)).toBe(false)
+  })
+  it('没有当前有效履约时退回既有默认路由；无路由保持空', () => {
+    const 订单 = 首个待审()
+    const 行: 作业行 = { key: 订单.systemOrderNo, order: 订单, stage: '待审核' }
+    expect(获取作业路由(行)).toEqual([订单.defaultRoute])
+    订单.defaultRoute = undefined
+    expect(获取作业路由(行)).toEqual([])
+    expect(命中作业仓库(行, '')).toBe(true)
   })
 })

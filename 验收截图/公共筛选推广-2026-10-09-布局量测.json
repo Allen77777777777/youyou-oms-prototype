@@ -1,0 +1,977 @@
+[
+  {
+    "page": "全渠道订单",
+    "controlWidths": [
+      {
+        "label": "平台",
+        "width": 130
+      },
+      {
+        "label": "店铺",
+        "width": 150
+      },
+      {
+        "label": "OMS处理状态",
+        "width": 150
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "全渠道订单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "全渠道订单",
+    "controlWidths": [
+      {
+        "label": "平台",
+        "width": 130
+      },
+      {
+        "label": "店铺",
+        "width": 150
+      },
+      {
+        "label": "OMS处理状态",
+        "width": 150
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "全渠道订单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "全渠道订单",
+    "controlWidths": [
+      {
+        "label": "平台",
+        "width": 130
+      },
+      {
+        "label": "店铺",
+        "width": 150
+      },
+      {
+        "label": "OMS处理状态",
+        "width": 150
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "全渠道订单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "eBay订单",
+    "controlWidths": [
+      {
+        "label": "店铺",
+        "width": 150
+      },
+      {
+        "label": "成交站点",
+        "width": 130
+      },
+      {
+        "label": "eBay履约状态",
+        "width": 140
+      },
+      {
+        "label": "eBay付款状态",
+        "width": 140
+      },
+      {
+        "label": "eBay取消状态",
+        "width": 140
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "eBay订单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "eBay订单",
+    "controlWidths": [
+      {
+        "label": "店铺",
+        "width": 150
+      },
+      {
+        "label": "成交站点",
+        "width": 130
+      },
+      {
+        "label": "eBay履约状态",
+        "width": 140
+      },
+      {
+        "label": "eBay付款状态",
+        "width": 140
+      },
+      {
+        "label": "eBay取消状态",
+        "width": 140
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "eBay订单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "eBay订单",
+    "controlWidths": [
+      {
+        "label": "店铺",
+        "width": 150
+      },
+      {
+        "label": "成交站点",
+        "width": 130
+      },
+      {
+        "label": "eBay履约状态",
+        "width": 140
+      },
+      {
+        "label": "eBay付款状态",
+        "width": 140
+      },
+      {
+        "label": "eBay取消状态",
+        "width": 140
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "eBay订单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "订单处理",
+    "controlWidths": [
+      {
+        "label": "平台",
+        "width": 110
+      },
+      {
+        "label": "店铺",
+        "width": 140
+      },
+      {
+        "label": "发货仓库",
+        "width": 145
+      },
+      {
+        "label": "物流渠道",
+        "width": 145
+      },
+      {
+        "label": "国家/地区",
+        "width": 120
+      },
+      {
+        "label": "订单标志",
+        "width": 120
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "订单处理排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "订单处理",
+    "controlWidths": [
+      {
+        "label": "平台",
+        "width": 110
+      },
+      {
+        "label": "店铺",
+        "width": 140
+      },
+      {
+        "label": "发货仓库",
+        "width": 145
+      },
+      {
+        "label": "物流渠道",
+        "width": 145
+      },
+      {
+        "label": "国家/地区",
+        "width": 120
+      },
+      {
+        "label": "订单标志",
+        "width": 120
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "订单处理排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "订单处理",
+    "controlWidths": [
+      {
+        "label": "平台",
+        "width": 110
+      },
+      {
+        "label": "店铺",
+        "width": 140
+      },
+      {
+        "label": "发货仓库",
+        "width": 145
+      },
+      {
+        "label": "物流渠道",
+        "width": 145
+      },
+      {
+        "label": "国家/地区",
+        "width": 120
+      },
+      {
+        "label": "订单标志",
+        "width": 120
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "平台订单号模糊",
+        "width": 385
+      },
+      {
+        "label": "订单处理排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "订单标发",
+    "controlWidths": [
+      {
+        "label": "标发单号模糊",
+        "width": 385
+      },
+      {
+        "label": "平台",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "订单标发排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "订单标发",
+    "controlWidths": [
+      {
+        "label": "标发单号模糊",
+        "width": 385
+      },
+      {
+        "label": "平台",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "订单标发排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "订单标发",
+    "controlWidths": [
+      {
+        "label": "标发单号模糊",
+        "width": 385
+      },
+      {
+        "label": "平台",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "订单标发排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "订单规则",
+    "controlWidths": [
+      {
+        "label": "规则名称模糊",
+        "width": 385
+      },
+      {
+        "label": "启用情况",
+        "width": 130
+      },
+      {
+        "label": "订单规则排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "订单规则",
+    "controlWidths": [
+      {
+        "label": "规则名称模糊",
+        "width": 385
+      },
+      {
+        "label": "启用情况",
+        "width": 130
+      },
+      {
+        "label": "订单规则排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "订单规则",
+    "controlWidths": [
+      {
+        "label": "规则名称模糊",
+        "width": 385
+      },
+      {
+        "label": "启用情况",
+        "width": 130
+      },
+      {
+        "label": "订单规则排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "三方仓出库单",
+    "controlWidths": [
+      {
+        "label": "出库单号模糊",
+        "width": 385
+      },
+      {
+        "label": "仓储服务商",
+        "width": 130
+      },
+      {
+        "label": "处理关注",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "三方仓出库单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "三方仓出库单",
+    "controlWidths": [
+      {
+        "label": "出库单号模糊",
+        "width": 385
+      },
+      {
+        "label": "仓储服务商",
+        "width": 130
+      },
+      {
+        "label": "处理关注",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "三方仓出库单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "三方仓出库单",
+    "controlWidths": [
+      {
+        "label": "出库单号模糊",
+        "width": 385
+      },
+      {
+        "label": "仓储服务商",
+        "width": 130
+      },
+      {
+        "label": "处理关注",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "三方仓出库单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "物流下单",
+    "controlWidths": [
+      {
+        "label": "物流单号模糊",
+        "width": 385
+      },
+      {
+        "label": "来源仓储服务商",
+        "width": 130
+      },
+      {
+        "label": "处理关注",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "物流下单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "物流下单",
+    "controlWidths": [
+      {
+        "label": "物流单号模糊",
+        "width": 385
+      },
+      {
+        "label": "来源仓储服务商",
+        "width": 130
+      },
+      {
+        "label": "处理关注",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "物流下单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "物流下单",
+    "controlWidths": [
+      {
+        "label": "物流单号模糊",
+        "width": 385
+      },
+      {
+        "label": "来源仓储服务商",
+        "width": 130
+      },
+      {
+        "label": "处理关注",
+        "width": 130
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "物流下单排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "物流渠道管理",
+    "controlWidths": [
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "启停状态",
+        "width": 130
+      },
+      {
+        "label": "目的国家",
+        "width": 130
+      },
+      {
+        "label": "渠道名称模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "物流渠道排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "物流渠道管理",
+    "controlWidths": [
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "启停状态",
+        "width": 130
+      },
+      {
+        "label": "目的国家",
+        "width": 130
+      },
+      {
+        "label": "渠道名称模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "物流渠道排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "物流渠道管理",
+    "controlWidths": [
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "启停状态",
+        "width": 130
+      },
+      {
+        "label": "目的国家",
+        "width": 130
+      },
+      {
+        "label": "渠道名称模糊",
+        "width": 385
+      },
+      {
+        "label": "至",
+        "width": 306
+      },
+      {
+        "label": "物流渠道排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [
+      "11px",
+      "11px"
+    ],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "三方仓库存",
+    "controlWidths": [
+      {
+        "label": "服务商",
+        "width": 130
+      },
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "仓库",
+        "width": 130
+      },
+      {
+        "label": "系统 SKU精确",
+        "width": 385
+      },
+      {
+        "label": "库存排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "三方仓库存",
+    "controlWidths": [
+      {
+        "label": "服务商",
+        "width": 130
+      },
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "仓库",
+        "width": 130
+      },
+      {
+        "label": "系统 SKU精确",
+        "width": 385
+      },
+      {
+        "label": "库存排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "三方仓库存",
+    "controlWidths": [
+      {
+        "label": "服务商",
+        "width": 130
+      },
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "仓库",
+        "width": 130
+      },
+      {
+        "label": "系统 SKU精确",
+        "width": 385
+      },
+      {
+        "label": "库存排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1920,
+    "width": 1920
+  },
+  {
+    "page": "三方仓库龄",
+    "controlWidths": [
+      {
+        "label": "服务商",
+        "width": 130
+      },
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "仓库",
+        "width": 130
+      },
+      {
+        "label": "系统 SKU精确",
+        "width": 385
+      },
+      {
+        "label": "库龄主行排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1280,
+    "width": 1280
+  },
+  {
+    "page": "三方仓库龄",
+    "controlWidths": [
+      {
+        "label": "服务商",
+        "width": 130
+      },
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "仓库",
+        "width": 130
+      },
+      {
+        "label": "系统 SKU精确",
+        "width": 385
+      },
+      {
+        "label": "库龄主行排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  {
+    "page": "三方仓库龄",
+    "controlWidths": [
+      {
+        "label": "服务商",
+        "width": 130
+      },
+      {
+        "label": "仓库账号",
+        "width": 130
+      },
+      {
+        "label": "仓库",
+        "width": 130
+      },
+      {
+        "label": "系统 SKU精确",
+        "width": 385
+      },
+      {
+        "label": "库龄主行排序",
+        "width": 130
+      }
+    ],
+    "dateFonts": [],
+    "scrollWidth": 1920,
+    "width": 1920
+  }
+]

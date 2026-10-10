@@ -220,12 +220,14 @@ describe('三方仓库龄日期及查询', () => {
   })
 
   it('SKU 精确批量查询与组合条件取交集，商品名称包含查询', () => {
-    const filters = { ...defaultFilters(), keywordType: 'warehouseSku' as const, keyword: 'WH-DEMO-0001\nWH-DEMO-BOUNDARY\nWH-DEMO-0001', accounts: ['demo-4px-a'], warehouses: ['demo-4px-bh'], quality: '良品' }
+    const filters = { ...defaultFilters(), keywordType: 'warehouseSku' as const, keyword: 'WH-DEMO-0001\nWH-DEMO-BOUNDARY\nWH-DEMO-0001', accounts: ['demo-4px-a'], warehouses: ['demo-4px-bh'], quality: ['良品'] }
     const result = filterAgingRecords(agingRecords, filters)
     expect(result.length).toBeGreaterThan(0)
     expect(result.every(record => ['WH-DEMO-0001', 'WH-DEMO-BOUNDARY'].includes(record.warehouseSku) && record.accountId === 'demo-4px-a' && record.warehouseId === 'demo-4px-bh' && record.quality === '良品')).toBe(true)
     expect(filterAgingRecords(agingRecords, { ...defaultFilters(), keyword: 'DEMO-BRK' })).toEqual([])
-    expect(filterAgingRecords(agingRecords, { ...defaultFilters(), keywordType: 'name', keyword: '刹车' }).every(record => record.name.includes('刹车'))).toBe(true)
+    const names = filterAgingRecords(agingRecords, { ...defaultFilters(), keywordType: 'name', searchMatch: 'contains', keyword: '刹车' })
+    expect(names.length).toBeGreaterThan(0)
+    expect(names.every(record => record.name.includes('刹车'))).toBe(true)
   })
 
   it('没有系统映射时仍能按前导零仓库 SKU 查到，不复制仓库 SKU 到系统 SKU', () => {
@@ -241,12 +243,19 @@ describe('三方仓库龄日期及查询', () => {
     expect(filterAgingRecords(records, { ...defaultFilters(), minAge: '0', maxAge: '30' }).map(record => record.id)).toEqual(['middle', 'small'])
   })
 
-  it('拒绝非法天数范围与超过 200 个 SKU', () => {
+  it('拒绝非法天数范围与超过 1000 个精确值', () => {
     expect(validateAgingFilters({ ...defaultFilters(), minAge: '-1' })).not.toBe('')
     expect(validateAgingFilters({ ...defaultFilters(), maxAge: '30.5' })).not.toBe('')
     expect(validateAgingFilters({ ...defaultFilters(), minAge: '61', maxAge: '30' })).not.toBe('')
-    expect(validateAgingFilters({ ...defaultFilters(), keyword: Array.from({ length: 201 }, (_, i) => String(i)).join('\n') })).not.toBe('')
+    expect(validateAgingFilters({ ...defaultFilters(), keyword: Array.from({ length: 1001 }, (_, i) => String(i)).join('\n') })).not.toBe('')
     expect(validateAgingFilters({ ...defaultFilters(), minAge: '0', maxAge: '30' })).toBe('')
+  })
+  it('质量多选及批次多行作用于来源明细，分组与历史快照不被扩张', () => {
+    const records = [row('good', { quality: '良品', batchNo: 'B-1' }), row('bad', { quality: '不良品', batchNo: 'B-2' }), row('other', { quality: '良品', batchNo: 'B-3' }), row('history', { quality: '不良品', batchNo: 'B-2', snapshotDate: '2026-09-22' })]
+    const result = filterAgingRecords(records, { ...defaultFilters(), snapshotDate: records[0]!.snapshotDate, quality: ['良品', '不良品'], batchNo: 'B-1\nB-2', batchMatch: 'exact' })
+    expect(result.map(record => record.id)).toEqual(['good', 'bad'])
+    expect(groupAgingDetails(result)).toHaveLength(2)
+    expect(filterAgingRecords(records, { ...defaultFilters(), snapshotDate: '2026-09-21', quality: ['良品', '不良品'] })).toEqual([])
   })
 
   it('查询、分段和页面刷新式重复读取不改来源行、日期或更新时刻', () => {

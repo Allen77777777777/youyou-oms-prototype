@@ -26,6 +26,8 @@
 .渠道国家筛选 { width:151px; flex:0 0 151px; }
 .渠道筛选 .el-button + .el-button { margin-left:0; }
 .渠道查询动作 { display:flex; gap:8px; flex-shrink:0; }
+.渠道时间筛选 { display:flex;align-items:center;gap:8px;flex:none;color:#606976;font-size:12px; }
+.渠道查询错误 { flex:0 0 100%;margin:0;color:#c65045;font-size:12px; }
 .渠道工具栏 { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 14px; border-top:1px solid #f0f2f5; border-bottom:1px solid var(--yy-border); background:#fafbfd; flex-shrink:0; }
 .渠道工具左 { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
 .渠道工具左 .el-button + .el-button { margin-left:0; }

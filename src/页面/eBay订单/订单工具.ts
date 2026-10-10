@@ -1,5 +1,34 @@
-import { eBay查询日期, type eBay时区模式 } from './时间工具'
+import { eBay查询墙钟, type eBay时区模式 } from './时间工具'
 import type { eBay订单, eBay订单筛选条件, 金额 } from './类型'
+import { 命中多选, 命中字段搜索, 命中时间范围, 校验字段搜索, 校验时间范围, 排序列表, 读取排序时刻, type 列表排序条件 } from '@/组件/筛选/筛选工具'
+
+export const eBay搜索字段: { value: string; label: string; kind?: 'identifier' | 'text' }[] = [
+  { value: 'platformOrderNo', label: '平台订单号' },
+  { value: 'salesRecordReference', label: '销售记录号' },
+  { value: 'systemOrderNo', label: '系统订单号' },
+  { value: 'buyerUsername', label: '买家账号', kind: 'text' },
+  { value: 'platformSku', label: '平台 SKU' },
+  { value: 'systemSku', label: '系统 SKU' },
+  { value: 'itemId', label: 'eBay Item ID' },
+  { value: 'lineItemId', label: '订单行 ID' },
+  { value: 'title', label: '商品名称', kind: 'text' },
+  { value: 'fulfillmentId', label: '平台 fulfillment ID' },
+  { value: 'trackingNumber', label: '跟踪号' },
+  { value: 'fulfillmentNo', label: 'OMS 履约单号' },
+  { value: 'confirmationNo', label: 'OMS 标发单号' },
+]
+
+export function 校验eBay订单筛选(条件: eBay订单筛选条件): string | undefined {
+  const 字段 = eBay搜索字段.find(项 => 项.value === (条件.searchType ?? 'platformOrderNo'))
+  if (!字段) return '请选择有效的搜索字段'
+  if (!['creationDate', 'shipBy'].includes(条件.dateType)) return '请选择有效的日期类型'
+  return 校验字段搜索(条件.keyword, 条件.searchMatch ?? 'contains', 字段.kind) ?? 校验时间范围(条件.dateRange)
+}
+
+export function 排序eBay订单(订单: eBay订单[], 条件: 列表排序条件): eBay订单[] {
+  if (!['creationDate', 'shipBy'].includes(条件.field)) return [...订单]
+  return 排序列表(订单, 项 => 读取排序时刻(项[条件.field as eBay订单筛选条件['dateType']]), 条件.direction, 项 => `${项.sellerId}/${项.orderId}`)
+}
 
 export type 状态语气 = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 
@@ -122,37 +151,33 @@ export function 订单商品数量(订单: eBay订单): number {
   return 订单.items.reduce((总数, 商品) => 总数 + 商品.quantity, 0)
 }
 
-export function 订单检索文本(订单: eBay订单): string {
-  return [
-    订单.orderId,
-    订单.salesRecordReference,
-    订单.store,
-    订单.buyerUsername,
-    订单.oms.systemOrderNo,
-    ...订单.items.flatMap((商品) => [商品.lineItemId, 商品.title, 商品.platformSku, 商品.systemSku, 商品.itemId]),
-    ...订单.fulfillments.flatMap((履约) => [履约.fulfillmentId, 履约.trackingNumber]),
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLocaleLowerCase()
-}
-
 export function 筛选eBay订单(订单列表: eBay订单[], 条件: eBay订单筛选条件, 时区模式: eBay时区模式 = 'site'): eBay订单[] {
-  const 关键词 = 条件.keyword.trim().toLocaleLowerCase()
+  if (校验eBay订单筛选(条件)) return []
+  const 搜索字段 = 条件.searchType ?? 'platformOrderNo'
+  const 字段配置 = eBay搜索字段.find(项 => 项.value === 搜索字段)!
+  const 搜索 = (值: string | undefined | string[]) => 命中字段搜索(值, 条件.keyword, 条件.searchMatch ?? 'contains', 字段配置.kind)
   return 订单列表.filter((订单) => {
-    if (关键词 && !订单检索文本(订单).includes(关键词)) return false
-    if (条件.store && 订单.store !== 条件.store) return false
-    if (条件.marketplace && !订单.purchaseMarketplaces.includes(条件.marketplace)) return false
-    if (条件.fulfillmentStatus && 订单.fulfillmentStatus !== 条件.fulfillmentStatus) return false
-    if (条件.dateRange?.length === 2) {
-      const 时间值 = 条件.dateType === 'shipBy' ? 订单.shipBy : 订单.creationDate
-      const 日期值 = eBay查询日期(时间值, 时区模式, 订单.purchaseMarketplaces)
-      if (!日期值 || 日期值 < 条件.dateRange[0] || 日期值 > 条件.dateRange[1]) return false
+    if (!命中多选(条件.store, 订单.store)) return false
+    if (条件.marketplace.length && !订单.purchaseMarketplaces.some(站点 => 命中多选(条件.marketplace, 站点))) return false
+    if (!命中多选(条件.fulfillmentStatus, 订单.fulfillmentStatus)) return false
+    if (条件.dateRange?.length) {
+      const 查询墙钟 = eBay查询墙钟(条件.dateType === 'shipBy' ? 订单.shipBy : 订单.creationDate, 时区模式, 订单.purchaseMarketplaces)
+      // 对比转换后的当地墙钟；公共校验仅处理日历及秒边界，不替代站点 IANA 时区。
+      if (!命中时间范围(查询墙钟, 条件.dateRange, true)) return false
     }
-    if (条件.paymentStatus && 订单.paymentStatus !== 条件.paymentStatus) return false
-    if (条件.cancelStatus && 订单.cancelStatus !== 条件.cancelStatus) return false
-    if (条件.omsStatus && 订单.oms.processingStatus !== 条件.omsStatus) return false
-    if (条件.syncStatus && 订单.sync.status !== 条件.syncStatus) return false
+    if (!命中多选(条件.paymentStatus, 订单.paymentStatus)) return false
+    if (!命中多选(条件.cancelStatus, 订单.cancelStatus)) return false
+    if (!命中多选(条件.omsStatus, 订单.oms.processingStatus)) return false
+    if (!命中多选(条件.syncStatus, 订单.sync.status)) return false
+    if (条件.keyword.trim() && ['platformSku', 'systemSku', 'itemId', 'lineItemId', 'title'].includes(搜索字段)) {
+      if (!订单.items.some(商品 => 搜索(商品[搜索字段 as keyof typeof 商品] as string | undefined))) return false
+    } else {
+      const 值 = 搜索字段 === 'platformOrderNo' ? 订单.orderId
+        : 搜索字段 === 'systemOrderNo' || 搜索字段 === 'fulfillmentNo' || 搜索字段 === 'confirmationNo' ? 订单.oms[搜索字段]
+        : 搜索字段 === 'fulfillmentId' || 搜索字段 === 'trackingNumber' ? 订单.fulfillments.map(履约 => 履约[搜索字段]).filter((项): 项 is string => Boolean(项))
+        : 订单[搜索字段 as keyof eBay订单] as string | undefined
+      if (!搜索(值)) return false
+    }
     return true
   })
 }

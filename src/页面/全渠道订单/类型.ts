@@ -157,13 +157,15 @@ export interface 全渠道订单 {
 
 export interface 全渠道订单筛选条件 {
   keyword: string
-  platform: string
-  store: string
-  processingStatus: string
+  searchType?: string
+  searchMatch?: 'contains' | 'exact'
+  platform: string | string[]
+  store: string | string[]
+  processingStatus: string | string[]
   dateType: 订单日期类型
-  dateRange: [] | [string, string] | null
-  platformStatus: string
-  syncStatus: string
-  skuStatus: string
-  countryCode: string
+  dateRange: string[] | null
+  platformStatus: string | string[]
+  syncStatus: string | string[]
+  skuStatus: string | string[]
+  countryCode: string | string[]
 }

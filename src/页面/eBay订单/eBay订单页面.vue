@@ -8,21 +8,17 @@ import {
   MoreFilled,
   QuestionFilled,
   RefreshRight,
-  Search,
   Tickets,
   WarningFilled,
 } from '@element-plus/icons-vue'
 import {
   ElButton,
-  ElDatePicker,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
   ElEmpty,
   ElForm,
-  ElFormItem,
   ElIcon,
-  ElInput,
   ElMessage,
   ElOption,
   ElPagination,
@@ -35,6 +31,10 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 
 import type { 原型标注 } from '@/类型/标注'
+import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import TimeRange from '@/组件/筛选/时间范围.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
 import 手机商品占位图 from '@/资源/eBay订单/旗舰手机商品占位-概念图.png'
 import eBay订单详情 from './eBay订单详情.vue'
 import EbayTimezoneSwitch from './时区切换.vue'
@@ -49,6 +49,9 @@ import {
   计算商品单价,
   金额非零,
   筛选eBay订单,
+  eBay搜索字段,
+  校验eBay订单筛选,
+  排序eBay订单,
 } from './订单工具'
 import type { eBay订单, eBay订单商品, eBay订单筛选条件 } from './类型'
 
@@ -58,21 +61,31 @@ const 订单列表 = ref<eBay订单[]>(
   eBay订单模拟数据.map((订单) => ({ ...订单, sync: { ...订单.sync } })),
 )
 
-const 创建默认筛选条件 = (): eBay订单筛选条件 => ({
+const 创建默认筛选条件 = () => ({
   keyword: '',
-  store: '',
-  marketplace: '',
-  fulfillmentStatus: '',
-  dateType: 'creationDate',
-  dateRange: [],
-  paymentStatus: '',
-  cancelStatus: '',
-  omsStatus: '',
-  syncStatus: '',
+  searchType: 'platformOrderNo',
+  searchMatch: 'contains' as 'contains' | 'exact',
+  store: [] as string[],
+  marketplace: [] as string[],
+  fulfillmentStatus: [] as string[],
+  dateType: 'creationDate' as eBay订单筛选条件['dateType'],
+  dateRange: null as string[] | null,
+  paymentStatus: [] as string[],
+  cancelStatus: [] as string[],
+  omsStatus: [] as string[],
+  syncStatus: [] as string[],
 })
 
-const 筛选条件 = reactive<eBay订单筛选条件>(创建默认筛选条件())
-const 已应用筛选条件 = reactive<eBay订单筛选条件>(创建默认筛选条件())
+const 筛选条件 = reactive(创建默认筛选条件())
+const 已应用筛选条件 = reactive(创建默认筛选条件())
+const 排序 = ref({ field: 'creationDate', direction: 'desc' as 'asc' | 'desc' })
+const 排序字段 = [{ value: 'creationDate', label: '下单时间' }, { value: 'shipBy', label: '最晚发货' }]
+const 查询待应用 = computed(() => JSON.stringify(筛选条件) !== JSON.stringify(已应用筛选条件))
+const 日期快捷时区 = computed(() => 当前eBay时区.value === 'beijing' ? 'Asia/Shanghai'
+  : 筛选条件.marketplace.length === 1 ? 获取显示时区('site', 筛选条件.marketplace) : undefined)
+const 日期范围说明 = computed(() => 当前eBay时区.value === 'beijing' ? '范围按北京时间解释'
+  : 日期快捷时区.value ? '范围按所选站点当地时间解释'
+  : '范围逐单按可靠站点当地时间解释；选择单一已配置站点后可用快捷日期')
 const 高级筛选展开 = ref(false)
 const 当前页 = ref(1)
 const 每页条数 = ref(20)
@@ -82,30 +95,17 @@ function 显示时间(时间: string | undefined, 原始订单: unknown) {
   return 转换eBay时间(时间, 获取显示时区(当前eBay时区.value, 订单.purchaseMarketplaces))
 }
 const 刷新中的订单 = ref<Set<string>>(new Set())
-const 日期快捷项 = [
-  {
-    text: '近 7 天',
-    value: () => {
-      const 结束 = new Date()
-      const 开始 = new Date()
-      开始.setDate(开始.getDate() - 6)
-      return [开始, 结束]
-    },
-  },
-  {
-    text: '近 30 天',
-    value: () => {
-      const 结束 = new Date()
-      const 开始 = new Date()
-      开始.setDate(开始.getDate() - 29)
-      return [开始, 结束]
-    },
-  },
-]
-
-const 店铺选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.store))])
-const 站点选项 = computed(() => [...new Set(订单列表.value.flatMap((订单) => 订单.purchaseMarketplaces))])
-const 筛选结果 = computed(() => 筛选eBay订单(订单列表.value, 已应用筛选条件, 当前eBay时区.value))
+const 店铺选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.store))].map(值 => ({ value: 值, label: 值 })))
+const 站点选项 = computed(() => [...new Set(订单列表.value.flatMap((订单) => 订单.purchaseMarketplaces))].map(值 => ({ value: 值, label: 格式化eBay站点(值) })))
+const 履约状态选项 = ['NOT_STARTED', 'IN_PROGRESS', 'FULFILLED'].map(值 => ({ value: 值, label: 获取状态说明('fulfillment', 值).text }))
+const 付款状态选项 = ['FAILED', 'PENDING', 'PAID', 'PARTIALLY_REFUNDED', 'FULLY_REFUNDED'].map(值 => ({ value: 值, label: 获取状态说明('payment', 值).text }))
+const 取消状态选项 = ['NONE_REQUESTED', 'IN_PROGRESS', 'CANCELED'].map(值 => ({ value: 值, label: 获取状态说明('cancel', 值).text }))
+const OMS状态选项 = ['待审核', '待推单', '待发货', '已发货', '异常', '不发货'].map(值 => ({ value: 值, label: 值 }))
+const 更新状态选项 = ['已同步', '同步中', '同步失败', '待同步'].map(值 => ({ value: 值, label: 获取状态说明('sync', 值).text }))
+const 筛选结果 = computed(() => {
+  const 结果 = 筛选eBay订单(订单列表.value, 已应用筛选条件, 当前eBay时区.value)
+  return 排序eBay订单(结果, 排序.value)
+})
 const 当前页数据 = computed(() => {
   const 起始 = (当前页.value - 1) * 每页条数.value
   return 筛选结果.value.slice(起始, 起始 + 每页条数.value)
@@ -119,7 +119,7 @@ const 当前订单 = computed(() => {
     : typeof route.query.seller === 'string' ? route.query.seller : ''
   return 订单列表.value.find((订单) => 订单.orderId === orderId && (!sellerId || 订单.sellerId === sellerId))
 })
-const 高级筛选数量 = computed(() => [筛选条件.omsStatus, 筛选条件.syncStatus].filter(Boolean).length)
+const 高级筛选数量 = computed(() => [筛选条件.omsStatus, 筛选条件.syncStatus].filter(值 => 值.length).length)
 const 有生效筛选 = computed(() => Boolean([
   已应用筛选条件.keyword,
   已应用筛选条件.store,
@@ -129,7 +129,7 @@ const 有生效筛选 = computed(() => Boolean([
   已应用筛选条件.cancelStatus,
   已应用筛选条件.omsStatus,
   已应用筛选条件.syncStatus,
-].filter(Boolean).length || 已应用筛选条件.dateRange?.length))
+].filter(值 => 值.length).length || 已应用筛选条件.dateRange?.length))
 
 const 标注 = (
   id: string,
@@ -145,7 +145,7 @@ const 标注 = (
   说明,
   路由: '/oms/orders/ebay',
   锚点: id,
-  版本: '0.6.0',
+  版本: '0.7.0',
   状态: '待评审',
   事实等级,
   prd引用,
@@ -155,20 +155,20 @@ const 标注 = (
 
 const 筛选标注 = 标注(
   'oms.ebay-order.list.filters',
-  '紧凑检索与日期筛选',
-  '采用无外置字段标题的紧凑 Element Plus 筛选栏，通过明确占位和 aria-label 识别关键词、店铺、站点、履约、付款、取消三个独立状态及日期条件；日期类型首版支持下单时间与最晚发货时间。',
+  '统一多选、字段搜索与时间排序',
+  '复用公共筛选组件：既有分类全部多选，默认平台订单号模糊搜索，字段下拉支持既有编号、买家和商品信息及多行精确查询。日期到秒并保留北京／站点解释；排序只重排已提交结果。',
   '合理假设',
-  ['PRD/eBay订单功能PRD.md#EB-03'],
+  ['PRD/eBay订单功能PRD.md#12-2026-10-09-统一列表筛选组件', 'PRD/列表筛选组件规范.md'],
   [],
   {
     前置条件: ['用户已进入 OMS → 销售订单 → eBay订单，且只看到有权限访问的店铺数据。'],
-    触发方式: ['输入关键词、选择筛选条件或打开更多筛选。', '点击查询提交本轮条件；回车提交关键词检索。'],
-    系统动作: ['仅在本地 eBay 专业订单投影上执行筛选，不在列表加载时逐行请求 eBay 接口。', '付款及取消状态常显，与履约状态按 AND 组合；日期范围按当前北京／站点时区匹配自然日。'],
+    触发方式: ['选择分类、搜索字段/模式、日期，点击查询或 Enter 提交；多行弹层应用后直接精确查询。', '排序弹层确定立即重排已应用结果，取消不提交。'],
+    系统动作: ['仅在本地 eBay 专业订单投影执行筛选；分类同字段 OR，字段之间 AND。查询逐个复制数组快照。', '付款、取消与履约仍是三项独立状态；日期范围按当前北京／每单可靠站点当地墙钟匹配并包含起止秒。', '站点模式仅单选可靠站点启用按该 IANA 今日计算的快捷日期；多站/未选仍可中文手动选择。', '按已有下单或最晚发货的绝对瞬间排序；排序不提交未查询草稿，不改变业务状态。'],
     成功结果: ['列表刷新为匹配结果，分页回到第 1 页。', '清空日期范围后不再附加日期条件。'],
-    异常处理: ['无匹配时保留筛选条件并展示空态；不得把“暂无订单”误判为接口无数据。'],
+    异常处理: ['非法、倒置或不完整时间、超过1000项精确输入阻断；站点缺失/冲突、非法或无时区来源有日期条件时不命中。', '无匹配时保留筛选条件并展示空态；不得把“暂无订单”误判为接口无数据。'],
     数据来源: ['本地 eBay 专业订单投影；字段口径见文档/集成/eBay/eBay订单功能与字段接入说明.md。'],
     权限与审计: ['店铺、平台和敏感字段遵循访问者数据范围；查询条件不得绕过权限范围。'],
-    验收要点: ['覆盖关键词、日期类型/日期范围、更多筛选、查询、重置和空结果场景。'],
+    验收要点: ['覆盖多选 OR/AND、字段隔离与多行取消、日期起止秒、跨日及夏令时、排序取消和已应用快照。', '重置保留时区偏好，恢复平台订单号模糊搜索；六态和 eBay 原始事实不变。'],
   },
 )
 
@@ -418,14 +418,14 @@ function 是否存在不同刊登站点(原始订单: unknown) {
 function 重置筛选() {
   Object.assign(筛选条件, 创建默认筛选条件())
   Object.assign(已应用筛选条件, 创建默认筛选条件())
+  排序.value = { field: 'creationDate', direction: 'desc' }
   当前页.value = 1
 }
 
 function 执行查询() {
-  Object.assign(已应用筛选条件, {
-    ...筛选条件,
-    dateRange: [...(筛选条件.dateRange ?? [])],
-  })
+  const 错误 = 校验eBay订单筛选(筛选条件)
+  if (错误) { ElMessage.warning(错误); return }
+  Object.assign(已应用筛选条件, Object.fromEntries(Object.entries(筛选条件).map(([键, 值]) => [键, Array.isArray(值) ? [...值] : 值])))
   当前页.value = 1
 }
 </script>
@@ -442,79 +442,25 @@ function 执行查询() {
     <section v-prototype="筛选标注" class="筛选面板">
       <ElForm :model="筛选条件" class="筛选表单" @submit.prevent="执行查询">
         <div class="筛选主网格">
-          <ElFormItem>
-            <ElInput
-              v-model="筛选条件.keyword"
-              clearable
-              aria-label="eBay订单关键词"
-              placeholder="订单号 / 买家 / SKU / Item ID / 跟踪号"
-              @keyup.enter="执行查询"
-            >
-              <template #prefix><ElIcon><Search /></ElIcon></template>
-            </ElInput>
-          </ElFormItem>
-          <ElFormItem>
-            <ElSelect v-model="筛选条件.store" clearable filterable aria-label="店铺" placeholder="全部店铺">
-              <ElOption v-for="店铺 in 店铺选项" :key="店铺" :label="店铺" :value="店铺" />
+          <MultiFilter v-model="筛选条件.store" :options="店铺选项" placeholder="店铺" :width="150" />
+          <MultiFilter v-model="筛选条件.marketplace" :options="站点选项" placeholder="成交站点" :width="130" />
+          <MultiFilter v-model="筛选条件.fulfillmentStatus" :options="履约状态选项" placeholder="eBay履约状态" :width="140" />
+          <MultiFilter v-model="筛选条件.paymentStatus" :options="付款状态选项" placeholder="eBay付款状态" :width="140" />
+          <MultiFilter v-model="筛选条件.cancelStatus" :options="取消状态选项" placeholder="eBay取消状态" :width="140" />
+          <FieldSearch v-model="筛选条件.keyword" v-model:field="筛选条件.searchType" v-model:mode="筛选条件.searchMatch" :fields="eBay搜索字段" aria-prefix="eBay订单" @search="执行查询" />
+          <div class="日期筛选组合">
+            <ElSelect v-model="筛选条件.dateType" aria-label="eBay订单日期类型" class="日期类型选择">
+              <ElOption v-for="字段 in 排序字段" :key="字段.value" :label="字段.label" :value="字段.value" />
             </ElSelect>
-          </ElFormItem>
-          <ElFormItem>
-            <ElSelect v-model="筛选条件.marketplace" clearable filterable aria-label="成交站点" placeholder="全部成交站点">
-              <ElOption v-for="站点 in 站点选项" :key="站点" :label="格式化eBay站点(站点)" :value="站点" />
-            </ElSelect>
-          </ElFormItem>
-          <ElFormItem>
-            <ElSelect v-model="筛选条件.fulfillmentStatus" clearable aria-label="eBay履约状态" placeholder="eBay履约状态">
-              <ElOption label="未开始履约" value="NOT_STARTED" />
-              <ElOption label="部分履约中" value="IN_PROGRESS" />
-              <ElOption label="已履约" value="FULFILLED" />
-            </ElSelect>
-          </ElFormItem>
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.paymentStatus" clearable aria-label="eBay付款状态" placeholder="eBay付款状态">
-                <ElOption label="付款失败" value="FAILED" />
-                <ElOption label="付款处理中" value="PENDING" />
-                <ElOption label="已付款" value="PAID" />
-                <ElOption label="部分退款" value="PARTIALLY_REFUNDED" />
-                <ElOption label="全额退款" value="FULLY_REFUNDED" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.cancelStatus" clearable aria-label="eBay取消状态" placeholder="eBay取消状态">
-                <ElOption label="无取消申请" value="NONE_REQUESTED" />
-                <ElOption label="取消处理中" value="IN_PROGRESS" />
-                <ElOption label="已取消" value="CANCELED" />
-              </ElSelect>
-            </ElFormItem>
-          <ElFormItem class="日期筛选项">
-            <div class="日期筛选组合">
-              <ElSelect v-model="筛选条件.dateType" aria-label="日期类型" class="日期类型选择">
-                <ElOption label="下单时间" value="creationDate" />
-                <ElOption label="最晚发货" value="shipBy" />
-              </ElSelect>
-              <ElDatePicker
-                v-model="筛选条件.dateRange"
-                class="日期范围选择"
-                type="daterange"
-                unlink-panels
-                clearable
-                format="YYYY-MM-DD"
-                value-format="YYYY-MM-DD"
-                range-separator="至"
-                start-placeholder="开始日期"
-                end-placeholder="结束日期"
-                aria-label="订单日期范围"
-                :shortcuts="日期快捷项"
-              />
-            </div>
-          </ElFormItem>
+            <TimeRange v-model="筛选条件.dateRange" :time-zone="日期快捷时区" :shortcuts-enabled="Boolean(日期快捷时区)" :hint="日期范围说明" :aria-prefix="当前eBay时区 === 'beijing' ? 'eBay订单北京时间' : 'eBay订单站点当地时间'" />
+          </div>
           <EbayTimezoneSwitch />
+          <ListSort v-model="排序" :fields="排序字段" aria-prefix="eBay订单" @change="当前页 = 1" />
           <div class="筛选操作">
-            <ElButton v-prototype="查询标注" type="primary" native-type="submit">查询</ElButton>
+            <ElButton v-prototype="查询标注" type="primary" native-type="submit" :title="查询待应用 ? '条件已修改，点击查询后生效' : '应用查询条件'">查询<span v-if="查询待应用" class="查询修改提示" /></ElButton>
             <ElButton v-prototype="重置标注" @click="重置筛选">重置</ElButton>
             <ElButton v-prototype="筛选标注" @click="高级筛选展开 = !高级筛选展开">
-              <ElIcon><Filter /></ElIcon>
-              更多筛选
+              <ElIcon><Filter /></ElIcon>更多筛选
               <b v-if="高级筛选数量">{{ 高级筛选数量 }}</b>
               <ElIcon class="展开箭头" :class="{ 展开: 高级筛选展开 }"><ArrowDown /></ElIcon>
             </ElButton>
@@ -522,19 +468,8 @@ function 执行查询() {
         </div>
         <Transition name="高级筛选">
           <div v-if="高级筛选展开" class="筛选高级网格">
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.omsStatus" clearable aria-label="OMS处理状态" placeholder="OMS处理状态">
-                <ElOption v-for="状态 in ['待审核', '待推单', '待发货', '已发货', '异常', '不发货']" :key="状态" :label="状态" :value="状态" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem>
-              <ElSelect v-model="筛选条件.syncStatus" clearable aria-label="eBay数据更新状态" placeholder="eBay数据更新状态">
-                <ElOption label="更新正常" value="已同步" />
-                <ElOption label="更新中" value="同步中" />
-                <ElOption label="更新失败" value="同步失败" />
-                <ElOption label="待更新" value="待同步" />
-              </ElSelect>
-            </ElFormItem>
+            <MultiFilter v-model="筛选条件.omsStatus" :options="OMS状态选项" placeholder="OMS处理状态" :width="140" />
+            <MultiFilter v-model="筛选条件.syncStatus" :options="更新状态选项" placeholder="eBay数据更新状态" :width="150" />
           </div>
         </Transition>
       </ElForm>
@@ -783,47 +718,14 @@ function 执行查询() {
   background: #fafbfc;
 }
 
-.筛选表单 :deep(.el-form-item) {
-  min-width: 0;
-  margin: 0;
-}
-
-.筛选表单 :deep(.el-select),
-.筛选表单 :deep(.el-date-editor) {
-  width: 100%;
-}
-
-.筛选主网格 {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(220px, 1.5fr) minmax(140px, 1fr) repeat(4, minmax(130px, 1fr));
-  align-items: center;
-  gap: 8px;
-}
-
-.日期筛选项 { grid-column: span 3; }
-.筛选主网格 > .时区切换 { justify-self: end; }
-.筛选操作 { grid-column: span 2; }
-
-.日期筛选组合 {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 6px;
-}
-
-.日期类型选择,
-.日期范围选择 {
-  min-width: 0;
-}
-
-.筛选操作 {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  white-space: nowrap;
-}
+.筛选表单 :deep(.el-form-item) { min-width: 0; margin: 0; }
+.筛选主网格 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.日期筛选组合 { display: flex; width: 400px; flex: 0 0 400px; align-items: center; }
+.日期类型选择 { width: 94px; flex: 0 0 94px; min-width: 0; }
+.日期类型选择 :deep(.el-select__wrapper) { padding-inline: 8px; border-radius: 4px 0 0 4px; }
+.日期类型选择 :deep(.el-select__selected-item) { font-size: 12px; }
+.筛选操作 { display: flex; align-items: center; white-space: nowrap; }
+.查询修改提示 { width: 5px; height: 5px; border-radius: 50%; background: white; margin-left: 4px; }
 
 .筛选操作 b {
   display: inline-grid;
@@ -844,15 +746,7 @@ function 执行查询() {
   transform: rotate(180deg);
 }
 
-.筛选高级网格 {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #dfe3e8;
-}
+.筛选高级网格 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #dfe3e8; }
 
 .高级筛选-enter-active,
 .高级筛选-leave-active {
@@ -1382,10 +1276,4 @@ function 执行查询() {
   background: white;
 }
 
-@container (max-width: 1000px) {
-  .筛选主网格 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .日期筛选项 { grid-column: span 3; }
-  .筛选主网格 > .时区切换 { justify-self: start; }
-  .筛选操作 { grid-column: span 2; }
-}
 </style>

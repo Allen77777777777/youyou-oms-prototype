@@ -1,4 +1,5 @@
 export type eBay时区模式 = 'beijing' | 'site'
+import { 读取排序时刻 } from '@/组件/筛选/筛选工具'
 
 // 原型站点配置；生产环境由站点主数据提供，同一国家不能推导唯一时区。
 export const 站点时区: Record<string, string> = {
@@ -14,13 +15,8 @@ export function 获取显示时区(模式: eBay时区模式, 站点: string[]): 
 }
 
 function 解析时间(时间: string): Date | undefined {
-  const 匹配 = 时间.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?::(\d{2}))? UTC([+-])(\d{1,2})(?::(\d{2}))?$/)
-  const 标准时间 = 匹配
-    ? `${匹配[1]}T${匹配[2]}:${匹配[3] || '00'}${匹配[4]}${匹配[5]!.padStart(2, '0')}:${匹配[6] || '00'}`
-    : /^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/.test(时间) ? 时间 : ''
-  if (!标准时间) return undefined
-  const 日期 = new Date(标准时间)
-  return Number.isFinite(日期.getTime()) ? 日期 : undefined
+  const 时刻 = 读取排序时刻(时间)
+  return 时刻 === undefined ? undefined : new Date(时刻)
 }
 
 export function 转换eBay时间(时间: string | undefined, 时区: string | undefined): string {
@@ -41,4 +37,10 @@ export function eBay查询日期(时间: string | undefined, 模式: eBay时区�
   const 时区 = 获取显示时区(模式, 站点)
   if (!时区) return undefined
   return 转换eBay时间(时间, 时区).slice(0, 10)
+}
+
+export function eBay查询墙钟(时间: string | undefined, 模式: eBay时区模式, 站点: string[]): string | undefined {
+  if (!时间 || !解析时间(时间)) return undefined
+  const 时区 = 获取显示时区(模式, 站点)
+  return 时区 ? 转换eBay时间(时间, 时区).slice(0, 19) : undefined
 }

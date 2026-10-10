@@ -1,18 +1,26 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Refresh, ArrowRight, Document, CircleCheck, Warning } from '@element-plus/icons-vue'
-import { ElButton, ElInput, ElSelect, ElOption, ElIcon, ElTag, ElTable, ElTableColumn, ElDrawer, ElDescriptions, ElDescriptionsItem, ElAlert, ElEmpty, ElMessage, ElMessageBox, ElTimeline, ElTimelineItem, ElPagination } from 'element-plus'
+import { ElButton, ElIcon, ElTag, ElTable, ElTableColumn, ElDrawer, ElDescriptions, ElDescriptionsItem, ElAlert, ElEmpty, ElMessage, ElMessageBox, ElTimeline, ElTimelineItem, ElPagination } from 'element-plus'
 import { 共享订单 } from '../订单处理/演示会话'
 import { 标发阻断原因, 标发状态列表, type 标发单, type 标发状态 } from './标发逻辑'
 import { 共享标发单 } from './演示会话'
 import type { 原型标注 } from '@/类型/标注'
+import MultiSelectFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import TimeRange from '@/组件/筛选/时间范围.vue'
+import ListSort from '@/组件/筛选/列表排序.vue'
+import { 标发搜索字段, 默认标发筛选, 校验标发筛选, 命中标发筛选, 排序标发单 } from './标发筛选'
 
 const router = useRouter()
 const route = useRoute()
 const 单据 = 共享标发单
 const 当前状态 = ref<标发状态 | '全部'>('全部')
-const 关键词 = ref(''); const 已查关键词 = ref(''); const 平台 = ref(''); const 已查平台 = ref(''); const 仅待核查 = ref(false)
+const 筛选 = reactive(默认标发筛选()); const 已应用 = reactive(默认标发筛选()); const 仅待核查 = ref(false)
+const 平台选项 = computed(() => [...new Set(单据.value.flatMap(单 => { const 平台 = 来源(单)?.platformCode; return 平台 ? [平台] : [] }))].map(值 => ({ value: 值, label: 值 })))
+const 排序 = ref<{ field: string; direction: 'asc' | 'desc' }>({ field: '', direction: 'desc' })
+const 排序字段 = [{ value: 'shippedAt', label: '实际发货时间', kind: 'time' as const }, { value: 'no', label: '标发单号', kind: 'text' as const }]
 const 选中 = ref<标发单[]>([]); const 详情 = ref<标发单>(); const 抽屉 = ref(false); const 正在执行 = ref(false)
 const 批量结果 = ref<{ total: number; success: number; failed: number; skipped: number; details: string[] }>()
 const 页码 = ref(1); const 每页 = 10
@@ -20,22 +28,22 @@ const 表格 = ref<{ clearSelection: () => void }>()
 function 清除勾选() { 选中.value = []; 表格.value?.clearSelection() }
 const 来源 = (单: 标发单) => 共享订单.value.find((订单) => 订单.systemOrderNo === 单.orderNo)
 const 阻断 = (单: 标发单) => 标发阻断原因(单, 来源(单))
-const 结果 = computed(() => 单据.value.filter((单) => (当前状态.value === '全部' || 单.status === 当前状态.value)
-  && (!仅待核查.value || 单.pendingVerification) && (!已查平台.value || 来源(单)?.platformCode === 已查平台.value)
-  && [单.no, 单.orderNo, 单.fulfillmentNo, 单.tracking, 来源(单)?.platformOrderNo].join(' ').toLowerCase().includes(已查关键词.value.toLowerCase())))
+const 结果 = computed(() => 排序标发单(单据.value.filter((单) => (当前状态.value === '全部' || 单.status === 当前状态.value)
+  && (!仅待核查.value || 单.pendingVerification) && 命中标发筛选(单, 已应用, 来源(单))), 排序.value))
 const 页数据 = computed(() => 结果.value.slice((页码.value - 1) * 每页, 页码.value * 每页))
 const 色 = (状态: 标发状态) => 状态 === '标发成功' ? 'success' : 状态 === '标发失败' ? 'danger' : 状态 === '无需标发' ? 'info' : 'warning'
 function 标注(id: string, 标题: string, 分类: 原型标注['分类'], 说明: string, 规则: string[], 等级: 原型标注['事实等级'] = '已确认'): 原型标注 {
-  return { id: `oms.confirmation.${id}`, 标题, 说明, ...{ 分类 }, 事实等级: 等级, 状态: '待评审', 版本: '0.3.0', 路由: '/oms/self-fulfillment/shipping-confirmation', 锚点: `oms.confirmation.${id}`, prd引用: ['PRD/订单标发功能PRD.md#6-功能与操作定义'], 触发方式: ['点击页面对应入口。'], 系统动作: 规则, 成功结果: ['更新标发对象及本地接口尝试，保留订单的有效出库事实。'], 异常处理: ['外部结果无法确认时记为标发失败并标记待核查；核查完成前禁止重提。'], 验收要点: 规则 }
+  return { id: `oms.confirmation.${id}`, 标题, 说明, ...{ 分类 }, 事实等级: 等级, 状态: '待评审', 版本: '2026-10-09', 路由: '/oms/self-fulfillment/shipping-confirmation', 锚点: `oms.confirmation.${id}`, prd引用: ['PRD/订单标发功能PRD.md#6-功能与操作定义', ...(id === 'filters' ? ['PRD/列表筛选组件规范.md'] : [])], 触发方式: ['点击页面对应入口。'], 系统动作: 规则, 成功结果: [id === 'filters' ? '筛选及排序只改变已应用结果展示，保留标发事实与动作资格。' : '更新标发对象及本地接口尝试，保留订单的有效出库事实。'], 异常处理: ['外部结果无法确认时记为标发失败并标记待核查；核查完成前禁止重提。'], 验收要点: 规则 }
 }
-function 查询() { 已查关键词.value = 关键词.value.trim(); 已查平台.value = 平台.value; 页码.value = 1; 清除勾选() }
+function 查询() { const 错误 = 校验标发筛选(筛选); if (错误) return void ElMessage.warning(错误); Object.assign(已应用, JSON.parse(JSON.stringify(筛选))); 页码.value = 1; 清除勾选() }
 function 切状态(状态: 标发状态 | '全部') { 当前状态.value = 状态; 页码.value = 1; 清除勾选() }
-function 重置() { 关键词.value = ''; 已查关键词.value = ''; 平台.value = ''; 已查平台.value = ''; 仅待核查.value = false; 切状态('全部') }
+function 重置() { Object.assign(筛选, 默认标发筛选()); Object.assign(已应用, 默认标发筛选()); 排序.value = { field: '', direction: 'desc' }; 仅待核查.value = false; 切状态('全部') }
+function 确认排序() { 页码.value = 1; 清除勾选() }
 watch(() => [route.path, route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([路径, 履约号, 订单号]) => {
   if (路径 !== '/oms/self-fulfillment/shipping-confirmation') return
   const 编号 = typeof 履约号 === 'string' ? 履约号 : typeof 订单号 === 'string' ? 订单号 : ''
   if (!编号) return
-  重置(); 关键词.value = 编号; 查询()
+  重置(); 筛选.searchType = typeof 履约号 === 'string' ? 'fulfillmentNo' : 'orderNo'; 筛选.searchMatch = 'exact'; 筛选.keyword = 编号; 查询()
 }, { immediate: true })
 function 查看(单: 标发单) { 详情.value = 单; 抽屉.value = true }
 function 记尝试(单: 标发单, action: string, result: string, evidence: string) { 单.attempts.unshift({ time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) + ' UTC+8', action, result, evidence }) }
@@ -81,7 +89,13 @@ async function 核查(单: 标发单) {
       <nav class="状态栏" v-prototype="标注('states', '标发五态', '规则', '状态数量只统计平台标发单，不汇总成订单数。', ['待标发、标发中、标发成功、标发失败、无需标发。', '待核查是失败原因分类，不增加第六种业务状态。'])">
         <button v-for="状态 in ['全部', ...标发状态列表] as const" :key="状态" :class="{ active: 当前状态 === 状态 }" @click="切状态(状态)">{{ 状态 }} <b>{{ 状态 === '全部' ? 单据.length : 单据.filter(单 => 单.status === 状态).length }}</b></button>
       </nav>
-      <div class="搜索栏"><ElInput v-model="关键词" placeholder="标发单号 / 系统订单号 / 履约单号 / 跟踪号" clearable @keyup.enter="查询" :prefix-icon="Search" /><ElSelect v-model="平台" placeholder="全部平台" clearable><ElOption label="eBay" value="eBay" /></ElSelect><ElButton type="primary" @click="查询">查询</ElButton><ElButton @click="重置">重置</ElButton></div>
+      <div class="搜索栏 统一筛选栏" v-prototype="标注('filters', '标发列表筛选与排序', '交互', '默认指定标发单号；分类多选、字段搜索、实际发货时间及列表排序沿用公共规范。', ['只匹配所选字段，模糊或精确可切换；多行精确 OR，最多 1000 个去重项。', '平台多选同字段 OR，确定仅修改筛选草稿，搜索才应用；状态页签仍单选。', '实际发货时间范围按来源明确 UTC+8 精确到起止秒，未选择不限时间。', '排序确认只重排已应用结果，回第一页清勾选；默认顺序恢复会话列表顺序。'], '合理假设')">
+        <FieldSearch v-model="筛选.keyword" v-model:field="筛选.searchType" v-model:mode="筛选.searchMatch" :fields="标发搜索字段" aria-prefix="订单标发" @search="查询" />
+        <MultiSelectFilter v-model="筛选.platform" :options="平台选项" placeholder="平台" />
+        <div class="实际时间筛选"><span>实际发货时间</span><TimeRange v-model="筛选.dates" aria-prefix="订单标发实际发货时间" /></div>
+        <ElButton type="primary" @click="查询">查询</ElButton><ElButton @click="重置">重置</ElButton>
+        <ListSort v-model="排序" :fields="排序字段" aria-prefix="订单标发" @change="确认排序" />
+      </div>
       <div class="操作栏" v-prototype="标注('submit', '提交与重试资格', '交互', '提交前检查发货依据、平台门禁、行数量与幂等约束；批量提交逐张重新校验。', ['选中后展示总数、可执行和跳过数量，经二次确认后提交。', '标发失败且待核查不得重试；核查确认成功直接补记成功。', '重试复用原标发单与幂等键，只增加接口尝试。'])"><span>已选 <b>{{ 选中.length }}</b> 张标发单</span><ElButton type="primary" :disabled="!选中.length || 正在执行" @click="提交(选中)">批量提交标发</ElButton><span class="辅助">提交前逐单校验 · 待核查单据自动跳过</span></div>
       <ElAlert v-if="批量结果" :title="`最近批次：共 ${批量结果.total} 张，成功 ${批量结果.success}，失败 ${批量结果.failed}，跳过 ${批量结果.skipped}，处理中 0`" :description="批量结果.details.join('；')" type="info" show-icon @close="批量结果 = undefined" />
       <ElTable ref="表格" :data="页数据" row-key="no" @selection-change="选中 = $event" @row-dblclick="查看">
@@ -118,4 +132,9 @@ async function 核查(单: 标发单) {
 .标发页面 { padding: 20px; color: #28364a; min-width: 0; height: 100%; overflow: auto; background: #f3f5f8; }
 .页首,.详情标题 { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:20px; }.页首 h1 {font-size:21px;margin:0 0 8px;font-weight:650}.页首 h1 span {font-size:12px;font-weight:400;color:#8792a3;margin-left:12px}.页首 p{margin:0;font-size:13px;color:#8792a3}.概览卡 {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}.概览卡 button{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid #e8edf3;border-radius:8px;padding:17px 20px;text-align:left;cursor:pointer}.概览卡 .el-icon{font-size:25px;padding:11px;box-sizing:content-box;border-radius:12px;background:#f3f7ff}.概览卡 span{display:block;color:#8792a3;font-size:12px}.概览卡 strong{display:block;font-size:25px;color:#28364a;margin-top:5px}.蓝{color:#367be8}.红{color:#d96064}.橙{color:#bd8a26}.绿{color:#30a586}.工作区{background:#fff;border:1px solid #e5eaf1;border-radius:8px;overflow:hidden}.状态栏{display:flex;flex-wrap:wrap;border-bottom:1px solid #edf0f4;padding:0 18px;gap:24px}.状态栏 button{border:0;background:none;padding:17px 0;font-size:13px;color:#778598;border-bottom:2px solid transparent;cursor:pointer}.状态栏 button.active{color:#2776da;border-bottom-color:#2776da}.状态栏 b{font-size:11px;margin-left:5px;background:#f0f3f8;border-radius:4px;padding:2px 5px}.搜索栏{display:flex;gap:10px;padding:18px;flex-wrap:wrap}.搜索栏>.el-input{width:360px}.搜索栏>.el-select{width:160px}.操作栏{display:flex;gap:14px;align-items:center;padding:0 18px 16px;font-size:12px;color:#8993a3}.操作栏 b{color:#347add}.辅助{margin-left:auto}.单号{font-variant-numeric:tabular-nums}small{display:block;font-size:11px;color:#8a96a7;margin-top:5px;line-height:1.6}.警示{color:#bc8019}.el-table{font-size:12px}.el-table :deep(th.el-table__cell){background:#f8fafc;color:#798699;font-weight:500}.el-table :deep(td.el-table__cell){padding:15px 0}footer{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;color:#8b95a4;font-size:12px}.详情标题 h2{font-size:18px;margin:0}.详情节{margin-top:26px}.详情节 h3{font-size:14px;margin:0 0 14px}.详情节 h3 span{font-size:11px;font-weight:400;color:#98a3b4;margin-left:8px}.详情节 p{font-size:12px;color:#8792a3;line-height:1.8}.详情节 :deep(.el-descriptions__content){word-break:break-word;font-size:12px}.详情节 :deep(.el-descriptions__label){font-size:12px}.详情节 :deep(.el-timeline){padding-left:10px}
 @media(max-width:1300px){.标发页面{padding:16px}.概览卡{gap:10px}.概览卡 button{padding:14px;gap:10px}.概览卡 .el-icon{font-size:20px;padding:8px}.辅助{display:none}.状态栏{gap:20px}}
+</style>
+<style scoped>
+.统一筛选栏{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.统一筛选栏 :deep(.el-button){height:32px;font-size:12px;margin-left:0}
+.实际时间筛选{display:flex;align-items:center;gap:6px;flex:none;min-width:0;font-size:12px;color:var(--el-text-color-regular)}
 </style>

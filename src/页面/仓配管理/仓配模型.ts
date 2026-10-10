@@ -1,3 +1,5 @@
+import type { 出库快照 } from './三方仓出库模型'
+
 export const 仓库状态 = ['下单中', '下单失败', '待出库', '出库异常', '已出库', '取消中', '已取消'] as const
 export const 物流状态 = ['待下单', '下单中', '下单成功', '下单失败', '已作废'] as const
 export const 仓储服务商 = ['万邑通', '谷仓', '4PX', '西邮', '出口易']
@@ -11,7 +13,7 @@ export interface 仓配单据 {
   status: string; externalNo: string; tracking: string; createdAt: string; updatedAt: string
   planned: number; shipped: number; sku: string; goods: string; country: string
   reason: string; reasonCode: string; awaitingCheck: boolean; blocker: string
-  history: 历史记录[]; attempts: 调用记录[]
+  history: 历史记录[]; attempts: 调用记录[]; outboundDetail?: 出库快照
 }
 export function 取得操作拦截(单据: 仓配单据, 动作: 作业动作): string {
   if (动作 === '查询结果') {

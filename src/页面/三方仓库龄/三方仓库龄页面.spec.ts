@@ -116,7 +116,7 @@ describe('三方仓库龄 SKU 展开交互', () => {
     expect(page.get('.result-info').text()).toContain('已选 1 个 SKU 组')
     expect(page.find('.batch-panel').exists()).toBe(true)
 
-    await page.get('input[aria-label="批次号"]').setValue('BATCH-SAME')
+    await page.get('input[aria-label="库龄批次搜索内容"]').setValue('BATCH-SAME')
     await page.get('form.filters').trigger('submit')
     await settle()
     expect(page.get('.el-pager .is-active').text()).toBe('1')
