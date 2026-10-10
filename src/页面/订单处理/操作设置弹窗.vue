@@ -6,11 +6,11 @@ import type { 原型标注 } from '@/类型/标注'
 import type { 作业行 } from './展示工具'
 import { 共享订单, 操作核查证据, 当前版本, 审核阻断原因, 推单阻断原因, 执行演示审核, 执行演示推单, 演示库存, type 仓库执行, type 命令结果 } from './演示会话'
 import { 不发货阻断原因, 执行演示不发货 } from './批量操作模型'
-import { 订单关联仓库执行, 仓单来源订单, 仓单期望版本, 重新推单阻断原因, 截单阻断原因, 退回待审核阻断原因, 恢复发货目标, 恢复发货阻断原因, 撤销不发货阻断原因, 执行演示重新推单, 执行演示截单, 执行演示退回待审核, 执行演示恢复发货, 执行演示撤销不发货 } from './操作功能模型'
+import { 订单关联仓库执行, 仓单来源订单, 仓单期望版本, 重新推单阻断原因, 退回待审核阻断原因, 恢复发货目标, 恢复发货阻断原因, 撤销不发货阻断原因, 执行演示重新推单, 执行演示退回待审核, 执行演示恢复发货, 执行演示撤销不发货 } from './操作功能模型'
 import { 获取作业来源订单 } from './筛选模型'
 import { 展示处理原因 } from './处理提示展示'
 
-export type 设置操作 = '审核' | '推单' | '重新推单' | '截单' | '退回待审核' | '不发货' | '恢复发货' | '撤销不发货'
+export type 设置操作 = '审核' | '推单' | '重新推单' | '退回待审核' | '不发货' | '恢复发货' | '撤销不发货'
 type 目标 = { key: string; order: 全渠道订单; row?: 作业行; execution?: 仓库执行; sources: 全渠道订单[]; version: number; versions: Record<string, number>; selected: boolean; reasons: string[] }
 const emit = defineEmits<{ result: [action: string, results: Array<{ key: string; result: 命令结果 }>] }>()
 const 打开 = ref(false)
@@ -20,14 +20,14 @@ const 目标列表 = ref<目标[]>([])
 const 来源选择 = ref('')
 const 保存中 = ref(false)
 const 草稿 = reactive({ reason: '', confirmed: false })
-const 是仓单操作 = computed(() => ['重新推单', '截单'].includes(操作.value))
+const 是仓单操作 = computed(() => 操作.value === '重新推单')
 const 需选择来源 = computed(() => !批量.value && !是仓单操作.value && 操作.value !== '推单' && 目标列表.value.length > 1)
 const 当前目标 = computed(() => 需选择来源.value ? 目标列表.value.filter(项 => 项.key === 来源选择.value) : 目标列表.value)
 function 可执行(项: 目标) { return 操作.value === '审核' ? 项.order.processingStatus === '待审核' && !项.order.reviews.some(记录 => 记录.status === '审核中') && !(项.order.platformCode === 'eBay' && 项.order.platformOrderStatus === 'IN_PROGRESS') : !项.reasons.length }
 const 合格选择 = computed(() => 当前目标.value.filter(项 => 项.selected && 可执行(项)))
 const 选中数 = computed(() => 当前目标.value.filter(项 => 项.selected).length)
-const 原因标签 = computed(() => ({ 审核: '审核说明', 推单: '', 重新推单: '修复说明', 截单: '截单原因', 退回待审核: '退回原因', 不发货: '不发货原因', 恢复发货: '恢复原因', 撤销不发货: '撤销原因' })[操作.value])
-const 确认勾选文案 = computed(() => ({ 截单: '我已核对全部受影响订单，确认申请终止本次仓库执行', 不发货: '我已核实所选订单无需 OMS 继续发货', 恢复发货: '我已完成异常复核，确认按所示目标阶段继续处理', 撤销不发货: '我已核实仍需 OMS 发货，撤销后必须重新审核' } as Record<string, string>)[操作.value] || '')
+const 原因标签 = computed(() => ({ 审核: '审核说明', 推单: '', 重新推单: '修复说明', 退回待审核: '退回原因', 不发货: '不发货原因', 恢复发货: '恢复原因', 撤销不发货: '撤销原因' })[操作.value])
+const 确认勾选文案 = computed(() => ({ 不发货: '我已核实所选订单无需 OMS 继续发货', 恢复发货: '我已完成异常复核，确认按所示目标阶段继续处理', 撤销不发货: '我已核实仍需 OMS 发货，撤销后必须重新审核' } as Record<string, string>)[操作.value] || '')
 const 恢复目标 = computed(() => 当前目标.value[0] ? 恢复发货目标(当前目标.value[0].order) : undefined)
 const 确认文案 = computed(() => {
   const n = 合格选择.value.length
@@ -35,7 +35,6 @@ const 确认文案 = computed(() => {
     case '审核': return `对 ${n} 张订单执行审核。通过后生成或确认有效履约方案并进入待推单；不通过的订单保留审核结果，不会推单。`
     case '推单': return `将 ${n} 张履约单按当前发货方案推送到仓库。推单受理不代表仓库建单成功，也不代表已发货。`
     case '重新推单': return `对已确认未生效且问题已修复的 ${n} 张出库单重新推单。结果未明的请求不会重新发送。`
-    case '截单': return `向仓库申请截停 ${n} 张出库单，影响 ${new Set(合格选择.value.flatMap(项 => 项.sources.map(order => order.systemOrderNo))).size} 张订单。受理不代表截单成功，请同步仓库状态确认结果；本次不直接改变订单处理状态。`
     case '退回待审核': return `将符合条件的 ${n} 张订单退回待审核，原审核及履约记录保留。重新配置并审核通过后才能再次推单。`
     case '不发货': return `将符合条件的 ${n} 张订单设为不发货，停止后续 OMS 发货。不会删除平台或出库历史，也不会代替仓库截单。`
     case '恢复发货': return `订单将恢复到 ${恢复目标.value || '待核实'}。本次不会重新推单，${恢复目标.value === '待发货' ? '继续原仓库执行' : 恢复目标.value === '待推单' ? '保留原执行历史，按有效方案等待推单' : '修复发货资料后必须重新审核'}。`
@@ -43,14 +42,13 @@ const 确认文案 = computed(() => {
   }
 })
 const 表单有效 = computed(() => 合格选择.value.length > 0 && (['审核', '推单'].includes(操作.value) || !!草稿.reason.trim()) && (!确认勾选文案.value || 草稿.confirmed))
-const 操作标注: 原型标注 = { id: 'oms.processing.action-settings', 锚点: 'oms.processing.action-settings', 标题: '六态操作设置与逐项资格', 说明: '按操作专题 PRD 提供本地评审交互；完整来源、历史执行、零出库、版本及待核查保护逐项重验。新增截单、退回、恢复及终态纠错仍为评审方案，外部接口未接入。', 路由: '/oms/self-fulfillment/processing', prd引用: ['PRD/订单处理-操作功能PRD.md'], 事实等级: '合理假设', 版本: '2026-10-10', 状态: '待评审', 交互规则: ['单个多来源先明确订单；批量目标去重、允许取消勾选，仅处理合格对象。', '普通审核可执行并记录通过或拦截摘要；平台部分履约仍仅展示拦截，不开放人工解除与剩余范围改写。', '截单受理保留原处理阶段，等待同步明确取消；恢复阶段由事实判断，不供手工选择。'], 数据来源: ['虚构订单及仓库执行证据；刷新恢复初始值，未调用真实 API。'] }
+const 操作标注: 原型标注 = { id: 'oms.processing.action-settings', 锚点: 'oms.processing.action-settings', 标题: '六态操作设置与逐项资格', 说明: '按操作专题 PRD 提供本地评审交互；完整来源、历史执行、零出库、版本及待核查保护逐项重验。退回、恢复及终态纠错仍为评审方案；截单仅在三方仓出库单操作，外部接口未接入。', 路由: '/oms/self-fulfillment/processing', prd引用: ['PRD/订单处理-操作功能PRD.md'], 事实等级: '合理假设', 版本: '2026-10-10', 状态: '待评审', 交互规则: ['单个多来源先明确订单；批量目标去重、允许取消勾选，仅处理合格对象。', '普通审核可执行并记录通过或拦截摘要；平台部分履约仍仅展示拦截，不开放人工解除与剩余范围改写。', '订单处理不发起截单；同步取得仓库明确结果后再核对后续动作。恢复阶段由事实判断，不供手工选择。'], 数据来源: ['虚构订单及仓库执行证据；刷新恢复初始值，未调用真实 API。'] }
 
 function 资格(项: 目标): string[] {
   switch (操作.value) {
     case '审核': return 审核阻断原因(项.order, 演示库存.value[项.order.systemOrderNo] ?? '充足')
     case '推单': return 项.row?.fulfillment ? 推单阻断原因(项.order, 项.row.fulfillment.fulfillmentOrderNo) : ['暂无有效履约方案']
     case '重新推单': return 重新推单阻断原因(项.execution!)
-    case '截单': return 截单阻断原因(项.execution!, 批量.value)
     case '退回待审核': return 退回待审核阻断原因(项.order)
     case '不发货': return 不发货阻断原因(项.order)
     case '恢复发货': return 恢复发货阻断原因(项.order)
@@ -58,13 +56,14 @@ function 资格(项: 目标): string[] {
   }
 }
 function open(action: 设置操作, rows: 作业行[], batch = false) {
+  if (!['审核', '推单', '重新推单', '退回待审核', '不发货', '恢复发货', '撤销不发货'].includes(action)) return ElMessage.warning('该操作请到对应业务页面办理')
   if (!rows.length) return ElMessage.warning('请先勾选当前页对象')
   操作.value = action; 批量.value = batch; 来源选择.value = ''
   Object.assign(草稿, { reason: '', confirmed: false })
   const 范围: 目标[] = []
   for (const row of rows) {
     const sources = 获取作业来源订单(row, 共享订单.value)
-    if (['重新推单', '截单'].includes(action)) {
+    if (action === '重新推单') {
       const executions = sources.flatMap(order => 订单关联仓库执行(order)).filter(项 => !row.fulfillment || 项.履约单号 === row.fulfillment.fulfillmentOrderNo)
       for (const execution of executions) { const orders = 仓单来源订单(execution); 范围.push({ key: execution.出库单号, order: orders[0] || row.order, row, execution, sources: orders, version: 0, versions: 仓单期望版本(execution), selected: true, reasons: [] }) }
     } else if (action === '推单') {
@@ -72,7 +71,7 @@ function open(action: 设置操作, rows: 作业行[], batch = false) {
     } else for (const order of sources) 范围.push({ key: order.systemOrderNo, order, row, sources: [order], version: 当前版本(order.systemOrderNo), versions: {}, selected: true, reasons: [] })
   }
   目标列表.value = [...new Map(范围.map(项 => [项.key, 项])).values()].map(项 => ({ ...项, reasons: 资格(项) }))
-  if (!batch && ['截单', '重新推单'].includes(action) && 目标列表.value.length > 1) 目标列表.value.forEach(项 => { 项.selected = false })
+  if (!batch && action === '重新推单' && 目标列表.value.length > 1) 目标列表.value.forEach(项 => { 项.selected = false })
   打开.value = true
 }
 async function 提交() {
@@ -89,7 +88,6 @@ async function 提交() {
         case '审核': result = 执行演示审核(项.key, 项.version, 草稿.reason); break
         case '推单': result = 执行演示推单(项.order.systemOrderNo, 项.row!.fulfillment!.fulfillmentOrderNo, 项.version, 项.versions); break
         case '重新推单': result = 执行演示重新推单(项.key, 项.versions, 草稿.reason); break
-        case '截单': result = 执行演示截单(项.key, 项.versions, 草稿.reason, 批量.value); break
         case '退回待审核': result = 执行演示退回待审核(项.key, 项.version, 草稿.reason); break
         case '不发货': result = 执行演示不发货(项.key, 项.version, 草稿.reason); break
         case '恢复发货': result = 执行演示恢复发货(项.key, 项.version, 草稿.reason); break
@@ -122,7 +120,7 @@ defineExpose({ open })
       <ElAlert v-else-if="合格选择.length < 选中数" :title="`本次仅处理符合条件的 ${合格选择.length} 个对象，其余对象将跳过。是否继续？`" type="warning" :closable="false" show-icon />
       <label v-if="原因标签" class="表单标签">{{ 原因标签 }}{{ 操作 === '审核' ? '（可选）' : ' *' }}<ElInput v-model="草稿.reason" type="textarea" :rows="2" :maxlength="2000" show-word-limit :placeholder="`请输入${原因标签}`" :aria-label="原因标签" /></label>
       <ElCheckbox v-if="确认勾选文案" v-model="草稿.confirmed" class="确认勾选">{{ 确认勾选文案 }}</ElCheckbox>
-      <ElAlert :title="确认文案" :type="['截单', '不发货', '撤销不发货'].includes(操作) ? 'warning' : 'info'" :closable="false" show-icon />
+      <ElAlert :title="确认文案" :type="['不发货', '撤销不发货'].includes(操作) ? 'warning' : 'info'" :closable="false" show-icon />
     </div>
     <template #footer><ElButton :disabled="保存中" @click="打开 = false">取消</ElButton><ElButton type="primary" :loading="保存中" :disabled="!表单有效" @click="提交">确认{{ 操作 }}</ElButton></template>
   </ElDialog>

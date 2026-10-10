@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { computed, defineComponent, h, inject, provide, type Ref } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import ActionSettings from './操作设置弹窗.vue'
+import ActionSettings, { type 设置操作 } from './操作设置弹窗.vue'
 import type { 作业行 } from './展示工具'
 import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本 } from './演示会话'
 
@@ -59,6 +59,17 @@ beforeEach(恢复数据)
 afterEach(() => { 实例.splice(0).forEach(wrapper => wrapper.unmount()); 恢复数据(); document.body.innerHTML = '' })
 
 describe('操作设置弹窗的对象范围与提交确认', () => {
+  it('旧截单调用无法打开单个或批量弹窗，不发出结果也不改写仓库状态和操作日志', async () => {
+    const 快照 = JSON.stringify({ orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value })
+    for (const batch of [false, true]) {
+      const wrapper = await 打开组件('截单' as 设置操作, [行('12', true)], batch)
+      expect(wrapper.find('.设置弹窗').exists()).toBe(false)
+      expect(wrapper.findAll('button')).toHaveLength(0)
+      expect(wrapper.emitted('result')).toBeUndefined()
+      expect(JSON.stringify({ orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value })).toBe(快照)
+    }
+  })
+
   it('库存不足的普通待审核订单仍可执行审核，保存本轮拦截摘要并保持待审核', async () => {
     const 原轮数 = 单('02').reviews.length
     const wrapper = await 打开组件('审核', [行('02')])
@@ -165,19 +176,6 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(仓库执行记录.value.find(execution => execution.出库单号 === 'OUT-DEMO-ACTION-21')!.状态).toBe('已取消')
   })
 
-  it('单个截单只要求截单原因和保留的人工确认，受理后仍等待仓库明确结果', async () => {
-    const wrapper = await 打开组件('截单', [行('12', true)])
-    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['截单原因'])
-    await wrapper.get('[aria-label="截单原因"]').setValue('停止本次发货，需调整发货方案')
-    expect(已禁用(wrapper, '确认截单')).toBe(true)
-    await wrapper.get('.确认勾选').setValue(true)
-    expect(已禁用(wrapper, '确认截单')).toBe(false)
-    await 按钮(wrapper, '确认截单').trigger('click')
-    await flushPromises()
-    expect(单('12').processingStatus).toBe('待发货')
-    expect(仓库执行记录.value.find(execution => execution.出库单号 === 'OUT-DEMO-ACTION-12')).toMatchObject({ 状态: '取消中', 待核查: true })
-  })
-
   it('已截单成功的独立订单只填写退回原因即可退回，保留终止的旧执行', async () => {
     const wrapper = await 打开组件('退回待审核', [行('13')])
     expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['退回原因'])
@@ -213,8 +211,8 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(wrapper.get('.目标表').text().split(单('01').systemOrderNo)).toHaveLength(2)
   })
 
-  it('共享单个截单准确展示全部两张来源身份，不重复构建同一仓单对象', async () => {
-    const wrapper = await 打开组件('截单', [行('33', true)])
+  it('共享仓单的重推预检准确展示全部来源身份且只构建一个仓单对象，未明确失败不能提交', async () => {
+    const wrapper = await 打开组件('重新推单', [行('33', true)])
     expect(wrapper.findAll('.对象编号')).toHaveLength(1)
     expect(wrapper.get('.对象编号').text()).toBe('OUT-DEMO-ACTION-SHARED')
     const sources = wrapper.findAll('.来源事实')
@@ -226,6 +224,8 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
       expect(source.get('.来源店铺').text()).toBe(`${order.platformCode} · ${order.storeName}`)
       expect(source.text()).toContain(`平台订单号：${order.platformOrderNo}`)
     }
+    expect(已禁用(wrapper, '确认重新推单')).toBe(true)
+    expect(wrapper.emitted('result')).toBeUndefined()
   })
 
   it('16条待审核批量无需审核说明也可提交，普通拦截留痕且部分履约不代替人工核查', async () => {
