@@ -168,7 +168,7 @@ function 批量入口(操作: string) {
   if (操作 === '修改仓库物流' || 操作 === '增加备注') return 打开批量操作(操作 === '增加备注' ? '批量备注' : '修改仓库物流')
   设置操作入口(操作 as 设置操作)
 }
-type 来源动作 = '订单详情' | '增加备注' | '修改仓库物流' | '查看操作记录' | '查看仓库库存' | '查看订单标发' | '查看终止原因'
+type 来源动作 = '订单详情' | '增加备注' | '修改仓库物流' | '查看订单标发' | '查看终止原因'
 const 来源窗口 = ref(false)
 const 来源动作 = ref<来源动作>('订单详情')
 const 来源目标行 = ref<作业行>()
@@ -176,7 +176,6 @@ const 目标来源 = ref('')
 const 全部来源 = computed(() => 来源目标行.value ? 获取作业来源订单(来源目标行.value, 共享订单.value) : [])
 const 备注控制 = ref<InstanceType<typeof OrderNotes>>()
 const 备注订单号 = ref('')
-const 记录窗口 = ref(false)
 const 记录订单 = ref<全渠道订单>()
 const 终止窗口 = ref(false)
 async function 执行来源动作(行: 作业行, 订单: 全渠道订单) {
@@ -184,8 +183,6 @@ async function 执行来源动作(行: 作业行, 订单: 全渠道订单) {
     case '订单详情': return 查看全渠道(订单)
     case '修改仓库物流': return 调整路由(订单)
     case '增加备注': 备注订单号.value = 订单.systemOrderNo; await nextTick(); return 备注控制.value?.open()
-    case '查看仓库库存': return 查看库存明细({ ...行, order: 订单 })
-    case '查看操作记录': 记录订单.value = 订单; 记录窗口.value = true; return
     case '查看终止原因': 记录订单.value = 订单; 终止窗口.value = true; return
     case '查看订单标发': return void router.push({ path: '/oms/self-fulfillment/shipping-confirmation', query: { systemOrderNo: 订单.systemOrderNo } })
   }
@@ -213,7 +210,6 @@ function 行更多操作(行: 作业行): string[] {
   if (['待审核', '待推单', '待发货'].includes(行.stage)) 操作.push('不发货')
   if (行.stage === '不发货') 操作.push('撤销不发货')
   if (行.stage !== '已发货') 操作.push('查看订单标发')
-  操作.push('查看操作记录', '查看仓库库存')
   return 操作
 }
 function 行操作入口(操作: string, 行: 作业行) {
@@ -533,15 +529,14 @@ const 标注 = {
       <ElButton v-if="来源动作 === '查看订单标发' && 来源目标行?.fulfillment" style="margin-top:16px" @click="来源窗口 = false; 查看执行(来源目标行, '标发')">查看该履约全部关联标发记录</ElButton>
       <template #footer><ElButton @click="来源窗口 = false">取消</ElButton><ElButton type="primary" :disabled="!目标来源" @click="确认来源">确认来源</ElButton></template>
     </ElDialog>
-    <ElDrawer v-model="记录窗口" title="操作记录" size="min(660px, 94vw)" append-to-body><template v-if="记录订单"><strong class="等宽">{{ 记录订单.systemOrderNo }}</strong><p v-if="!记录订单.operationLogs.length" class="浅色字">暂无对应记录</p><article v-for="(日志, 索引) in [...记录订单.operationLogs].reverse()" :key="索引" class="日志行"><div><strong>{{ 展示处理原因(日志.operationType) }} · {{ 日志.operationResult }}</strong><p>{{ 展示处理原因(日志.content) }}</p><small>{{ 日志.operatedAt }} · {{ 日志.operator }}</small></div></article></template></ElDrawer>
     <ElDialog v-model="终止窗口" title="不发货原因" width="min(660px, 92vw)" append-to-body><div v-if="记录订单" class="终止原因"><strong>{{ 记录订单.systemOrderNo }}</strong><p>{{ 记录订单.noShipmentReason || '暂无对应记录' }}</p><p class="浅色字">原订单、审核及仓库执行历史保留。</p></div><template #footer><ElButton @click="终止窗口 = false">关闭</ElButton></template></ElDialog>
 
     <ElDialog v-model="结果打开" :title="结果标题" width="min(900px, 94vw)" append-to-body><div class="结果统计"><div v-for="(数量, 类型) in 结果统计" :key="类型"><span>{{ 类型 }}</span><strong>{{ 数量 }}</strong></div></div><ElTable :data="批次结果" max-height="380"><ElTableColumn prop="key" label="作用对象" min-width="230" /><ElTableColumn label="结果" width="105"><template #default="{ row }"><ElTag :type="是跳过(row.result) ? 'info' : !row.result.成功 ? 'danger' : row.result.待核查 ? 'warning' : 'success'">{{ 是跳过(row.result) ? '跳过' : !row.result.成功 ? '失败' : row.result.待核查 ? '处理中' : '成功' }}</ElTag></template></ElTableColumn><ElTableColumn label="结果说明 / 下一步" min-width="380"><template #default="{ row }">{{ 展示处理原因(row.result.信息) }}<div v-if="row.result.对象号" class="等宽 浅色字">{{ row.result.对象号 }}</div></template></ElTableColumn></ElTable><template #footer><ElButton @click="导出结果">下载逐项结果</ElButton><ElButton v-if="(结果统计.成功 || 结果统计.处理中) && ['审核结果', '推单结果'].includes(结果标题)" type="primary" @click="结果打开 = false; 当前队列 = '待推单'; 重置()">{{ 结果标题 === '审核结果' ? '进入待推单' : '查看待推单' }}</ElButton><ElButton v-if="结果标题 === '不发货结果' && 结果统计.成功" type="primary" @click="结果打开 = false; 当前队列 = '不发货'; 重置()">查看不发货订单</ElButton><ElButton @click="结果打开 = false">关闭</ElButton></template></ElDialog>
 
-    <ElDialog v-model="批量操作打开" :title="批量操作类型" width="min(820px, 94vw)" append-to-body destroy-on-close :close-on-click-modal="false">
+    <ElDialog v-model="批量操作打开" :title="批量操作类型" width="min(1280px, 96vw)" top="3vh" class="订单批量编辑弹窗" append-to-body destroy-on-close :close-on-click-modal="false">
       <div v-prototype="标注.批量扩展" class="批量操作表单">
         <div class="批量范围摘要"><strong>{{ 批量操作目标.length }} 张订单</strong><span>可处理 {{ 批量可处理数量 }}</span><span v-if="批量操作目标.length !== 批量可处理数量" class="危险字">拦截 {{ 批量操作目标.length - 批量可处理数量 }}</span></div>
-        <ElTable :data="批量操作目标" max-height="250"><ElTableColumn label="选择" width="60"><template #default="{ row }"><ElCheckbox v-model="row.selected" :aria-label="'选择批量目标 ' + row.order.systemOrderNo" /></template></ElTableColumn><ElTableColumn prop="order.systemOrderNo" label="系统订单号" min-width="190" /><ElTableColumn prop="order.processingStatus" label="当前阶段" width="95" /><ElTableColumn label="处理范围 / 校验结果" min-width="310"><template #default="{ row }"><span :class="row.reasons.length ? '危险字' : '通过字'">{{ 展示处理原因(row.reasons.join('；')) || (批量操作类型 === '批量备注' ? '追加至本地备注，保留原有历史' : '当前可处理，确认时再次校验') }}</span></template></ElTableColumn></ElTable>
+        <ElTable :data="批量操作目标" max-height="calc(94vh - 450px)"><ElTableColumn label="选择" width="60"><template #default="{ row }"><ElCheckbox v-model="row.selected" :aria-label="'选择批量目标 ' + row.order.systemOrderNo" /></template></ElTableColumn><ElTableColumn label="订单信息" min-width="270"><template #default="{ row }"><strong>{{ row.order.systemOrderNo }}</strong><div>{{ row.order.platformCode }} · {{ row.order.storeName || '—' }}</div><div>平台订单号：{{ row.order.platformOrderNo || '—' }}</div></template></ElTableColumn><ElTableColumn prop="order.processingStatus" label="当前阶段" width="95" /><ElTableColumn label="处理范围 / 校验结果" min-width="310"><template #default="{ row }"><span :class="row.reasons.length ? '危险字' : '通过字'">{{ 展示处理原因(row.reasons.join('；')) || (批量操作类型 === '批量备注' ? '追加至本地备注，保留原有历史' : '当前可处理，确认时再次校验') }}</span></template></ElTableColumn></ElTable>
         <template v-if="批量操作类型 === '批量备注'"><label for="批量备注输入">备注内容</label><ElInput id="批量备注输入" v-model="批量操作草稿.content" type="textarea" :rows="4" :maxlength="订单备注字数上限" show-word-limit placeholder="输入要追加到所选订单的备注" aria-label="批量备注内容" /><p class="批量说明">相同内容逐单追加，仅供内部查看，不向平台或仓库发送。</p></template>
         <template v-else>
           <template v-if="批量操作类型 === '修改仓库物流'"><ElForm label-position="top"><WarehouseChannelSelect v-model:warehouse="批量操作草稿.warehouse" v-model:channel="批量操作草稿.code" :routes="演示路由" /></ElForm><div v-if="批量所选路由" class="批量路由摘要">仓储服务商：{{ 批量所选路由.warehouseProvider }}<br>仓库账号：{{ 批量所选路由.warehouseAccount }}<br>面单模式：{{ 批量所选路由.labelMode }}</div></template>
@@ -559,6 +554,8 @@ const 标注 = {
 </template>
 
 <style scoped>
+:global(.订单批量编辑弹窗){max-height:94vh;margin-bottom:3vh}
+:global(.订单批量编辑弹窗 .el-dialog__body){max-height:calc(94vh - 110px);overflow:auto}
 .作业工具栏{flex-wrap:wrap}.批量操作组{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.批量操作组 :deep(.el-button){margin:0;font-size:12px;height:30px;padding:0 12px}.批量操作组>span{display:inline-flex}.勾选摘要{font-size:12px;color:#738197;white-space:nowrap}.批量操作表单{display:flex;flex-direction:column;gap:12px}.批量操作表单>label{color:var(--yy-text-heading);font-size:12px}.批量范围摘要{display:flex;flex-wrap:wrap;align-items:center;gap:16px;font-size:12px;color:#738197}.批量范围摘要>strong{color:var(--yy-text-heading)}.批量说明{margin:0;color:#738197;font-size:12px;line-height:1.6}.批量路由摘要{padding:10px 12px;background:#f7f9fc;border:1px solid #edf0f4;border-radius:4px;color:#53657b;font-size:12px;line-height:1.8}
 .作业表格 :deep(th.el-table__cell){color:var(--yy-text-heading)!important}
 .作业表格 .信息格{gap:6px;justify-content:flex-start;line-height:1.5}

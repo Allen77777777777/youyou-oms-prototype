@@ -211,35 +211,35 @@ export function 执行演示重新推单(出库单号: string, 版本表: Record
   return { 成功: true, 信息: '重新推单已受理，请同步仓库状态查看结果', 对象号: 出库单号, 待核查: true }
 }
 
-export function 执行演示截单(出库单号: string, 版本表: Record<string, number>, 原因: string, 复核说明: string, 批量 = false): 命令结果 {
+export function 执行演示截单(出库单号: string, 版本表: Record<string, number>, 原因: string, 批量 = false): 命令结果 {
   const 查找 = 查仓单(出库单号, 版本表)
   if ('成功' in 查找) return 查找
-  const 错误 = 字段错误([['截单原因', 原因], ['复核说明', 复核说明]])
+  const 错误 = 字段错误([['截单原因', 原因]])
   if (错误) return { 成功: false, 信息: 错误 }
   const 阻断 = 截单阻断原因(查找, 批量)
   if (阻断.length) return { 成功: false, 信息: 阻断.join('；') }
   查找.状态 = '取消中'; 查找.待核查 = true; 查找.原因 = `截单申请已受理：${原因.trim()}`; 查找.更新时间 = 演示时间()
-  for (const 订单 of 仓单来源订单(查找)) 记录操作(订单, '截单', `${出库单号}；全部受影响来源：${仓单来源订单(查找).map(项 => 项.systemOrderNo).join('、')}；原因：${原因.trim()}；复核：${复核说明.trim()}；仅申请仓库截单，订单保持${订单.processingStatus}，等待明确结果。仅本地演示。`)
+  for (const 订单 of 仓单来源订单(查找)) 记录操作(订单, '截单', `${出库单号}；全部受影响来源：${仓单来源订单(查找).map(项 => 项.systemOrderNo).join('、')}；原因：${原因.trim()}；仅申请仓库截单，订单保持${订单.processingStatus}，等待明确结果。仅本地演示。`)
   return { 成功: true, 信息: '截单申请已受理，请等待仓库确认', 对象号: 出库单号, 待核查: true }
 }
 
-export function 执行演示退回待审核(订单号: string, 期望版本: number, 原因: string, 复核说明: string): 命令结果 {
+export function 执行演示退回待审核(订单号: string, 期望版本: number, 原因: string): 命令结果 {
   const 查找 = 查订单(订单号, 期望版本)
   if ('成功' in 查找) return 查找
-  const 错误 = 字段错误([['退回原因', 原因], ['复核说明', 复核说明]])
+  const 错误 = 字段错误([['退回原因', 原因]])
   if (错误) return { 成功: false, 信息: 错误 }
   const 阻断 = 退回待审核阻断原因(查找)
   if (阻断.length) return { 成功: false, 信息: 阻断.join('；') }
   const 原状态 = 查找.processingStatus
   停止旧方案(查找); 查找.processingStatus = '待审核'
-  记录操作(查找, '退回待审核', `${原状态} → 待审核；原计划已停止，原审核、履约和仓库快照保留；原因：${原因.trim()}；复核：${复核说明.trim()}；后续须重新审核，本次不推单。仅本地演示。`)
+  记录操作(查找, '退回待审核', `${原状态} → 待审核；原计划已停止，原审核、履约和仓库快照保留；原因：${原因.trim()}；后续须重新审核，本次不推单。仅本地演示。`)
   return { 成功: true, 信息: '已退回待审核，原审核和执行记录保留', 对象号: 订单号 }
 }
 
-export function 执行演示恢复发货(订单号: string, 期望版本: number, 原因: string, 复核说明: string): 命令结果 {
+export function 执行演示恢复发货(订单号: string, 期望版本: number, 原因: string): 命令结果 {
   const 查找 = 查订单(订单号, 期望版本)
   if ('成功' in 查找) return 查找
-  const 错误 = 字段错误([['恢复原因', 原因], ['复核说明', 复核说明]])
+  const 错误 = 字段错误([['恢复原因', 原因]])
   if (错误) return { 成功: false, 信息: 错误 }
   const 阻断 = 恢复发货阻断原因(查找)
   if (阻断.length) return { 成功: false, 信息: 阻断.join('；') }
@@ -251,20 +251,20 @@ export function 执行演示恢复发货(订单号: string, 期望版本: number
     if (目标 === '待推单') 查找.fulfillmentOrders.push({ ...原方案, fulfillmentOrderNo: `FL-${订单号}-RECOVER-V${当前版本(订单号) + 1}`, route: { ...原方案.route }, isActive: true, status: '待执行', plannedQuantity: 查找.items.reduce((总, 行) => 总 + 行.fulfillableQuantity!, 0), shippedQuantity: 0, trackingNumber: undefined, shippedAt: undefined })
   }
   查找.processingStatus = 目标; 查找.blockReason = undefined
-  记录操作(查找, '恢复发货', `异常 → ${目标}；原异常：${原异常 || '未填写'}；原因：${原因.trim()}；复核：${复核说明.trim()}；${目标 === '待发货' ? '继续唯一原仓单，不重新推单' : 目标 === '待推单' ? '旧仓单保持结束，原有效方案另建待执行路径，本次不推单' : '旧方案停止，待资料修复后重新审核'}。仅本地演示。`)
+  记录操作(查找, '恢复发货', `异常 → ${目标}；原异常：${原异常 || '未填写'}；原因：${原因.trim()}；${目标 === '待发货' ? '继续唯一原仓单，不重新推单' : 目标 === '待推单' ? '旧仓单保持结束，原有效方案另建待执行路径，本次不推单' : '旧方案停止，待资料修复后重新审核'}。仅本地演示。`)
   return { 成功: true, 信息: `已恢复到${目标}，本次不会重新推单`, 对象号: 订单号 }
 }
 
-export function 执行演示撤销不发货(订单号: string, 期望版本: number, 原因: string, 纠错说明: string, 核查依据: string): 命令结果 {
+export function 执行演示撤销不发货(订单号: string, 期望版本: number, 原因: string): 命令结果 {
   const 查找 = 查订单(订单号, 期望版本)
   if ('成功' in 查找) return 查找
-  const 错误 = 字段错误([['撤销原因', 原因], ['纠错说明', 纠错说明], ['核查依据', 核查依据]])
+  const 错误 = 字段错误([['撤销原因', 原因]])
   if (错误) return { 成功: false, 信息: 错误 }
   const 阻断 = 撤销不发货阻断原因(查找)
   if (阻断.length) return { 成功: false, 信息: 阻断.join('；') }
   const 原不发货原因 = 查找.noShipmentReason
   停止旧方案(查找); 查找.processingStatus = '待审核'; 查找.noShipmentReason = undefined; 查找.blockReason = undefined
-  记录操作(查找, '撤销不发货', `不发货 → 待审核；原不发货原因：${原不发货原因 || '未填写'}；撤销原因：${原因.trim()}；纠错说明：${纠错说明.trim()}；核查依据：${核查依据.trim()}；原记录保留，旧仓库单不会恢复，必须重新审核，本次不推单。仅本地演示。`)
+  记录操作(查找, '撤销不发货', `不发货 → 待审核；原不发货原因：${原不发货原因 || '未填写'}；撤销原因：${原因.trim()}；原记录保留，旧仓库单不会恢复，必须重新审核，本次不推单。仅本地演示。`)
   return { 成功: true, 信息: '已撤销不发货并返回待审核，旧仓库单不会恢复', 对象号: 订单号 }
 }
 

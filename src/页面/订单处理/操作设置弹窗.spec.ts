@@ -85,7 +85,7 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(wrapper.text()).toContain('本次仅处理符合条件的 1 个对象，其余对象将跳过')
     expect(wrapper.get('.目标表').text()).toContain('已有有效出库事实')
     await wrapper.get('[aria-label="不发货原因"]').setValue('业务确认不再需要发货')
-    await wrapper.get('[aria-label="复核说明"]').setValue('逐单核实无仓库执行及实际出库')
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['不发货原因'])
     await wrapper.get('.确认勾选').setValue(true)
     expect(已禁用(wrapper, '确认不发货')).toBe(false)
     await wrapper.get('[aria-label="选择操作对象 OMS-DEMO-ACTION-01"]').setValue(false)
@@ -116,18 +116,15 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(wrapper.emitted('result')).toBeUndefined()
   })
 
-  it('不发货的原因、复核说明和人工确认各自必填，取消不改变订单', async () => {
+  it('不发货只填写一个原因，仍需人工确认；空白原因及未确认不可提交，取消不改变订单', async () => {
     const 快照 = JSON.stringify(单('01'))
     const wrapper = await 打开组件('不发货', [行('01')])
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['不发货原因'])
     expect(已禁用(wrapper, '确认不发货')).toBe(true)
     await wrapper.get('[aria-label="不发货原因"]').setValue(' \n ')
-    await wrapper.get('[aria-label="复核说明"]').setValue('已核对全部范围')
     await wrapper.get('.确认勾选').setValue(true)
     expect(已禁用(wrapper, '确认不发货')).toBe(true)
     await wrapper.get('[aria-label="不发货原因"]').setValue('无需继续发货')
-    await wrapper.get('[aria-label="复核说明"]').setValue(' ')
-    expect(已禁用(wrapper, '确认不发货')).toBe(true)
-    await wrapper.get('[aria-label="复核说明"]').setValue('全部履约及历史执行已核实为零出库')
     await wrapper.get('.确认勾选').setValue(false)
     expect(已禁用(wrapper, '确认不发货')).toBe(true)
     await wrapper.get('.确认勾选').setValue(true)
@@ -137,13 +134,12 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(wrapper.emitted('result')).toBeUndefined()
   })
 
-  it('恢复目标只读且由事实判定，原因、说明和确认齐备后才恢复待审核', async () => {
+  it('恢复目标只读且由事实判定，仅恢复原因和人工确认齐备后即可回待审核', async () => {
     const wrapper = await 打开组件('恢复发货', [行('19')])
     expect(wrapper.text()).toContain('系统判定恢复到：待审核')
     expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['恢复原因'])
     await wrapper.get('[aria-label="恢复原因"]').setValue('平台条件已恢复，需要重新配置发货')
-    expect(已禁用(wrapper, '确认恢复发货')).toBe(true)
-    await wrapper.get('[aria-label="复核说明"]').setValue('旧仓单已明确结束，剩余两件仍需发货')
     expect(已禁用(wrapper, '确认恢复发货')).toBe(true)
     await wrapper.get('.确认勾选').setValue(true)
     expect(已禁用(wrapper, '确认恢复发货')).toBe(false)
@@ -155,18 +151,123 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(wrapper.emitted('result')![0]![1]).toEqual([{ key: 'OMS-DEMO-ACTION-19', result: expect.objectContaining({ 成功: true }) }])
   })
 
-  it('撤销不发货还要求独立核查依据，撤销后保留旧仓单并回待审核', async () => {
+  it('撤销不发货只填写撤销原因并保留确认勾选，撤销后旧仓单不复活', async () => {
     const wrapper = await 打开组件('撤销不发货', [行('21')])
-    await wrapper.get('[aria-label="撤销原因"]').setValue('原结论误判')
-    await wrapper.get('[aria-label="纠错说明"]').setValue('已取得仍需发货的业务结论')
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['撤销原因'])
     await wrapper.get('.确认勾选').setValue(true)
     expect(已禁用(wrapper, '确认撤销不发货')).toBe(true)
-    await wrapper.get('[aria-label="核查依据"]').setValue('已核对付款、取消、剩余范围及旧执行结果')
+    await wrapper.get('[aria-label="撤销原因"]').setValue('原结论误判，已核对仍需发货及旧执行结果')
     expect(已禁用(wrapper, '确认撤销不发货')).toBe(false)
     await 按钮(wrapper, '确认撤销不发货').trigger('click')
     await flushPromises()
     expect(单('21').processingStatus).toBe('待审核')
     expect(单('21').fulfillmentOrders.every(fulfillment => !fulfillment.isActive)).toBe(true)
     expect(仓库执行记录.value.find(execution => execution.出库单号 === 'OUT-DEMO-ACTION-21')!.状态).toBe('已取消')
+  })
+
+  it('单个截单只要求截单原因和保留的人工确认，受理后仍等待仓库明确结果', async () => {
+    const wrapper = await 打开组件('截单', [行('12', true)])
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['截单原因'])
+    await wrapper.get('[aria-label="截单原因"]').setValue('停止本次发货，需调整发货方案')
+    expect(已禁用(wrapper, '确认截单')).toBe(true)
+    await wrapper.get('.确认勾选').setValue(true)
+    expect(已禁用(wrapper, '确认截单')).toBe(false)
+    await 按钮(wrapper, '确认截单').trigger('click')
+    await flushPromises()
+    expect(单('12').processingStatus).toBe('待发货')
+    expect(仓库执行记录.value.find(execution => execution.出库单号 === 'OUT-DEMO-ACTION-12')).toMatchObject({ 状态: '取消中', 待核查: true })
+  })
+
+  it('已截单成功的独立订单只填写退回原因即可退回，保留终止的旧执行', async () => {
+    const wrapper = await 打开组件('退回待审核', [行('13')])
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['退回原因'])
+    expect(已禁用(wrapper, '确认退回待审核')).toBe(true)
+    await wrapper.get('[aria-label="退回原因"]').setValue('原执行已结束，重新选择发货方案')
+    expect(已禁用(wrapper, '确认退回待审核')).toBe(false)
+    await 按钮(wrapper, '确认退回待审核').trigger('click')
+    await flushPromises()
+    expect(单('13').processingStatus).toBe('待审核')
+    expect(单('13').fulfillmentOrders.every(item => !item.isActive)).toBe(true)
+    expect(仓库执行记录.value.find(execution => execution.出库单号 === 'OUT-DEMO-ACTION-13')!.状态).toBe('已取消')
+  })
+
+  it('明确失败且已修复的单个仓单只要求修复说明，不直接改变待推单阶段', async () => {
+    const wrapper = await 打开组件('重新推单', [行('08', true)])
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['修复说明'])
+    expect(已禁用(wrapper, '确认重新推单')).toBe(true)
+    await wrapper.get('[aria-label="修复说明"]').setValue('已核实渠道开通及原请求未生效，保持原方案重提')
+    expect(已禁用(wrapper, '确认重新推单')).toBe(false)
+    await 按钮(wrapper, '确认重新推单').trigger('click')
+    await flushPromises()
+    expect(单('08').processingStatus).toBe('待推单')
+    expect(仓库执行记录.value.find(execution => execution.出库单号 === 'OUT-DEMO-ACTION-08')).toMatchObject({ 状态: '下单中', 待核查: true })
+  })
+
+  it('来源显示平台、店铺和平台订单号，订单目标系统编号只展示一次', async () => {
+    const wrapper = await 打开组件('不发货', [行('01')])
+    const source = wrapper.get('.来源事实')
+    expect(source.get('.来源店铺').text()).toBe(`${单('01').platformCode} · ${单('01').storeName}`)
+    expect(source.text()).toContain(`平台订单号：${单('01').platformOrderNo}`)
+    expect(source.text()).toContain(`当前阶段：${单('01').processingStatus}`)
+    expect(source.text()).not.toContain(单('01').systemOrderNo)
+    expect(wrapper.get('.目标表').text().split(单('01').systemOrderNo)).toHaveLength(2)
+  })
+
+  it('共享单个截单准确展示全部两张来源身份，不重复构建同一仓单对象', async () => {
+    const wrapper = await 打开组件('截单', [行('33', true)])
+    expect(wrapper.findAll('.对象编号')).toHaveLength(1)
+    expect(wrapper.get('.对象编号').text()).toBe('OUT-DEMO-ACTION-SHARED')
+    const sources = wrapper.findAll('.来源事实')
+    expect(sources).toHaveLength(2)
+    for (const 编号 of ['33', '34']) {
+      const order = 单(编号)
+      const source = sources.find(item => item.text().includes(order.systemOrderNo))!
+      expect(source).toBeDefined()
+      expect(source.get('.来源店铺').text()).toBe(`${order.platformCode} · ${order.storeName}`)
+      expect(source.text()).toContain(`平台订单号：${order.platformOrderNo}`)
+    }
+  })
+
+  it('16条待审核批量无需审核说明也可提交，普通拦截留痕且部分履约不代替人工核查', async () => {
+    const orders = 共享订单.value.filter(order => order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
+    expect(orders).toHaveLength(16)
+    const 原轮数 = new Map(orders.map(order => [order.systemOrderNo, order.reviews.length]))
+    const rows: 作业行[] = orders.map(order => ({ key: order.systemOrderNo, order, stage: '待审核' }))
+    const wrapper = await 打开组件('审核', rows, true)
+    expect(wrapper.get('.范围摘要').text()).toContain('共 16 个对象')
+    expect(wrapper.get('.范围摘要').text()).toContain('可处理 14 个')
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['审核说明'])
+    expect(已禁用(wrapper, '确认审核')).toBe(false)
+    await 按钮(wrapper, '确认审核').trigger('click')
+    await flushPromises()
+    const results = wrapper.emitted('result')![0]![1] as Array<{ key: string; result: { 成功: boolean } }>
+    expect(results).toHaveLength(16)
+    for (const order of orders) {
+      if (order.platformOrderStatus === 'IN_PROGRESS') {
+        expect(order.reviews).toHaveLength(原轮数.get(order.systemOrderNo)!)
+        expect(order.processingStatus).toBe('待审核')
+        expect(order.fulfillmentOrders).toHaveLength(0)
+      } else expect(order.reviews).toHaveLength(原轮数.get(order.systemOrderNo)! + 1)
+    }
+    expect(单('02').reviews[单('02').reviews.length - 1]).toMatchObject({ status: '已拦截', decisionNote: expect.stringContaining('库存不足') })
+  })
+
+  it('16条待审核批量不发货只有一个必填原因，人工确认后逐单终止而不创建仓单', async () => {
+    const orders = 共享订单.value.filter(order => order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
+    expect(orders).toHaveLength(16)
+    const 初始执行数 = 仓库执行记录.value.length
+    const rows: 作业行[] = orders.map(order => ({ key: order.systemOrderNo, order, stage: '待审核' }))
+    const wrapper = await 打开组件('不发货', rows, true)
+    expect(wrapper.get('.范围摘要').text()).toContain('可处理 16 个')
+    expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['不发货原因'])
+    await wrapper.get('[aria-label="不发货原因"]').setValue('已核实无需 OMS 继续发货，全部历史零出库且无未结束执行')
+    expect(已禁用(wrapper, '确认不发货')).toBe(true)
+    await wrapper.get('.确认勾选').setValue(true)
+    expect(已禁用(wrapper, '确认不发货')).toBe(false)
+    await 按钮(wrapper, '确认不发货').trigger('click')
+    await flushPromises()
+    expect(orders.every(order => order.processingStatus === '不发货')).toBe(true)
+    expect(仓库执行记录.value).toHaveLength(初始执行数)
+    expect(wrapper.emitted('result')![0]![1]).toHaveLength(16)
   })
 })

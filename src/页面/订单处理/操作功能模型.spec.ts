@@ -85,14 +85,14 @@ describe('唯一同步入口取得仓库事实并保护订单六态', () => {
 describe('截单是仓库申请，只有明确结果才允许退回或终止', () => {
   it('受理保持原订单状态，同步确认取消后才能退回，再修改路由及重审', () => {
     const 原单 = 单('12'); const 执行 = 仓('12'); const 路由快照 = JSON.stringify(原单.fulfillmentOrders[0]!.route)
-    expect(执行演示截单(执行.出库单号, 仓单期望版本(执行), '需重新分仓', '全部影响已核对').成功).toBe(true)
+    expect(执行演示截单(执行.出库单号, 仓单期望版本(执行), '需重新分仓，全部影响已核对').成功).toBe(true)
     expect(执行.状态).toBe('取消中')
     expect(原单.processingStatus).toBe('待发货')
     expect(退回待审核阻断原因(原单).length).toBeGreaterThan(0)
     expect(不发货阻断原因(原单).length).toBeGreaterThan(0)
     expect(同步演示仓库状态(执行.出库单号).信息).toContain('确认截单成功')
     expect(原单.processingStatus).toBe('待发货')
-    expect(执行演示退回待审核(原单.systemOrderNo, 当前版本(原单.systemOrderNo), '更换分仓', '旧路径已取消且零出库').成功).toBe(true)
+    expect(执行演示退回待审核(原单.systemOrderNo, 当前版本(原单.systemOrderNo), '更换分仓，旧路径已取消且零出库').成功).toBe(true)
     expect(原单.fulfillmentOrders[0]!.isActive).toBe(false)
     expect(JSON.stringify(原单.fulfillmentOrders[0]!.route)).toBe(路由快照)
     expect(修改仓库物流阻断原因(原单)).toEqual([])
@@ -104,7 +104,7 @@ describe('截单是仓库申请，只有明确结果才允许退回或终止', (
   })
   it('仓库拒绝截单不直接退回或不发货，保留仍有效仓库执行', () => {
     const 执行 = 仓('26')
-    expect(执行演示截单(执行.出库单号, 仓单期望版本(执行), '改仓', '核查').成功).toBe(true)
+    expect(执行演示截单(执行.出库单号, 仓单期望版本(执行), '改仓').成功).toBe(true)
     expect(同步演示仓库状态(执行.出库单号).信息).toContain('仓库拒绝截单')
     expect(执行.状态).toBe('待出库')
     expect(单('26').processingStatus).toBe('待发货')
@@ -122,7 +122,7 @@ describe('截单是仓库申请，只有明确结果才允许退回或终止', (
     expect(截单阻断原因(执行, false).join('；')).toContain('出库事实')
     单('34').fulfillmentOrders[0]!.shippedQuantity = 0
     const 版本表 = 仓单期望版本(执行)
-    expect(执行演示截单(执行.出库单号, 版本表, '终止原共享执行', '核对两张来源').成功).toBe(true)
+    expect(执行演示截单(执行.出库单号, 版本表, '终止原共享执行，已核对两张来源').成功).toBe(true)
     expect(单('33').operationLogs[单('33').operationLogs.length - 1]!.content).toContain(单('34').systemOrderNo)
   })
 })
@@ -133,7 +133,7 @@ describe('恢复与终态纠错只恢复处理资格，不立即向仓库发货'
     expect(演示库存.value[原单.systemOrderNo]).toBe('不足')
     expect(恢复发货目标(原单)).toBe('待发货')
     expect(恢复发货阻断原因(原单)).toEqual([])
-    expect(执行演示恢复发货(原单.systemOrderNo, 1, '发货条件恢复', '原仓单明确可继续').成功).toBe(true)
+    expect(执行演示恢复发货(原单.systemOrderNo, 1, '发货条件恢复，原仓单明确可继续').成功).toBe(true)
     expect(原单.processingStatus).toBe('待发货')
     expect(原单.fulfillmentOrders).toHaveLength(1)
     expect(原单.fulfillmentOrders[0]!.fulfillmentOrderNo).toBe(原履约号)
@@ -143,7 +143,7 @@ describe('恢复与终态纠错只恢复处理资格，不立即向仓库发货'
   it('恢复待推单建立独立可执行新路径，旧已取消仓单及快照不复活', () => {
     const 原单 = 单('18'); const 原履约快照 = JSON.stringify(原单.fulfillmentOrders[0]); const 原仓快照 = JSON.stringify(仓('18'))
     expect(恢复发货目标(原单)).toBe('待推单')
-    expect(执行演示恢复发货(原单.systemOrderNo, 1, '仍需发货', '原方案仍适用').成功).toBe(true)
+    expect(执行演示恢复发货(原单.systemOrderNo, 1, '仍需发货，原方案仍适用').成功).toBe(true)
     expect(原单.processingStatus).toBe('待推单')
     expect(JSON.stringify(原单.fulfillmentOrders[0])).toBe(原履约快照)
     expect(JSON.stringify(仓('18'))).toBe(原仓快照)
@@ -153,7 +153,7 @@ describe('恢复与终态纠错只恢复处理资格，不立即向仓库发货'
   it('回待审核允许未修复 SKU、地址、路由和库存，后续审核仍会拦截', () => {
     const 原单 = 单('19'); 原单.address.addressLine1 = ''; 原单.defaultRoute = undefined; 演示库存.value[原单.systemOrderNo] = '结果未知'
     expect(恢复发货目标(原单)).toBe('待审核')
-    expect(执行演示恢复发货(原单.systemOrderNo, 1, '重新规划', '原执行已结束仍有真实待发需求').成功).toBe(true)
+    expect(执行演示恢复发货(原单.systemOrderNo, 1, '重新规划，原执行已结束仍有真实待发需求').成功).toBe(true)
     expect(执行演示审核(原单.systemOrderNo, 当前版本(原单.systemOrderNo)).成功).toBe(false)
   })
   it('恢复必须继续同一原仓单，不能把旧仓单事实套到另一个当前计划', () => {
@@ -161,37 +161,37 @@ describe('恢复与终态纠错只恢复处理资格，不立即向仓库发货'
     原单.fulfillmentOrders[0]!.fulfillmentOrderNo = 'FL-ANOTHER-ACTIVE'
     expect(恢复发货目标(原单)).toBeUndefined()
     expect(恢复发货阻断原因(原单).length).toBeGreaterThan(0)
-    expect(执行演示恢复发货(原单.systemOrderNo, 1, '恢复', '核查').成功).toBe(false)
+    expect(执行演示恢复发货(原单.systemOrderNo, 1, '恢复').成功).toBe(false)
   })
   it('恢复待推单校验将实际复制的旧履约快照，不能借当前默认路由通过', () => {
     const 原单 = 单('18')
     原单.fulfillmentOrders[0]!.route.warehouseAccount = ''
     expect(原单.defaultRoute!.warehouseAccount).toBeTruthy()
     expect(恢复发货目标(原单)).toBe('待审核')
-    expect(执行演示恢复发货(原单.systemOrderNo, 1, '重新规划', '旧履约路由需修复').成功).toBe(true)
+    expect(执行演示恢复发货(原单.systemOrderNo, 1, '重新规划，旧履约路由需修复').成功).toBe(true)
     expect(原单.processingStatus).toBe('待审核')
     expect(原单.fulfillmentOrders).toHaveLength(1)
   })
   it.each(['20', '27'])('%s 的平台条件或实际出库/剩余未明不允许恢复', 编号 => {
-    expect(执行演示恢复发货(单(编号).systemOrderNo, 1, '恢复', '复核文字').成功).toBe(false)
+    expect(执行演示恢复发货(单(编号).systemOrderNo, 1, '恢复').成功).toBe(false)
     expect(单(编号).processingStatus).toBe('异常')
   })
   it('有明确纠错依据的误终止回待审核，保留原不发货结论和旧仓单', () => {
     const 原单 = 单('21'); const 原原因 = 原单.noShipmentReason; const 原仓 = JSON.stringify(仓('21'))
     原单.items[0]!.systemSku = undefined; 原单.defaultRoute = undefined
     expect(撤销不发货阻断原因(原单)).toEqual([])
-    expect(执行演示撤销不发货(原单.systemOrderNo, 1, '误操作', '原判断错误', '业务核查依据完整').成功).toBe(true)
+    expect(执行演示撤销不发货(原单.systemOrderNo, 1, '误操作，已核查原判断错误仍需发货').成功).toBe(true)
     expect(原单.processingStatus).toBe('待审核')
     expect(原单.noShipmentReason).toBeUndefined()
     expect(原单.operationLogs[原单.operationLogs.length - 1]!.content).toContain(原原因!)
     expect(JSON.stringify(仓('21'))).toBe(原仓)
   })
   it.each(['22', '23'])('%s 原终止依据仍成立不能撤销', 编号 => {
-    expect(执行演示撤销不发货(单(编号).systemOrderNo, 1, '纠错', '说明', '依据').成功).toBe(false)
+    expect(执行演示撤销不发货(单(编号).systemOrderNo, 1, '纠错').成功).toBe(false)
     expect(单(编号).processingStatus).toBe('不发货')
   })
   it('最终取消且仓库已结束的异常可不发货，正常状态须先异常复核', () => {
-    expect(执行演示不发货(单('32').systemOrderNo, 1, '平台已取消', '仓库已取消且零出库').成功).toBe(true)
+    expect(执行演示不发货(单('32').systemOrderNo, 1, '平台已取消，仓库已取消且零出库').成功).toBe(true)
     expect(单('32').cancelledAt).toBeTruthy()
     const 原单 = 单('13'); 操作核查证据.value[原单.systemOrderNo]!.平台允许 = false
     expect(不发货阻断原因(原单).join('；')).toContain('异常复核')
@@ -203,20 +203,40 @@ describe('恢复与终态纠错只恢复处理资格，不立即向仓库发货'
 })
 
 describe('所有新命令提交时核对版本与输入，阻止重放和范围变化', () => {
+  const 单原因命令 = [
+    { 名称: '截单', 编号: '12', 执行: (原因: string) => 执行演示截单(仓('12').出库单号, 仓单期望版本(仓('12')), 原因) },
+    { 名称: '退回待审核', 编号: '13', 执行: (原因: string) => 执行演示退回待审核(单('13').systemOrderNo, 1, 原因) },
+    { 名称: '不发货', 编号: '01', 执行: (原因: string) => 执行演示不发货(单('01').systemOrderNo, 1, 原因) },
+    { 名称: '恢复发货', 编号: '17', 执行: (原因: string) => 执行演示恢复发货(单('17').systemOrderNo, 1, 原因) },
+    { 名称: '撤销不发货', 编号: '21', 执行: (原因: string) => 执行演示撤销不发货(单('21').systemOrderNo, 1, 原因) },
+  ]
+  it.each(单原因命令)('$名称 只验证一个必填原因且仅记录一次，既有历史保留', ({ 编号, 执行 }) => {
+    const 订单 = 单(编号)
+    const 原历史 = JSON.stringify(订单.operationLogs)
+    expect(执行(' \n ').成功).toBe(false)
+    expect(执行('文'.repeat(2001)).成功).toBe(false)
+    expect(JSON.stringify(订单.operationLogs)).toBe(原历史)
+    const 原历史条数 = 订单.operationLogs.length
+    expect(执行('  本次后续处理原因  ').成功).toBe(true)
+    expect(JSON.stringify(订单.operationLogs.slice(0, 原历史条数))).toBe(原历史)
+    const 日志 = 订单.operationLogs[订单.operationLogs.length - 1]!.content
+    expect(日志.match(/本次后续处理原因/g)).toHaveLength(1)
+    expect(日志).not.toMatch(/复核：|复核说明：|纠错说明：|核查依据：/)
+  })
   it('共享仓单任何来源版本变化均阻止申请，不只检查代表订单', () => {
     const 执行 = 仓('SHARED'); const 版本表 = 仓单期望版本(执行)
     订单版本.value[单('34').systemOrderNo] = 2
-    expect(执行演示截单(执行.出库单号, 版本表, '截单', '核查').信息).toContain('已变化')
+    expect(执行演示截单(执行.出库单号, 版本表, '截单').信息).toContain('已变化')
     expect(执行.状态).toBe('待出库')
   })
   it('空必填及超过 2000 字符均不写日志，过期恢复版本不可重放', () => {
     const 原单 = 单('17'); const 快照 = JSON.stringify(原单)
-    expect(执行演示恢复发货(原单.systemOrderNo, 1, '恢复', ' ').成功).toBe(false)
-    expect(执行演示恢复发货(原单.systemOrderNo, 1, '文'.repeat(2001), '说明').成功).toBe(false)
-    expect(执行演示恢复发货(原单.systemOrderNo, 0, '恢复', '说明').成功).toBe(false)
+    expect(执行演示恢复发货(原单.systemOrderNo, 1, ' ').成功).toBe(false)
+    expect(执行演示恢复发货(原单.systemOrderNo, 1, '文'.repeat(2001)).成功).toBe(false)
+    expect(执行演示恢复发货(原单.systemOrderNo, 0, '恢复').成功).toBe(false)
     expect(JSON.stringify(原单)).toBe(快照)
-    expect(执行演示不发货(单('01').systemOrderNo, 1, '不发货', ' ').成功).toBe(false)
-    expect(执行演示撤销不发货(单('21').systemOrderNo, 1, '纠错', '说明', ' ').成功).toBe(false)
+    expect(执行演示不发货(单('01').systemOrderNo, 1, ' ').成功).toBe(false)
+    expect(执行演示撤销不发货(单('21').systemOrderNo, 1, ' ').成功).toBe(false)
   })
   it('共享推单要求全部来源版本且每条来源当前状态均合格', () => {
     const 来源一 = 单('33'); const 来源二 = 单('34'); const 履约号 = 来源一.fulfillmentOrders[0]!.fulfillmentOrderNo

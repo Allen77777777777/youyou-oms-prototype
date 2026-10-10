@@ -12,7 +12,7 @@ describe('处理提示保留阻断及源证据', () => {
       const 订单 = 共享订单.value.find(项 => 项.systemOrderNo === 'OMS-DEMO-ACTION-12')!
       const 执行 = 仓库执行记录.value.find(项 => 项.出库单号 === 'OUT-DEMO-ACTION-12')!
       const 行: 作业行 = { key: 订单.fulfillmentOrders[0]!.fulfillmentOrderNo, order: 订单, fulfillment: 订单.fulfillmentOrders[0], execution: 执行, stage: '待发货' }
-      expect(执行演示截单(执行.出库单号, 仓单期望版本(执行), '重新规划', '已核对零出库').成功).toBe(true)
+      expect(执行演示截单(执行.出库单号, 仓单期望版本(执行), '重新规划，已核对零出库').成功).toBe(true)
       expect(获取仓库结束提示(行)).toBeUndefined()
       expect(同步演示仓库状态(执行.出库单号).成功).toBe(true)
       const 状态快照 = JSON.stringify({ 订单, 执行, 版本: 订单版本.value })
