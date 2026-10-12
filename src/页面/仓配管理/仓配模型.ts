@@ -10,7 +10,7 @@ export interface 历史记录 { time: string; title: string; detail: string }
 export interface 仓配单据 {
   id: string; kind: 作业类型; no: string; fulfillment: string; order: string; provider: string
   warehouse: string; account: string; channel: string; channelCode: string; platform: string; labelMode: string
-  status: string; externalNo: string; tracking: string; createdAt: string; updatedAt: string
+  status: string; externalLogisticsOrderNo?: string; externalNo: string; tracking: string; createdAt: string; updatedAt: string
   planned: number; shipped: number; sku: string; goods: string; country: string
   reason: string; reasonCode: string; awaitingCheck: boolean; blocker: string
   history: 历史记录[]; attempts: 调用记录[]; outboundDetail?: 出库快照

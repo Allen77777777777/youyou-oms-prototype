@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Search, Refresh, Download, ArrowRight, OfficeBuilding, FolderOpened } from '@element-plus/icons-vue'
 import { ElAlert, ElButton, ElConfigProvider, ElDialog, ElForm, ElFormItem, ElIcon, ElInput, ElInputNumber, ElMessage, ElOption, ElPagination, ElRadio, ElRadioGroup, ElSelect, ElSwitch, ElTable, ElTableColumn, ElTabs, ElTabPane, ElTag, ElTooltip, ElTree } from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
@@ -53,6 +54,15 @@ const 编辑打开 = ref(false), 只读 = ref(false), 表单错误 = ref('')
 const 草稿 = reactive<渠道配置>({ ...复制渠道(渠道列表.value[0]!), shipmentMappings: 复制渠道(渠道列表.value[0]?.shipmentMappings ?? 创建空白标发设置()) })
 const 已填标发平台数 = computed(() => 草稿.shipmentMappings.filter(mapping => mapping.carrierCode.trim()).length)
 function 打开配置(row: 渠道配置, readonly = false) { Object.assign(草稿, 复制渠道(row), { shipmentMappings: 复制渠道(row.shipmentMappings ?? 创建空白标发设置()) }); 只读.value = readonly; 表单错误.value = ''; 编辑打开.value = true }
+const route = useRoute()
+watch(() => [route.path, route.query.channelId], ([path, id]) => {
+  if (path !== '/oms/warehouse-delivery/logistics-channels' || typeof id !== 'string' || !id) return
+  const matches = 渠道列表.value.filter(row => row.id === id)
+  if (matches.length !== 1) { 编辑打开.value = false; ElMessage.warning('未找到唯一关联的物流渠道，请核查渠道身份'); return }
+  当前导航.value = { id: 'all', label: '全部三方仓', count: 渠道列表.value.length }
+  重置(); 筛选.keywordType = 'code'; 筛选.searchMatch = 'exact'; 筛选.keyword = matches[0]!.code; 查询()
+  打开配置(matches[0]!, true)
+}, { immediate: true })
 function 保存() {
   草稿.name = 草稿.name.trim(); 草稿.remark = 草稿.remark.trim()
   草稿.shipmentMappings.forEach(mapping => { mapping.carrierCode = mapping.carrierCode.trim(); mapping.trackingUrl = (mapping.trackingUrl ?? '').trim() })
@@ -132,7 +142,7 @@ const 标注细则: Record<string, Partial<原型标注>> = {
     成功结果: ['当前渠道详情显示保存后的各平台代码与查询地址；同名渠道及不同平台互不覆盖，历史标发快照保持原值。'],
     异常处理: ['未配置平台不阻止其他平台配置或渠道启用；真实标发前必须针对订单平台校验映射、实际出库与跟踪号。缺少或未知代码保持待处理，不回退为仓库名、渠道名或其他平台代码。', '配置与仓库实际发运承运商不一致时先核查，不用配置改写实际发运事实。保存配置不触发标发、不修改成功标发记录，也不解除现有失败单的执行阻断。'],
     数据来源: ['用户提供的领星截图仅作交互参考；平台标发边界以订单标发 PRD、订单单据字段标准及 eBay 接口说明为准。单号默认只提供使用跟踪号、承运商表头、配送服务仅 Amazon 可填及查询地址全部可填为用户确认；URL 长度和格式校验为实现方案，各平台真实提交规则仍须核验。'],
-    prd引用: ['PRD/物流渠道管理功能PRD.md#44-编辑弹窗', 'PRD/订单标发功能PRD.md#3-主流程与资格校验', 'PRD/订单单据字段标准.md', '文档/集成/eBay/eBay订单API对接说明.md#63-订单标发请求参数'],
+    prd引用: ['PRD/物流渠道管理功能PRD.md#44-编辑弹窗', 'PRD/订单标发功能PRD.md#21-生成时机与主流程', 'PRD/订单单据字段标准.md', '文档/集成/eBay/eBay订单API对接说明.md#63-订单标发请求参数'],
     验收要点: ['仅显示一期七平台；不恢复实际承运商或单/多模式。', '修改一行只影响该渠道的对应平台；取消编辑不写回，重复同步不覆盖人工映射，日志可读。', '空映射可保存；已填写仍是待核验配置，不作为真实平台自动标发已接通的证据。'],
   },
   toggle: { 触发方式: ['点击行内开关或批量启停，再确认。'], 系统动作: ['固定当前目标 ID 与数量；每条独立校验，已有目标状态跳过；记录每条成功动作前后值。'], 成功结果: ['反馈成功、失败、跳过数量和逐条结果。'], 异常处理: ['确认取消不改动；失败不回退其他成功项；启用不等于外部能力已核验。'], 验收要点: ['停用后旧单状态不变，启用不解除共享失败单阻断。'] },

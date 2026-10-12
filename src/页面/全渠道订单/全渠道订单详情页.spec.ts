@@ -128,7 +128,7 @@ describe('订单完整详情的业务事实展示', () => {
     const other = { ...structuredClone(order), systemOrderNo: 'OMS-DETAIL-TEST-B' }
     共享订单.value = [order, other]
     仓库执行记录.value = [
-      { 履约单号: 'FL-DETAIL-CURRENT', 订单号: [order.systemOrderNo, other.systemOrderNo], 出库单号: 'CK-DETAIL-SHARED', 外部仓库单号: 'WH-DETAIL-SHARED', 状态: '已出库', 待核查: false, 原因: '', 更新时间: '2026-10-10T02:01:00Z', 出库事实: { planned: 8, shipped: 3, tracking: 'DEMO-TRACK-SHARED', shippedAt: '2026-10-10T02:00:00Z' } },
+      { 履约单号: 'FL-DETAIL-CURRENT', 订单号: [order.systemOrderNo, other.systemOrderNo], 出库单号: 'CK-DETAIL-SHARED', 三方仓出库单号: 'WH-DETAIL-SHARED', 状态: '已出库', 待核查: false, 原因: '', 更新时间: '2026-10-10T02:01:00Z', 出库事实: { planned: 8, shipped: 3, tracking: 'DEMO-TRACK-SHARED', shippedAt: '2026-10-10T02:00:00Z' } },
       { 履约单号: 'FL-DETAIL-OLDER-REQUEST', 订单号: [order.systemOrderNo], 出库单号: 'CK-DETAIL-HISTORY', 状态: '已取消', 待核查: false, 原因: '历史原请求已明确取消', 更新时间: '2026-10-09T02:00:00Z', 出库事实: { planned: null, shipped: null, tracking: null, shippedAt: null } },
       { 履约单号: 'FL-UNRELATED', 订单号: ['OMS-UNRELATED'], 出库单号: 'CK-UNRELATED', 状态: '下单失败', 待核查: false, 原因: '', 更新时间: '2026-10-10T02:00:00Z' },
     ]

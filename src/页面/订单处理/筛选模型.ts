@@ -31,7 +31,7 @@ export interface 订单处理筛选上下文 {
   now?: number
 }
 
-export const 编号搜索类型: string[] = ['platformOrderNo', 'systemOrderNo', 'fulfillmentOrderNo', 'warehouseOrderNo', 'trackingNumber']
+export const 编号搜索类型: string[] = ['platformOrderNo', 'systemOrderNo', 'fulfillmentOrderNo', 'outboundOrderNo', 'externalOutboundNo', 'trackingNumber']
 export const 订单处理剩余发货时间选项 = ['已超时', '不足12小时', '不足24小时', '不足36小时', '不足48小时', '大于48小时'] as const
 const 商品搜索类型: 订单处理商品搜索类型[] = ['platformItemTitle', 'systemItemName', 'platformSku', 'systemSku']
 const 日期搜索类型: 订单处理日期类型[] = ['orderedAt', 'paidAt', 'shipByAt', 'lastSyncedAt']
@@ -141,7 +141,7 @@ function 关联履约(行: 作业行, 订单: 全渠道订单) {
 function 关联执行(行: 作业行, 订单: 全渠道订单, 上下文: 订单处理筛选上下文): 仓库执行[] {
   const 执行 = [...(上下文.executions ?? []), ...(行.execution ? [行.execution] : [])]
     .filter(单 => 单.订单号.includes(订单.systemOrderNo) && (!行.fulfillment || 单.履约单号 === 行.fulfillment.fulfillmentOrderNo))
-  return [...new Map(执行.map(单 => [JSON.stringify([单.履约单号, 单.出库单号, 单.外部仓库单号, [...单.订单号].sort()]), 单])).values()]
+  return [...new Map(执行.map(单 => [JSON.stringify([单.履约单号, 单.出库单号, 单.三方仓出库单号, [...单.订单号].sort()]), 单])).values()]
 }
 
 function 命中关键词(行: 作业行, 订单: 全渠道订单, 筛选: 订单处理筛选条件, 上下文: 订单处理筛选上下文): boolean {
@@ -153,7 +153,7 @@ function 命中关键词(行: 作业行, 订单: 全渠道订单, 筛选: 订单
       : 筛选.searchType === 'platformOrderNo' ? [订单.platformOrderNo]
         : 筛选.searchType === 'fulfillmentOrderNo' ? 履约.map(项 => 项.fulfillmentOrderNo)
           : 筛选.searchType === 'trackingNumber' ? 履约.map(项 => 项.trackingNumber)
-            : 执行.flatMap(单 => [单.出库单号, 单.外部仓库单号])
+            : 筛选.searchType === 'outboundOrderNo' ? 执行.map(单 => 单.出库单号) : 执行.map(单 => 单.三方仓出库单号)
     return 候选.some(值 => 命中文本(值, 筛选))
   }
   return 筛选.searchType === 'buyerExternalId' && 命中文本(订单.buyerExternalId, 筛选)

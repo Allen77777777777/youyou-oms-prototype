@@ -73,7 +73,7 @@ describe('订单处理受控演示命令', () => {
     expect(结果.待核查).toBe(true)
     expect(结果.成功).toBe(false)
     expect(仓单.状态).toBe('下单中')
-    expect(仓单.外部仓库单号).toBeUndefined()
+    expect(仓单.三方仓出库单号).toBeUndefined()
   })
   it('取消中样例进入异常并阻止审核，无最终取消事实；已出库样例不接受重审', () => {
     const 取消中 = 共享订单.value.find((订单) => 订单.systemOrderNo === 'OMS260912000009')!

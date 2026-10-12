@@ -7,12 +7,12 @@ export const 标发搜索字段 = [
   { value: 'platformOrderNo', label: '平台订单号' }, { value: 'fulfillmentNo', label: '履约单号' },
   { value: 'tracking', label: '跟踪号' },
 ]
-export interface 标发筛选条件 { keyword: string; searchType: string; searchMatch: 'contains' | 'exact'; platform: string[]; dates: null | string[] }
-export function 默认标发筛选(): 标发筛选条件 { return { keyword: '', searchType: 'no', searchMatch: 'contains', platform: [], dates: null } }
+export interface 标发筛选条件 { keyword: string; searchType: string; searchMatch: 'contains' | 'exact'; platform: string[]; store: string[]; dates: null | string[] }
+export function 默认标发筛选(): 标发筛选条件 { return { keyword: '', searchType: 'no', searchMatch: 'contains', platform: [], store: [], dates: null } }
 export function 校验标发筛选(筛选: 标发筛选条件) { return 校验字段搜索(筛选.keyword, 筛选.searchMatch, 'identifier') || 校验时间范围(筛选.dates) }
 export function 命中标发筛选(单: 标发单, 筛选: 标发筛选条件, 来源?: 全渠道订单): boolean {
   const 字段 = 筛选.searchType === 'platformOrderNo' ? 来源?.platformOrderNo : 单[(['no', 'orderNo', 'fulfillmentNo', 'tracking'].includes(筛选.searchType) ? 筛选.searchType : 'no') as 'no' | 'orderNo' | 'fulfillmentNo' | 'tracking']
-  return 命中字段搜索(字段, 筛选.keyword, 筛选.searchMatch) && 命中多选(筛选.platform, 来源?.platformCode) && 命中时间范围(单.shippedAt, 筛选.dates, true)
+  return 命中字段搜索(字段, 筛选.keyword, 筛选.searchMatch) && 命中多选(筛选.platform, 来源?.platformCode) && 命中多选(筛选.store, 来源 ? JSON.stringify([来源.platformCode, 来源.storeId]) : undefined) && 命中时间范围(单.shippedAt, 筛选.dates, true)
 }
 export function 排序标发单(单据: 标发单[], 排序: { field: string; direction: 'asc' | 'desc' }) {
   if (!排序.field) return 单据

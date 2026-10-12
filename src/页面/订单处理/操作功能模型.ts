@@ -285,7 +285,7 @@ export function 同步演示仓库状态(出库单号: string): 命令结果 {
   } else if (原状态 === '取消中') 查找.状态 = 结果 === '拒绝截单' ? '待出库' : '已取消'
   else if (原状态 === '下单中') 查找.状态 = '待出库'
   查找.待核查 = false; 查找.更新时间 = 演示时间(); 查找.原因 = 结果 === '拒绝截单' ? '仓库拒绝截单：当前作业阶段无法撤销' : 查找.状态 === '下单失败' ? 查找.原因 : ''
-  if (['待出库', '出库异常', '已出库'].includes(查找.状态)) 查找.外部仓库单号 ??= `WH-DEMO-${查找.履约单号}`
+  if (['待出库', '出库异常', '已出库'].includes(查找.状态)) 查找.三方仓出库单号 ??= `WH-DEMO-${查找.履约单号}`
   for (const 订单 of 来源) {
     const 履约 = 订单.fulfillmentOrders.find(项 => 项.fulfillmentOrderNo === 查找.履约单号)!
     if (查找.状态 === '已出库' && 结果 === '已出库') { 履约.shippedQuantity = 履约.plannedQuantity; 履约.shippedAt = 演示时间(); 履约.trackingNumber ??= `DEMO-TRACK-${查找.履约单号}`; 履约.status = '已发货' }

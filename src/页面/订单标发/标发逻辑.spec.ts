@@ -13,7 +13,15 @@ function 场景() {
 }
 
 describe('标发门禁', () => {
-  it('有效出库事实完整且没有阻断时可提交', () => { const { 单, 订单 } = 场景(); expect(标发阻断原因(单, 订单)).toEqual([]) })
+  it('订单已发货且有效出库事实完整时可提交', () => { const { 单, 订单 } = 场景(); expect(标发阻断原因(单, 订单)).toEqual([]) })
+  it('拆单中已出库的履约不能在订单仍待发货时提前标发', () => {
+    const { 单, 订单, 履约 } = 场景()
+    订单.processingStatus = '待发货'
+    订单.fulfillmentOrders.push({ ...structuredClone(履约), fulfillmentOrderNo: 'FL-TEST-REMAINING', status: '执行中', shippedQuantity: 0, shippedAt: undefined })
+    expect(标发阻断原因(单, 订单)).toEqual(['OMS 订单尚未已发货，本期暂不提交标发'])
+    expect(履约.shippedQuantity).toBe(1)
+    expect(单.attempts).toHaveLength(0)
+  })
   it('失败但外部结果待核查时禁止重提', () => { const { 单, 订单 } = 场景(); 单.status = '标发失败'; 单.pendingVerification = true; expect(标发阻断原因(单, 订单)).toContain('平台结果待核查，确认前禁止重提') })
   it('仅跟踪号不构成出库依据', () => { const { 单, 订单, 履约 } = 场景(); 履约.shippedQuantity = 0; expect(标发阻断原因(单, 订单)).toContain('缺少有效仓库出库事实或实际发货时间') })
   it('同一行少量提交不能绕过 eBay 整行覆盖限制', () => { const { 单, 订单 } = 场景(); 订单.items[0]!.fulfillableQuantity = 2; expect(标发阻断原因(单, 订单)).toContain('eBay 同一订单行必须以一个跟踪号覆盖该行全部应标发数量') })

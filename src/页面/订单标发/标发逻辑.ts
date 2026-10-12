@@ -7,6 +7,8 @@ export interface 标发单 {
   lineId: string; idempotencyKey: string; pendingVerification: boolean
   reason: string; attempts: Array<{ time: string; action: string; result: string; evidence: string }>
   externalId?: string; exemptionReason?: string
+  nonMarkRecord?: { reason: string; operator: string; time: string; previousStatus: 标发状态 }
+  outboundNo?: string
 }
 
 export const 标发状态列表: 标发状态[] = ['待标发', '标发中', '标发成功', '标发失败', '无需标发']
@@ -18,6 +20,7 @@ export function 标发阻断原因(单: 标发单, 订单?: 全渠道订单): st
   if (单.pendingVerification) 原因.push('平台结果待核查，确认前禁止重提')
   if (订单.platformCode !== 'eBay') 原因.push('该平台标发规则与接口待接入')
   if (订单.fulfillmentMode !== '自配送') 原因.push('平台履约订单不进入 OMS 标发')
+  if (订单.processingStatus !== '已发货') 原因.push('OMS 订单尚未已发货，本期暂不提交标发')
   if (订单.cancelledAt || 订单.processingStatus === '不发货' || 订单.blockReason) 原因.push('订单存在已确认阻断，需核查订单上下文')
   // paidAt 是展示字段，不参与标发门禁；当前订单级付款状态由平台适配链路处理。
   // 已发货终态不因后续非 PAID 更新回退，标发仍以有效出库事实和平台结果为准。
@@ -31,13 +34,17 @@ export function 标发阻断原因(单: 标发单, 订单?: 全渠道订单): st
 }
 
 export function 创建标发演示单(订单列表: 全渠道订单[]): 标发单[] {
+  // 仅初始化六条既有虚构样例；真实有效出库且订单已发货后的生成及调度尚未接入。
+  // 不从生产渠道名称推断平台承运商，也不以本函数模拟正常／拆单／合单生成规则。
+  const 演示历史承运商: Record<string, string> = { 'DEMO-CF-CHANNEL-GC': 'FedEx', 'DEMO-CF-CHANNEL-WYT': 'USPS' }
   return 订单列表.filter((订单) => /^OMS-DEMO-CF-0[1-6]$/.test(订单.systemOrderNo)).map((订单, 序号) => {
     const 履约 = 订单.fulfillmentOrders[0]!
     const 状态: 标发状态[] = ['待标发', '标发中', '标发成功', '标发失败', '无需标发', '标发失败']
     const 单: 标发单 = {
       no: `CF-DEMO-260912-${String(序号 + 1).padStart(3, '0')}`, orderNo: 订单.systemOrderNo,
       fulfillmentNo: 履约.fulfillmentOrderNo, status: 状态[序号]!, tracking: 履约.trackingNumber ?? '',
-      carrier: 'USPS', shippedAt: 履约.shippedAt ?? '', quantity: 订单.items[0]?.fulfillableQuantity ?? 1,
+      carrier: 序号 === 0 ? '' : 演示历史承运商[履约.route.shippingChannelId ?? ''] ?? '', shippedAt: 履约.shippedAt ?? '', quantity: 订单.items[0]?.fulfillableQuantity ?? 1,
+      outboundNo: `OUT-${履约.fulfillmentOrderNo}`,
       lineId: 订单.items[0]!.externalLineId, idempotencyKey: `DEMO-CF-${序号 + 1}-V1`,
       pendingVerification: 序号 === 3, reason: 序号 === 3 ? '请求超时，平台是否受理待核查' : 序号 === 5 ? '平台明确拒绝：演示授权校验失败；已更新演示凭据，可重新校验' : '',
       attempts: [],

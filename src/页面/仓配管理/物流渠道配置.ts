@@ -62,6 +62,20 @@ export function 创建渠道配置样例(includeNew = false): 渠道配置[] {
   }))))
 }
 
+/** 明确配置的两个虚构联动样例，不从渠道名称推断承运商。其他样例的映射仍为空。 */
+export function 创建标发联动渠道样例(): 渠道配置[] {
+  return [
+    { suffix: 'WYT', provider: '万邑通', warehouse: '万邑通美西仓', name: 'USPS Ground Advantage', code: 'WYT-USPS-GA', carrier: 'USPS' },
+    { suffix: 'GC', provider: '谷仓', warehouse: '谷仓美东仓', name: 'FedEx Home Delivery', code: 'GC-FEDEX-HD', carrier: 'FedEx' },
+  ].map(row => ({
+    ...复制渠道(创建渠道配置样例()[0]!), id: `DEMO-CF-CHANNEL-${row.suffix}`, code: row.code, name: row.name,
+    provider: row.provider, providerId: `DEMO-CF-PROVIDER-${row.suffix}`, account: `${row.provider} · 北美主体`, accountId: `DEMO-CF-ACCOUNT-${row.suffix}`,
+    warehouse: row.warehouse, warehouseId: `DEMO-CF-WAREHOUSE-${row.suffix}`, sourceId: `DEMO-CF-SERVICE-${row.suffix}`, sourceName: row.name,
+    enabled: true, remark: '虚构订单标发联动样例；承运商仅供评审，真实平台字典尚未接入。',
+    shipmentMappings: 创建空白标发设置().map(mapping => ({ ...mapping, carrierCode: mapping.platform === 'eBay' ? row.carrier : '' })),
+  }))
+}
+
 export function 校验渠道配置(row: 渠道配置): string {
   if (!row.name.trim()) return '请填写渠道名称'
   if (row.name.trim().length > 60) return '渠道名称最多 60 个字符'

@@ -7,8 +7,8 @@ import { 创建推单出库快照, type 出库快照 } from '../仓配管理/三
 
 // 所有写操作只在本次浏览器会话内演示；订单详情与作业工作台引用同一主事实。
 export const 演示路由: 订单路由[] = [
-  { warehouse: '万邑通美西仓', warehouseProvider: '万邑通', warehouseAccount: '万邑通 · 北美主体', shippingChannel: 'USPS Ground Advantage', shippingChannelCode: 'WYT-USPS-GA', labelMode: '仓配一体' },
-  { warehouse: '谷仓美东仓', warehouseProvider: '谷仓', warehouseAccount: '谷仓 · 北美主体', shippingChannel: 'FedEx Home Delivery', shippingChannelCode: 'GC-FEDEX-HD', labelMode: '仓配一体' },
+  { warehouse: '万邑通美西仓', warehouseProvider: '万邑通', warehouseAccount: '万邑通 · 北美主体', shippingChannel: 'USPS Ground Advantage', shippingChannelCode: 'WYT-USPS-GA', shippingChannelId: 'DEMO-CF-CHANNEL-WYT', labelMode: '仓配一体' },
+  { warehouse: '谷仓美东仓', warehouseProvider: '谷仓', warehouseAccount: '谷仓 · 北美主体', shippingChannel: 'FedEx Home Delivery', shippingChannelCode: 'GC-FEDEX-HD', shippingChannelId: 'DEMO-CF-CHANNEL-GC', labelMode: '仓配一体' },
 ]
 
 function 创建作业样例(序号: number, 覆盖: Partial<全渠道订单> = {}): 全渠道订单 {
@@ -83,7 +83,9 @@ export interface 仓库执行 {
   履约单号: string
   订单号: string[]
   出库单号: string
-  外部仓库单号?: string
+  三方仓出库单号?: string
+  /** 来源明确返回的物流业务编号；与仓单号、跟踪号独立，缺失不补。 */
+  externalLogisticsOrderNo?: string
   状态: '下单中' | '下单失败' | '待出库' | '出库异常' | '已出库' | '取消中' | '已取消'
   待核查: boolean
   原因: string
@@ -93,7 +95,7 @@ export interface 仓库执行 {
 }
 export const 仓库执行记录 = ref<仓库执行[]>(共享订单.value.flatMap((订单) => 订单.fulfillmentOrders
   .filter((履约) => 履约.isActive && ['执行中', '已发货'].includes(履约.status))
-  .map((履约) => ({ 履约单号: 履约.fulfillmentOrderNo, 订单号: [订单.systemOrderNo], 出库单号: `OUT-${履约.fulfillmentOrderNo}`, 外部仓库单号: `WH-DEMO-${履约.fulfillmentOrderNo}`, 状态: 履约.status === '已发货' ? '已出库' as const : '待出库' as const, 待核查: false, 原因: 履约.shippedQuantity > 0 && 履约.shippedQuantity < 履约.plannedQuantity ? '已部分出库；剩余范围暂停，状态及恢复规则待确认。' : '', 更新时间: 履约.fulfillmentOrderNo === 'FL-DEMO-FLAG-08' ? '2026-09-12 09:35:00 UTC+8' : '2026-09-12 09:00:00 UTC+8' }))))
+  .map((履约) => ({ 履约单号: 履约.fulfillmentOrderNo, 订单号: [订单.systemOrderNo], 出库单号: `OUT-${履约.fulfillmentOrderNo}`, 三方仓出库单号: `WH-DEMO-${履约.fulfillmentOrderNo}`, 状态: 履约.status === '已发货' ? '已出库' as const : '待出库' as const, 待核查: false, 原因: 履约.shippedQuantity > 0 && 履约.shippedQuantity < 履约.plannedQuantity ? '已部分出库；剩余范围暂停，状态及恢复规则待确认。' : '', 更新时间: 履约.fulfillmentOrderNo === 'FL-DEMO-FLAG-08' ? '2026-09-12 09:35:00 UTC+8' : '2026-09-12 09:00:00 UTC+8' }))))
 仓库执行记录.value.push({ 履约单号: 'FL-DEMO-260912-7', 订单号: [推单样例[1]!.systemOrderNo], 出库单号: 'OUT-DEMO-260912-7', 状态: '下单失败', 待核查: false, 原因: '仓库明确拒绝：当前账号未开通所选渠道。修复账号与渠道配置后再重试。', 更新时间: '2026-09-12 09:08:00 UTC+8' }, { 履约单号: 'FL-DEMO-260912-8', 订单号: [推单样例[2]!.systemOrderNo], 出库单号: 'OUT-DEMO-260912-8', 状态: '下单中', 待核查: true, 原因: '请求超时，仓库是否已建单尚待核查；不可重复推仓。', 更新时间: '2026-09-12 09:09:00 UTC+8' })
 仓库执行记录.value = 仓库执行记录.value.filter(项 => !项.履约单号.startsWith('FL-DEMO-OP-') && !项.履约单号.startsWith('FL-DEMO-ACTION-'))
 仓库执行记录.value.push(...操作样例.执行)
@@ -106,6 +108,9 @@ for (const 执行 of 仓库执行记录.value) {
   const 履约 = 共享订单.value.find(项 => 项.systemOrderNo === 执行.订单号[0])?.fulfillmentOrders.find(项 => 项.fulfillmentOrderNo === 执行.履约单号)
   if (同履约路径.size === 1 && 履约) 执行.出库事实 = { planned: 履约.plannedQuantity, shipped: 履约.shippedQuantity, tracking: 履约.trackingNumber || null, shippedAt: 履约.shippedAt || null }
 }
+
+const 物流商单号样例 = 仓库执行记录.value.find(执行 => 执行.出库单号 === 'OUT-FL-DEMO-CF-01')
+if (物流商单号样例) 物流商单号样例.externalLogisticsOrderNo = 'DEMO-LOGISTICS-20261012-001'
 
 export const 演示库存 = ref<Record<string, '充足' | '不足' | '结果未知'>>({ [待审样例[4]!.systemOrderNo]: '结果未知' })
 Object.assign(演示库存.value, 操作样例.库存)
@@ -210,7 +215,7 @@ export function 核查演示仓库结果(履约单号: string): 命令结果 {
   if (!执行) return { 成功: false, 信息: '尚无仓库请求' }
   if (履约单号 === 'FL-DEMO-260912-8') return { 成功: false, 待核查: true, 信息: '演示查询仍未取得明确结果；保留下单中，禁止重复推仓。' }
   if (执行.状态 !== '下单中') return { 成功: true, 信息: `已读取最后可信仓库事实：${执行.状态}` }
-  执行.状态 = '待出库'; 执行.待核查 = false; 执行.原因 = ''; 执行.外部仓库单号 = `WH-DEMO-${履约单号}`; 执行.更新时间 = 演示时间()
+  执行.状态 = '待出库'; 执行.待核查 = false; 执行.原因 = ''; 执行.三方仓出库单号 = `WH-DEMO-${履约单号}`; 执行.更新时间 = 演示时间()
   for (const 订单号 of 执行.订单号) {
     const 订单 = 共享订单.value.find((项) => 项.systemOrderNo === 订单号)
     if (!订单) continue
@@ -218,7 +223,7 @@ export function 核查演示仓库结果(履约单号: string): 命令结果 {
     if (履约) 履约.status = '执行中'
     const 全部建仓 = 订单.fulfillmentOrders.filter((项) => 项.isActive).every((项) => 仓库执行记录.value.some((仓单) => 仓单.履约单号 === 项.fulfillmentOrderNo && ['待出库', '出库异常', '已出库'].includes(仓单.状态)))
     if (订单.processingStatus === '待推单' && !订单.blockReason && !订单.cancelledAt && 全部建仓) 订单.processingStatus = '待发货'
-    记录操作(订单, '核查仓库结果', `模拟仓库明确建单成功，已认领 ${执行.外部仓库单号}；订单当前为${订单.processingStatus}。`)
+    记录操作(订单, '核查仓库结果', `模拟仓库明确建单成功，已认领 ${执行.三方仓出库单号}；订单当前为${订单.processingStatus}。`)
   }
   return { 成功: true, 信息: '模拟仓库已明确建单成功，进入待出库；订单已按全部有效履约范围重新聚合。', 对象号: 执行.出库单号 }
 }

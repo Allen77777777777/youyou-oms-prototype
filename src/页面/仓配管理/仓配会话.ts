@@ -3,11 +3,11 @@ import { 共享订单, 仓库执行记录, 操作核查证据, 预置仓库评�
 import { 同步演示仓库状态, 同步仓库状态阻断原因, 重新推单阻断原因, 执行演示重新推单, 仓单期望版本, 仓单来源订单, 截单阻断原因, 执行演示截单 } from '../订单处理/操作功能模型'
 import { 创建仓配样例, 取得操作拦截, 执行样例动作, 演示时间, type 仓配单据 } from './仓配模型'
 import { 创建出库工作台样例, 创建历史出库快照, 创建推单出库快照, 取得出库详情, 命中截单能力样例, type 出库快照, type 出库作业动作, type 出库截单影响范围 } from './三方仓出库模型'
-import { 创建渠道配置样例, type 渠道配置, type 渠道操作记录 } from './物流渠道配置'
+import { 创建渠道配置样例, 创建标发联动渠道样例, type 渠道配置, type 渠道操作记录 } from './物流渠道配置'
 
 export const 仓库会话单据 = ref<仓配单据[]>(创建出库工作台样例())
 export const 物流会话单据 = ref<仓配单据[]>(创建仓配样例('物流'))
-export const 渠道会话 = ref<渠道配置[]>(创建渠道配置样例())
+export const 渠道会话 = ref<渠道配置[]>([...创建渠道配置样例(), ...创建标发联动渠道样例()])
 export const 渠道会话审计 = ref<渠道操作记录[]>([])
 // 只收敛领域初始化时固化的旧预置评审对象，领域事实仍用于原门禁。
 // 会话模块首次加载或HMR前已新推的对象不属于该固定集合，仍会正常投影。
@@ -39,7 +39,7 @@ export function 创建仓库执行投影(execution: 仓库执行, existing?: 仓
     return {
       id, kind: '仓库', no: execution.出库单号, fulfillment: execution.履约单号, order: snapshot.sourceOrders.map(source => source.systemOrderNo).join('、') || execution.订单号.join('、'),
       provider: route?.warehouseProvider || '待补充', warehouse: route?.warehouse || '待补充', account: route?.warehouseAccount || '待补充', channel: route?.shippingChannel || '待补充', channelCode: route?.shippingChannelCode || '', platform: snapshot.sourceOrders[0]?.platform || '',
-      status: execution.状态, labelMode: route?.labelMode === '仓配一体' ? '仓库回传' : '仓配分离', externalNo: execution.外部仓库单号 || '', tracking: facts?.tracking || existing?.tracking || '', createdAt: existing ? existing.createdAt : (snapshot.submittedAt ? 标准时间(snapshot.submittedAt) : ''), updatedAt: 标准时间(execution.更新时间),
+      status: execution.状态, labelMode: route?.labelMode === '仓配一体' ? '仓库回传' : '仓配分离', externalNo: execution.三方仓出库单号 || '', externalLogisticsOrderNo: execution.externalLogisticsOrderNo, tracking: facts?.tracking || existing?.tracking || '', createdAt: existing ? existing.createdAt : (snapshot.submittedAt ? 标准时间(snapshot.submittedAt) : ''), updatedAt: 标准时间(execution.更新时间),
       planned: snapshot.quantitySummary.plannedQuantity ?? 0, shipped: snapshot.quantitySummary.shippedQuantity ?? 0,
       sku: snapshot.items.map(item => item.systemSku).filter(Boolean).join('、'), goods: snapshot.items.map(item => item.goods).filter(Boolean).join('、'), country: snapshot.recipient?.countryCode || '',
       reason: execution.原因, reasonCode: execution.待核查 ? 'EXTERNAL_RESULT_PENDING_CHECK' : execution.原因 ? 'DEMO_SHARED_EXECUTION_BLOCKED' : '', awaitingCheck: execution.待核查, blocker: '',

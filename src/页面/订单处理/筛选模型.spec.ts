@@ -15,7 +15,7 @@ function 订单(覆盖: Partial<全渠道订单> = {}): 全渠道订单 {
 function 订单行(原单 = 订单(), stage: 作业行['stage'] = '待审核'): 作业行 { return { key: 原单.systemOrderNo, order: 原单, stage } }
 function 履约行(原单: 全渠道订单, 编号 = 'FULFILLMENT-A'): 作业行 {
   原单.fulfillmentOrders = [{ fulfillmentOrderNo: 编号, status: '执行中', isActive: true, route: 路由(), plannedQuantity: 1, shippedQuantity: 0, trackingNumber: 'TRACK-A' }]
-  return { key: 编号, order: 原单, fulfillment: 原单.fulfillmentOrders[0]!, stage: '待发货', execution: { 履约单号: 编号, 订单号: [原单.systemOrderNo], 出库单号: 'OUT-A', 外部仓库单号: 'WAREHOUSE-A', 状态: '待出库', 待核查: false, 原因: '', 更新时间: '2026-10-09T02:00:00Z' } }
+  return { key: 编号, order: 原单, fulfillment: 原单.fulfillmentOrders[0]!, stage: '待发货', execution: { 履约单号: 编号, 订单号: [原单.systemOrderNo], 出库单号: 'OUT-A', 三方仓出库单号: 'WAREHOUSE-A', 状态: '待出库', 待核查: false, 原因: '', 更新时间: '2026-10-09T02:00:00Z' } }
 }
 function 条件(覆盖: Partial<订单处理筛选条件> = {}): 订单处理筛选条件 { return { ...默认订单处理筛选(), ...覆盖 } }
 const 查询时刻 = Date.parse('2026-10-09T00:00:00Z')
@@ -24,6 +24,14 @@ function 命中(行: 作业行, 覆盖: Partial<订单处理筛选条件>, 环�
 const 买家留言标志: 订单标志 = { code: 'BUYER_NOTE', text: '言', name: '买家留言', tone: 'orange', reason: '演示来源', sourceOrderNos: ['OMS-B'] }
 
 describe('统一查询输入与 1000 条上限', () => {
+  it('两类出库编号独立查询，多行精确不跨字段兜底', () => {
+    const 行 = 履约行(订单())
+    expect(命中(行, { searchType: 'outboundOrderNo', keyword: 'WAREHOUSE-A' })).toBe(false)
+    expect(命中(行, { searchType: 'externalOutboundNo', keyword: 'OUT-A' })).toBe(false)
+    expect(命中(行, { searchType: 'outboundOrderNo', searchMatch: 'exact', keyword: 'OUT-X\nOUT-A' })).toBe(true)
+    expect(命中(行, { searchType: 'externalOutboundNo', searchMatch: 'exact', keyword: 'WAREHOUSE-X\nWAREHOUSE-A' })).toBe(true)
+    expect(校验订单处理筛选(条件({ searchType: 'warehouseOrderNo' }))).toBe('请选择有效的搜索类型')
+  })
   it('默认平台订单号模糊匹配，分类数组及日期范围相互独立，不保留已删除的综合和商品组', () => {
     const 草稿 = 默认订单处理筛选()
     expect(草稿).toMatchObject({ searchType: 'platformOrderNo', searchMatch: 'contains', keyword: '', dateType: 'orderedAt', dateRange: null })
@@ -230,7 +238,7 @@ describe('统一字段模糊和精确匹配', () => {
   })
   it('各编号精确 OR 查询保留大小写，不以子串或其他字段内容命中', () => {
     const 原单 = 订单(), 行 = 履约行(原单)
-    for (const [searchType, keyword] of [['systemOrderNo', 'OMS-A'], ['platformOrderNo', 'PLATFORM-A'], ['fulfillmentOrderNo', 'FULFILLMENT-A'], ['warehouseOrderNo', 'OUT-A'], ['warehouseOrderNo', 'WAREHOUSE-A'], ['trackingNumber', 'TRACK-A']] as const) {
+    for (const [searchType, keyword] of [['systemOrderNo', 'OMS-A'], ['platformOrderNo', 'PLATFORM-A'], ['fulfillmentOrderNo', 'FULFILLMENT-A'], ['outboundOrderNo', 'OUT-A'], ['externalOutboundNo', 'WAREHOUSE-A'], ['trackingNumber', 'TRACK-A']] as const) {
       expect(命中(行, { searchType, searchMatch: 'exact', keyword: 'OTHER;\n' + keyword })).toBe(true)
       expect(命中(行, { searchType, searchMatch: 'exact', keyword: keyword.toLowerCase() })).toBe(false)
       expect(命中(行, { searchType, searchMatch: 'exact', keyword: keyword.slice(0, -1) })).toBe(false)
@@ -274,14 +282,14 @@ describe('统一字段模糊和精确匹配', () => {
   })
   it('订单行查询关联历史仓单，当前履约不串历史履约或另一来源执行', () => {
     const A = 订单(), 行 = 履约行(A), B = 订单({ systemOrderNo: 'OMS-B', storeId: 'store-b', fulfillmentOrders: structuredClone(A.fulfillmentOrders) })
-    const 历史 = { ...structuredClone(行.execution!), 履约单号: 'HISTORY', 出库单号: 'HISTORY-OUT', 外部仓库单号: 'HISTORY-WAREHOUSE' }
-    const B执行 = { ...structuredClone(行.execution!), 订单号: ['OMS-B'], 出库单号: 'B-OUT', 外部仓库单号: 'B-WAREHOUSE' }
+    const 历史 = { ...structuredClone(行.execution!), 履约单号: 'HISTORY', 出库单号: 'HISTORY-OUT', 三方仓出库单号: 'HISTORY-WAREHOUSE' }
+    const B执行 = { ...structuredClone(行.execution!), 订单号: ['OMS-B'], 出库单号: 'B-OUT', 三方仓出库单号: 'B-WAREHOUSE' }
     const 环境 = 上下文([A, B], { executions: [历史, B执行] })
-    expect(命中(订单行(A, '异常'), { searchType: 'warehouseOrderNo', searchMatch: 'exact', keyword: 'HISTORY-OUT' }, 环境)).toBe(true)
-    expect(命中(订单行(A, '不发货'), { searchType: 'warehouseOrderNo', keyword: 'history-warehouse' }, 环境)).toBe(true)
-    expect(命中(行, { searchType: 'warehouseOrderNo', searchMatch: 'exact', keyword: 'HISTORY-OUT' }, 环境)).toBe(false)
-    expect(命中(行, { store: ['store-b'], searchType: 'warehouseOrderNo', keyword: 'OUT-A' }, 环境)).toBe(false)
-    expect(命中(行, { store: ['store-b'], searchType: 'warehouseOrderNo', keyword: 'B-OUT' }, 环境)).toBe(true)
+    expect(命中(订单行(A, '异常'), { searchType: 'outboundOrderNo', searchMatch: 'exact', keyword: 'HISTORY-OUT' }, 环境)).toBe(true)
+    expect(命中(订单行(A, '不发货'), { searchType: 'externalOutboundNo', keyword: 'history-warehouse' }, 环境)).toBe(true)
+    expect(命中(行, { searchType: 'outboundOrderNo', searchMatch: 'exact', keyword: 'HISTORY-OUT' }, 环境)).toBe(false)
+    expect(命中(行, { store: ['store-b'], searchType: 'outboundOrderNo', keyword: 'OUT-A' }, 环境)).toBe(false)
+    expect(命中(行, { store: ['store-b'], searchType: 'outboundOrderNo', keyword: 'B-OUT' }, 环境)).toBe(true)
   })
 })
 

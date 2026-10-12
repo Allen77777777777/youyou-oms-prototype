@@ -70,6 +70,7 @@ export interface 订单路由 {
   warehouseAccount: string
   shippingChannel: string
   shippingChannelCode: string
+  shippingChannelId?: string
   labelMode: '仓配一体' | '仓配分离'
 }
 

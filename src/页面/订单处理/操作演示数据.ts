@@ -166,7 +166,7 @@ export function 创建操作演示(创建: (序号: number, 覆盖?: Partial<全
     if (编号 === '25') 单.fulfillmentCompletedAt = '2026-10-10 10:30:00 UTC+8'
     if (仓态) 执行.push({
       履约单号: `FL-DEMO-ACTION-${编号}`, 订单号: [单.systemOrderNo], 出库单号: `OUT-DEMO-ACTION-${编号}`,
-      外部仓库单号: ['下单中', '下单失败'].includes(仓态) ? undefined : `WH-DEMO-ACTION-${编号}`,
+      三方仓出库单号: ['下单中', '下单失败'].includes(仓态) ? undefined : `WH-DEMO-ACTION-${编号}`,
       状态: 仓态, 待核查: ['下单中', '取消中'].includes(仓态) || 编号 === '27',
       原因: 仓态 === '下单失败' ? '仓库明确拒绝原请求：所选渠道尚未开通。'
         : 仓态 === '下单中' ? '仓库建单结果尚未明确，请同步仓库状态。'
@@ -204,6 +204,6 @@ export function 创建操作演示(创建: (序号: number, 覆盖?: Partial<全
     证据[单.systemOrderNo] = { 平台允许: true, 剩余已核实: true, 零出库已核实: true, 范围已核清: true }
     库存[单.systemOrderNo] = '充足'
   }
-  执行.push({ 履约单号: 'FL-DEMO-ACTION-SHARED', 订单号: 共享.map(单 => 单.systemOrderNo), 出库单号: 'OUT-DEMO-ACTION-SHARED', 外部仓库单号: 'WH-DEMO-ACTION-SHARED', 状态: '待出库', 待核查: false, 原因: '', 更新时间: 核查时间 })
+  执行.push({ 履约单号: 'FL-DEMO-ACTION-SHARED', 订单号: 共享.map(单 => 单.systemOrderNo), 出库单号: 'OUT-DEMO-ACTION-SHARED', 三方仓出库单号: 'WH-DEMO-ACTION-SHARED', 状态: '待出库', 待核查: false, 原因: '', 更新时间: 核查时间 })
   return { 订单: [...订单, ...共享], 执行, 证据, 库存 }
 }

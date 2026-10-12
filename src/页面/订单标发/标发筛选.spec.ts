@@ -32,4 +32,12 @@ describe('标发列表统一筛选', () => {
     expect(排序标发单(列表, { field: '', direction: 'asc' }).map(项 => 项.no)).toEqual(['CF-B', 'CF-A', 'CF-Z'])
     expect(JSON.stringify(列表)).toBe(原值)
   })
+
+  it('店铺按平台及稳定店铺ID隔离，同名店铺和失去关联的记录不能冒充命中', () => {
+    const 筛选 = 默认标发筛选(); 筛选.store = [JSON.stringify([来源.platformCode, 来源.storeId])]
+    expect(命中标发筛选(单, 筛选, 来源)).toBe(true)
+    expect(命中标发筛选(单, 筛选, { ...来源, storeId: 'OTHER-ID' })).toBe(false)
+    expect(命中标发筛选(单, 筛选, { ...来源, platformCode: 'Temu' })).toBe(false)
+    expect(命中标发筛选(单, 筛选)).toBe(false)
+  })
 })

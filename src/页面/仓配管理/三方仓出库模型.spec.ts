@@ -185,7 +185,7 @@ describe('出库工作台安全共享操作', () => {
     共享订单.value.push(order)
     操作核查证据.value[order.systemOrderNo] = { 平台允许: true, 剩余已核实: true, 零出库已核实: true, 同步结果: '已出库' }
     const snapshot = 创建推单出库快照([order], 'FULFILLMENT-TEST', '2026-10-10 10:00:00 UTC+8')
-    仓库执行记录.value.push({ 履约单号: 'FULFILLMENT-TEST', 订单号: [order.systemOrderNo], 出库单号: 'OUT-TEST-SHIP-FACT', 外部仓库单号: 'WH-TEST-SHIP-FACT', 状态: '待出库', 待核查: false, 原因: '', 更新时间: '2026-10-10 10:00:00 UTC+8', 出库快照: snapshot, 出库事实: { planned: 2, shipped: 0, tracking: null, shippedAt: null } })
+    仓库执行记录.value.push({ 履约单号: 'FULFILLMENT-TEST', 订单号: [order.systemOrderNo], 出库单号: 'OUT-TEST-SHIP-FACT', 三方仓出库单号: 'WH-TEST-SHIP-FACT', 状态: '待出库', 待核查: false, 原因: '', 更新时间: '2026-10-10 10:00:00 UTC+8', 出库快照: snapshot, 出库事实: { planned: 2, shipped: 0, tracking: null, shippedAt: null } })
     await nextTick()
     const row = 仓库会话单据.value.find(item => item.no === 'OUT-TEST-SHIP-FACT')!
     expect(执行仓配会话动作(row, '查询结果').success).toBe(true)
