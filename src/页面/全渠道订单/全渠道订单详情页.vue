@@ -5,6 +5,8 @@ import { CopyDocument, InfoFilled, Lock, WarningFilled } from '@element-plus/ico
 import { ElButton, ElIcon, ElMessage, ElTable, ElTableColumn, ElTooltip } from 'element-plus'
 import type { 原型标注 } from '@/类型/标注'
 import OrderFlags from '../订单处理/订单标志组件.vue'
+import { 订单金额字段 } from './订单金额字段'
+import AmountFieldHelp from './金额字段帮助.vue'
 import OrderNotes from '../订单处理/订单备注组件.vue'
 import OrderProductImage from './商品缩略图.vue'
 import PlatformProductTitle from './平台商品标题.vue'
@@ -57,11 +59,7 @@ const 收件字段 = computed(() => [
   字段('邮政编码', props.order.address.postalCode), 字段('手机', props.order.address.mobilePhone),
   字段('电话', props.order.address.telephone), 字段('邮箱', props.order.address.email),
 ])
-const 金额字段 = computed(() => [
-  { label: '订单总金额', value: props.order.amount.orderAmount }, { label: '客付运费', value: props.order.amount.buyerPaidShipping },
-  { label: '客付税费', value: props.order.amount.buyerPaidTax }, { label: '交易费', value: props.order.amount.transactionFee },
-  { label: '平台补贴', value: props.order.amount.platformSubsidy }, { label: '其他费用', value: props.order.amount.otherFee },
-])
+const 金额字段 = computed(() => 订单金额字段.map(项 => ({ ...项, value: props.order.amount[项.key] })))
 const 时间字段 = computed(() => [
   { label: '下单时间', source: props.order.orderedAt }, { label: '付款时间', source: props.order.paidAt },
   { label: '最晚发货时间', source: props.order.shipByAt }, { label: '订单创建时间', source: props.order.createdAt },
@@ -120,6 +118,7 @@ const 标注 = (id: string, 标题: string, 说明: string, 事实等级: 原型
 const 本轮引用 = ['PRD/全渠道订单功能PRD.md#21-2026-10-10-订单详情排版与业务信息完整性', 'PRD/订单处理功能PRD.md#75-完整订单详情与履约执行摘要']
 const 详情标注 = 标注('oms.all-order.detail', '订单完整详情与分区导航', '订单处理与全渠道列表打开同一顶部详情页签。详情完整展示已有通用业务事实，分区导航只滚动定位，不卸载字段；长编号、地址、原因及商品标题完整换行。', '合理假设', 本轮引用, ['同一系统订单复用同一路径页签。', '完整性不表示展示数据库全部技术字段或平台专业字段，不恢复独立审核记录及已删除的按钮。'])
 const 状态标注 = 标注('oms.all-order.detail.statuses', '平台状态与 OMS 状态分离', '平台订单状态、OMS 六态、仓库状态、标发状态各自展示；不以其中任一状态推算或覆盖另一状态。', '已确认', ['PRD/订单单据字段标准.md#61-订单头-oms_order'])
+const 金额标注 = 标注('oms.all-order.detail.amount', '订单金额字段释义', '六项订单金额及页头总金额旁的小问号以《订单单据字段标准》第 6.4 节为依据，面向业务用户解释定义、费用范围及空值／零值，与订单处理列表共用文案。', '已确认', ['PRD/订单单据字段标准.md#64-订单金额明细-oms_order_amount'], ['悬停、聚焦或点击显示业务释义，不展示研发备注或 PRD 来源，Esc 关闭；不依赖原型标注开关，不修改金额或触发订单操作。'])
 const 商品标注 = 标注('oms.all-order.detail.items', '全部商品行与金额', '逐行展示图片、来源行和商品 ID、平台 SKU 与规格、系统 SKU 与品名、映射结果、下单及可履约数量、单价、行金额和商品实收金额。缺失不按单价乘数量补造实收，零值保留；不分摊共享履约金额。', '合理假设', 本轮引用)
 const 路由标注 = 标注('oms.all-order.detail.routing', '履约路由与全部关联执行', '订单保存路由与每张履约执行快照分别展示。包括历史履约与所有稳定关联仓单、标发单；共享单据数量标为整张单据，不作为本订单实际量、不分摊、不从状态反推数量。仓库库存沿用只读来源明细。', '合理假设', 本轮引用)
 const 敏感信息标注 = 标注('oms.all-order.detail.masked-address', '完整收件信息默认脱敏', '原型仅用虚构脱敏信息；公司、县区、地址两行、手机、电话、邮箱和买家留言分别展示。明文权限、原因及审计待评审。', '待确认', ['PRD/订单单据字段标准.md#63-收件信息-oms_order_address', ...本轮引用])
@@ -138,7 +137,7 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
         <div v-prototype="状态标注" class="头部状态">
           <div><span>OMS 处理状态</span><b class="状态徽标" :class="'tone-' + OMS状态.tone">{{ OMS状态.text }}</b></div>
           <div><span>平台订单状态</span><b class="状态徽标" :class="'tone-' + 平台状态.tone">{{ 平台状态.text }}</b></div>
-          <div class="头部金额"><span>订单总金额</span><strong>{{ 格式化金额(order.amount.orderAmount) }}</strong></div>
+          <div class="头部金额"><span>订单总金额<AmountFieldHelp :label="订单金额字段[0].label" :description="订单金额字段[0].description" /></span><strong>{{ 格式化金额(order.amount.orderAmount) }}</strong></div>
         </div>
       </header>
       <nav class="分区导航" aria-label="订单详情分区"><button v-for="区 in 分区" :key="区.id" type="button" :class="{ 当前: 当前分区 === 区.id }" :aria-current="当前分区 === 区.id ? 'location' : undefined" @click="跳转分区(区.id)">{{ 区.label }}</button><span>所有时间为北京时间</span></nav>
@@ -149,7 +148,7 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
       <div class="概览网格">
         <section data-section="basic" class="详情分区 基础卡"><div class="分区标题"><h2>订单信息</h2><span>{{ order.orderType }}</span></div><dl class="字段网格"><div v-for="项 in 基础字段" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></section>
         <section data-section="recipient" v-prototype="敏感信息标注" class="详情分区 收件卡"><div class="分区标题"><h2>收件信息</h2><span class="锁定提示"><ElIcon><Lock /></ElIcon>默认脱敏</span></div><dl class="字段网格 收件字段"><div v-for="项 in 收件字段" :key="项.label" :class="{ 跨行: 项.wide }"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl><div class="买家留言"><span>买家留言</span><p>{{ order.address.buyerMessage || '—' }}</p></div></section>
-        <section data-section="amount" class="详情分区 金额卡"><div class="分区标题"><h2>金额信息</h2></div><dl class="金额明细"><div v-for="(项, 索引) in 金额字段" :key="项.label" :class="{ 总金额: 索引 === 0 }"><dt>{{ 项.label }}</dt><dd>{{ 格式化金额(项.value) }}</dd></div></dl></section>
+        <section data-section="amount" v-prototype="金额标注" class="详情分区 金额卡"><div class="分区标题"><h2>金额信息</h2></div><dl class="金额明细"><div v-for="(项, 索引) in 金额字段" :key="项.label" :class="{ 总金额: 索引 === 0 }"><dt>{{ 项.label }}<AmountFieldHelp :label="项.label" :description="项.description" /></dt><dd>{{ 格式化金额(项.value) }}</dd></div></dl></section>
       </div>
 
       <section data-section="times" class="详情分区"><div class="分区标题"><h2>时间信息</h2><span v-if="剩余时间" :class="{ 超时: 剩余时间.kind === 'overdue' }">剩余发货时间：{{ 剩余时间.text }}</span><span v-else>北京时间</span></div><dl class="字段网格 时间网格"><div v-for="项 in 时间字段" :key="项.label"><dt>{{ 项.label }}</dt><dd :title="项.source">{{ 格式化北京时间(项.source) }}</dd></div></dl></section>

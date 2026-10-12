@@ -475,7 +475,7 @@ function 保存路由() {
             </div>
           </template>
         </ElTableColumn>
-        <ElTableColumn :label="当前单位 === '履约单' ? '来源订单金额' : '订单金额'" min-width="172">
+        <ElTableColumn :label="当前单位 === '履约单' ? '来源订单金额' : '订单金额'" min-width="196">
           <template #default="{ row }">
             <OrderAmountSummary v-prototype="标注.金额" :amount="row.order.amount" />
           </template>
