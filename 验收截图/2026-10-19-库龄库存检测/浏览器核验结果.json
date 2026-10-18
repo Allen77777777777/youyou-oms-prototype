@@ -1,0 +1,36 @@
+{
+  "widths": [
+    {
+      "width": 1280,
+      "scrollWidth": 1280,
+      "stockLabel": "分仓后，仓库剩余库存小于则跳过该仓库"
+    },
+    {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "stockLabel": "分仓后，仓库剩余库存小于则跳过该仓库"
+    },
+    {
+      "width": 1920,
+      "scrollWidth": 1920,
+      "stockLabel": "分仓后，仓库剩余库存小于则跳过该仓库"
+    }
+  ],
+  "switchPresent": true,
+  "defaultOff": true,
+  "required": true,
+  "thresholdRefilled": "5",
+  "modeSwitchRetained": true,
+  "offRetainsValue": true,
+  "helpVerified": true,
+  "helpEscClosed": true,
+  "savedSummary": true,
+  "detailsSummary": true,
+  "logSummary": true,
+  "tabRetained": true,
+  "menu": true,
+  "search": true,
+  "annotation": "oms.rules.actions / 0.26",
+  "trial": "规则试算\n只返回匹配建议，不执行订单动作；本地试算未覆盖全部默认审单项。\n选择订单\n分仓规则\nOMS260912000001 · eBay · 待审核\n开始试算\n平台\neBay\n店铺\n北美汽配演示店\n国家\nUS\n处理状态\n待审核\n候选结果\n库龄库存检测演示已编辑\n\n分仓模式：库龄分仓；优先分配订单SKU库龄最长的仓库；分仓后剩余库存 < 5 时跳过该仓库\n\n发货仓库：尚未确定\n\n物流渠道：随匹配仓库确定\n\n候选仓库1：万邑通美西仓 · 万邑通 · 万邑通 · 北美主体；物流渠道：USPS Ground Advantage\n\n候选仓库2：谷仓美东仓 · 谷仓 · 谷仓 · 北美主体；物流渠道：FedEx Home Delivery\n\nv3 · 优先级 30\n执行条件\n\n2 项条件需处理\n\n万邑通美西仓：未取得唯一的库龄来源资料\n谷仓美东仓：未取得唯一的库龄来源资料\n匹配轨迹 3 条规则\n美国自配送默认路由\n停用跳过\n\n优先级 10 · v2 · 全部满足\n\n收货国家 等于 美国（US）\n\n履约模式 等于 自配送\n\n北美备用仓候选\n停用跳过\n\n优先级 20 · v1 · 全部满足\n\n收货国家 等于 美国（US）\n\n库龄库存检测演示已编辑\n首个命中候选\n\n优先级 30 · v3 · 全部满足\n\n订单平台 等于 eBay",
+  "errors": []
+}

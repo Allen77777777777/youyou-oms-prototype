@@ -1,0 +1,68 @@
+{
+  "savedRefill": "5",
+  "widths": [
+    {
+      "width": 1280,
+      "pageWidth": 1280,
+      "modeOverflow": false,
+      "stockInput": {
+        "x": 505,
+        "y": 669,
+        "width": 98,
+        "height": 30,
+        "top": 669,
+        "right": 603,
+        "bottom": 699,
+        "left": 505
+      }
+    },
+    {
+      "width": 1440,
+      "pageWidth": 1440,
+      "modeOverflow": false,
+      "stockInput": {
+        "x": 561,
+        "y": 671,
+        "width": 98,
+        "height": 30,
+        "top": 671,
+        "right": 659,
+        "bottom": 701,
+        "left": 561
+      }
+    },
+    {
+      "width": 1920,
+      "pageWidth": 1920,
+      "modeOverflow": false,
+      "stockInput": {
+        "x": 561,
+        "y": 671,
+        "width": 98,
+        "height": 30,
+        "top": 671,
+        "right": 659,
+        "bottom": 701,
+        "left": 561
+      }
+    }
+  ],
+  "helpFormula": "仓库总库存 - 所有已被订单锁定的库存（包含当前正尝试分仓的订单数量）",
+  "sample": "10-9=1（<5）",
+  "trialGate": "未取得分仓后剩余可用库存，无法判断是否跳过该仓库",
+  "navigation": {
+    "tabs": true,
+    "menu": true,
+    "search": true,
+    "annotation": "oms.rules.actions / 0.24"
+  },
+  "helpKeyboard": {
+    "focusOpens": true,
+    "escCloses": true
+  },
+  "changeWarehouse": {
+    "channelCleared": true,
+    "thresholdRetained": "5",
+    "cancelSourcePreserved": true
+  }
+}

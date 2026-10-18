@@ -63,7 +63,12 @@ export const router = createRouter({
       path: '/',
       component: 中台布局,
       redirect: '/index',
-      children: [...页面路由, 全渠道订单详情路由, eBay订单详情路由],
+      children: [...页面路由, 全渠道订单详情路由, eBay订单详情路由, ...(['new', 'edit', 'copy'] as const).map(mode => ({
+        path: `/oms/self-fulfillment/order-rules/${mode}/:sessionId`,
+        name: `oms-order-rule-${mode}`,
+        component: () => import('@/页面/订单规则/规则编辑页面.vue'),
+        meta: { title: mode === 'new' ? '新增规则' : mode === 'edit' ? '编辑规则' : '复制规则', source: '用户规划', activeMenu: '/oms/self-fulfillment/order-rules', ruleEditorMode: mode },
+      }))],
     },
     { path: '/:pathMatch(.*)*', redirect: '/index' },
   ],

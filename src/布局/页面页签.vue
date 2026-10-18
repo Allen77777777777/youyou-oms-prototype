@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { Close, HomeFilled, RefreshRight } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
+import { 业务页签关闭请求, 清理业务页签 } from './页签操作'
 
 interface 页签 {
   路径: string
@@ -11,6 +12,12 @@ interface 页签 {
 const route = useRoute()
 const router = useRouter()
 const 已打开页签 = ref<页签[]>([])
+
+watch(业务页签关闭请求, async (请求) => {
+  if (!请求) return
+  已打开页签.value = 已打开页签.value.filter(页签 => 页签.路径 !== 请求.path)
+  if (route.path === 请求.path) await router.push(请求.returnTo)
+})
 
 function 获取当前页签标题() {
   const 基础标题 = String(route.meta.title ?? '')
@@ -36,6 +43,7 @@ watch(
 )
 
 async function 关闭页签(页签: 页签) {
+  清理业务页签(页签.路径)
   const 索引 = 已打开页签.value.findIndex((项目) => 项目.路径 === 页签.路径)
   已打开页签.value.splice(索引, 1)
   if (页签.路径 !== route.path) return

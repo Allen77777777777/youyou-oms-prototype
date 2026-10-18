@@ -1,0 +1,35 @@
+{
+  "widths": [
+    {
+      "width": 1280,
+      "scrollWidth": 1280,
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "scrollWidth": 1920,
+      "overflow": false
+    }
+  ],
+  "modeEnabled": true,
+  "priceDisabled": true,
+  "duplicateDisabled": true,
+  "incompleteBlocked": true,
+  "candidatesRefilled": 2,
+  "channelNamesRefilled": true,
+  "basicThresholdPreserved": "5",
+  "warehouseChangeClearsOwnChannel": true,
+  "cancelPreserved": true,
+  "annotation": "oms.rules.actions / 0.25",
+  "navigation": {
+    "menu": true,
+    "search": true,
+    "tabs": true
+  },
+  "trial": "候选库龄来源未核实，不使用基础暂存路由"
+}
