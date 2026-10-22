@@ -7,26 +7,30 @@ import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
 function 规则覆盖(覆盖: Partial<订单规则> = {}): 订单规则 { return { ...创建规则样例().find(项 => 项.type === '订单标发规则')!, ...覆盖 } }
 
 describe('订单标发执行动作', () => {
-  it('只开放仓库发货完成后标发和无需标发，新建默认立即且不启用', () => {
-    expect(标发基础动作).toEqual(['仓库发货完成后标发', '无需标发'])
+  it('开放物流下单后标发，新建仍默认仓库完成后立即且不启用', () => {
+    expect(标发基础动作).toEqual(['仓库发货完成后标发', '物流下单后标发', '无需标发'])
     const session = 创建规则草稿('订单标发规则', [])!
     try { expect(session.draft).toMatchObject({ action: '仓库发货完成后标发', enabled: false, shippingAction: { timing: 'immediate' } }) }
     finally { 丢弃规则草稿(session.key) }
   })
   it.each(['1', '2', '5', '72'])('延迟与提前小时数%s可保存并出现在摘要中', hours => {
     for (const timing of ['delay', 'beforeDeadline'] as const) {
-      const 规则 = 规则覆盖({ shippingAction: { timing, delayHours: hours, beforeDeadlineHours: hours } })
-      expect(校验规则配置(规则, [])).toBe('')
-      expect(格式化标发动作(规则)).toContain(`${hours} 小时`)
-      expect(标发动作说明(规则)).toContain(timing === 'delay' ? `+ ${hours} 小时` : `− ${hours} 小时`)
+      for (const action of ['仓库发货完成后标发', '物流下单后标发']) {
+        const 规则 = 规则覆盖({ action, shippingAction: { timing, delayHours: hours, beforeDeadlineHours: hours } })
+        expect(校验规则配置(规则, [])).toBe('')
+        expect(格式化标发动作(规则)).toContain(`${hours} 小时`)
+        expect(标发动作说明(规则)).toContain(timing === 'delay' ? `+ ${hours} 小时` : `− ${hours} 小时`)
+      }
     }
   })
   it.each(['', '0', '-1', '1.5', '73', '720', '1e2', ' 2 ', 'Infinity', 'abc'])('当前选择的延迟或提前值%s非法时阻断保存和有效试算', hours => {
     for (const timing of ['delay', 'beforeDeadline'] as const) {
-      const 规则 = 规则覆盖({ shippingAction: { timing, delayHours: hours, beforeDeadlineHours: hours } })
-      expect(校验规则配置(规则, [])).toContain('1～72')
-      expect(命中规则(规则, 全渠道订单模拟数据[0]!)).toBe(false)
-      expect(格式化标发动作(规则)).toContain('配置待完善')
+      for (const action of ['仓库发货完成后标发', '物流下单后标发']) {
+        const 规则 = 规则覆盖({ action, shippingAction: { timing, delayHours: hours, beforeDeadlineHours: hours } })
+        expect(校验规则配置(规则, [])).toContain('1～72')
+        expect(命中规则(规则, 全渠道订单模拟数据[0]!)).toBe(false)
+        expect(格式化标发动作(规则)).toContain('配置待完善')
+      }
     }
   })
   it('不校验未选小时数，也不在摘要中使用残留值', () => {
@@ -37,13 +41,43 @@ describe('订单标发执行动作', () => {
     expect(校验标发动作(规则)).toBe('')
     expect(格式化标发动作(规则)).not.toContain('bad')
   })
-  it('未知标发时机及物流下单动作不参与有效命中', () => {
+  it('新旧动作均拒绝未知标发时机，物流下单动作有合法时机时可匹配', () => {
     const 规则 = 规则覆盖({ shippingAction: { timing: 'unknown' } as unknown as 标发时机配置 })
     expect(校验规则配置(规则, [])).toContain('标发时机')
     expect(命中规则(规则, 全渠道订单模拟数据[0]!)).toBe(false)
     规则.action = '物流下单后标发'
-    expect(校验规则配置(规则, [])).toContain('标发动作')
+    expect(校验规则配置(规则, [])).toContain('标发时机')
     expect(命中规则(规则, 全渠道订单模拟数据[0]!)).toBe(false)
+    规则.shippingAction = { timing: 'immediate' }
+    expect(校验规则配置(规则, [])).toBe('')
+    expect(命中规则(规则, 全渠道订单模拟数据[0]!)).toBe(true)
+  })
+  it('物流下单动作默认立即，三种摘要均明确跟踪号获取触发且不引用仓库完成时间', () => {
+    const 规则 = 规则覆盖({ action: '物流下单后标发', shippingAction: undefined })
+    初始化标发动作(规则)
+    expect(规则.shippingAction?.timing).toBe('immediate')
+    expect(格式化标发动作(规则)).toBe('获取跟踪号后立即标发')
+    expect(标发动作说明(规则)).toBe('获取到跟踪号后，立即安排标发。')
+    规则.shippingAction = { timing: 'delay', delayHours: '2', beforeDeadlineHours: 'bad' }
+    expect(格式化标发动作(规则)).toBe('获取跟踪号后延迟 2 小时标发')
+    expect(标发动作说明(规则)).toBe('计划标发时间 = 跟踪号获取时间 + 2 小时')
+    expect(标发动作说明(规则)).not.toContain('仓库')
+    规则.shippingAction = { timing: 'beforeDeadline', beforeDeadlineHours: '3', delayHours: 'bad' }
+    expect(格式化标发动作(规则)).toContain('获取跟踪号后')
+    expect(标发动作说明(规则)).toBe('计划标发时间 = 最晚标发时间 − 3 小时；若届时尚未获取跟踪号，待获取后尽快标发。')
+    expect(标发动作说明(规则)).not.toContain('仓库')
+  })
+  it('新动作只校验所选时机，复用暂存配置且格式化保持只读', () => {
+    const 规则 = 规则覆盖({ action: '物流下单后标发', shippingAction: { timing: 'immediate', delayHours: '2', beforeDeadlineHours: '3' } })
+    const before = JSON.stringify(规则)
+    expect(格式化标发动作(规则)).toBe('获取跟踪号后立即标发')
+    expect(标发动作说明(规则)).toContain('跟踪号')
+    expect(JSON.stringify(规则)).toBe(before)
+    规则.action = '仓库发货完成后标发'; 规则.shippingAction!.timing = 'delay'
+    expect(格式化标发动作(规则)).toBe('仓库发货完成后延迟 2 小时标发')
+    规则.action = '物流下单后标发'
+    expect(格式化标发动作(规则)).toBe('获取跟踪号后延迟 2 小时标发')
+    expect(规则.shippingAction?.beforeDeadlineHours).toBe('3')
   })
   it('无需标发忽略时间配置，含义与发货及平台成功独立', () => {
     const 规则 = 规则覆盖({ action: '无需标发', shippingAction: { timing: 'delay', delayHours: '' } })
@@ -71,7 +105,7 @@ describe('订单标发执行动作', () => {
     订单.processingStatus = '待发货'; 订单.fulfillmentOrders = []
     const before = JSON.stringify(订单)
     for (const shippingAction of [{ timing: 'immediate' }, { timing: 'delay', delayHours: '2' }, { timing: 'beforeDeadline', beforeDeadlineHours: '3' }] as 标发时机配置[]) {
-      for (const action of 标发基础动作) {
+      for (const action of ['仓库发货完成后标发', '无需标发']) {
         const 结果 = 试算规则([规则覆盖({ action, shippingAction })], 订单, '订单标发规则')
         expect(结果.hit).toBeDefined()
         expect(结果.gates).toContain('来源 OMS 订单尚未已发货，不得生成或调度标发')

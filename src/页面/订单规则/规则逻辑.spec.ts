@@ -317,7 +317,7 @@ describe('24项条件目录和输入契约', () => {
     expect(条件定义.platformOrderStatus.kind).toBe('select')
     expect(条件字段名.fulfillmentMode).toBe('履约模式')
     expect(条件定义.countryCode.kind).toBe('multi')
-    expect(多选条件字段).toEqual(['platformCode', 'siteCode', 'storeId', 'countryCode'])
+    expect(多选条件字段).toEqual(['platformCode', 'siteCode', 'storeId', 'countryCode', 'shippingWarehouse'])
     expect(是否多选条件字段('countryCode')).toBe(true)
     expect(是否多选条件字段('city')).toBe(false)
   })

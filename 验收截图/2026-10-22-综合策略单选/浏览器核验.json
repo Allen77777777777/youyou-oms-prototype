@@ -1,0 +1,164 @@
+{
+  "price": [
+    {
+      "ageDisabled": true,
+      "choices": [
+        {
+          "checked": true,
+          "value": "priceGap"
+        },
+        {
+          "checked": false,
+          "value": "ageGap"
+        }
+      ],
+      "overflow": false,
+      "priceDisabled": false,
+      "scrollWidth": 1280,
+      "width": 1280
+    },
+    {
+      "ageDisabled": true,
+      "choices": [
+        {
+          "checked": true,
+          "value": "priceGap"
+        },
+        {
+          "checked": false,
+          "value": "ageGap"
+        }
+      ],
+      "overflow": false,
+      "priceDisabled": false,
+      "scrollWidth": 1440,
+      "width": 1440
+    },
+    {
+      "ageDisabled": true,
+      "choices": [
+        {
+          "checked": true,
+          "value": "priceGap"
+        },
+        {
+          "checked": false,
+          "value": "ageGap"
+        }
+      ],
+      "overflow": false,
+      "priceDisabled": false,
+      "scrollWidth": 1920,
+      "width": 1920
+    }
+  ],
+  "age": [
+    {
+      "ageDisabled": false,
+      "choices": [
+        {
+          "checked": false,
+          "value": "priceGap"
+        },
+        {
+          "checked": true,
+          "value": "ageGap"
+        }
+      ],
+      "days": "5",
+      "overflow": false,
+      "price": "2",
+      "priceDisabled": true,
+      "scrollWidth": 1280,
+      "width": 1280
+    },
+    {
+      "ageDisabled": false,
+      "choices": [
+        {
+          "checked": false,
+          "value": "priceGap"
+        },
+        {
+          "checked": true,
+          "value": "ageGap"
+        }
+      ],
+      "days": "5",
+      "overflow": false,
+      "price": "2",
+      "priceDisabled": true,
+      "scrollWidth": 1440,
+      "width": 1440
+    },
+    {
+      "ageDisabled": false,
+      "choices": [
+        {
+          "checked": false,
+          "value": "priceGap"
+        },
+        {
+          "checked": true,
+          "value": "ageGap"
+        }
+      ],
+      "days": "5",
+      "overflow": false,
+      "price": "2",
+      "priceDisabled": true,
+      "scrollWidth": 1920,
+      "width": 1920
+    }
+  ],
+  "help": [
+    {
+      "icon": {
+        "height": 14,
+        "width": 14
+      },
+      "rect": {
+        "bottom": 485,
+        "left": 599,
+        "right": 1193,
+        "top": 79.65625,
+        "width": 594
+      },
+      "scrollWidth": 1280,
+      "text": "一票一件与一票多件一票一件订单，优先比较对应产品的库龄。一票多件订单，多个仓库满足条件时，将各 SKU 的库龄累加，优先取整单库龄合计较高的仓库。同一 SKU 不按件数重复累加。最近批次与全批次最近批次：比较各 SKU 最近有货批次的库龄。全批次：比较各 SKU 所有有货批次中的最大库龄。库龄口径示例SKU仓库库龄（批次）库龄（批次）a100130 天（2025-06-03 批次）60 天（2025-05-03 批次）a200233 天（2025-06-01 批次）53 天（2025-05-10 批次）选择“库龄高（最近批次）”时，比较 30 天与 33 天，选择仓库 002。选择“库龄高（全批次）”时，比较 60 天与 53 天，选择仓库 001。",
+      "width": 1280
+    },
+    {
+      "icon": {
+        "height": 14,
+        "width": 14
+      },
+      "rect": {
+        "bottom": 485,
+        "left": 655,
+        "right": 1249,
+        "top": 79.65625,
+        "width": 594
+      },
+      "scrollWidth": 1440,
+      "text": "一票一件与一票多件一票一件订单，优先比较对应产品的库龄。一票多件订单，多个仓库满足条件时，将各 SKU 的库龄累加，优先取整单库龄合计较高的仓库。同一 SKU 不按件数重复累加。最近批次与全批次最近批次：比较各 SKU 最近有货批次的库龄。全批次：比较各 SKU 所有有货批次中的最大库龄。库龄口径示例SKU仓库库龄（批次）库龄（批次）a100130 天（2025-06-03 批次）60 天（2025-05-03 批次）a200233 天（2025-06-01 批次）53 天（2025-05-10 批次）选择“库龄高（最近批次）”时，比较 30 天与 33 天，选择仓库 002。选择“库龄高（全批次）”时，比较 60 天与 53 天，选择仓库 001。",
+      "width": 1440
+    },
+    {
+      "icon": {
+        "height": 14,
+        "width": 14
+      },
+      "rect": {
+        "bottom": 485,
+        "left": 655,
+        "right": 1249,
+        "top": 79.65625,
+        "width": 594
+      },
+      "scrollWidth": 1920,
+      "text": "一票一件与一票多件一票一件订单，优先比较对应产品的库龄。一票多件订单，多个仓库满足条件时，将各 SKU 的库龄累加，优先取整单库龄合计较高的仓库。同一 SKU 不按件数重复累加。最近批次与全批次最近批次：比较各 SKU 最近有货批次的库龄。全批次：比较各 SKU 所有有货批次中的最大库龄。库龄口径示例SKU仓库库龄（批次）库龄（批次）a100130 天（2025-06-03 批次）60 天（2025-05-03 批次）a200233 天（2025-06-01 批次）53 天（2025-05-10 批次）选择“库龄高（最近批次）”时，比较 30 天与 33 天，选择仓库 002。选择“库龄高（全批次）”时，比较 60 天与 53 天，选择仓库 001。",
+      "width": 1920
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import { 创建规则样例, type 订单规则, type 规则类型, type 规则�
 import { 中台平台站点资料, 中台系统用户资料, 站点选择值, type 平台站点资料 } from './规则基础选项'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
 import { 共享订单备注 } from '../订单处理/订单备注模型'
+import { 条件分组 } from './规则条件定义'
 
 let 页面: VueWrapper | undefined
 const 浮层桩 = { props: ['modelValue'], template: '<section v-if="modelValue"><slot /><slot name="footer" /></section>' }
@@ -126,17 +127,20 @@ describe('规则条件输入与表单联动', () => {
     expect(条件行(refill, '长宽高').get<HTMLInputElement>('input[aria-label="第2项长宽高高度下限"]').element.disabled).toBe(true)
   })
 
-  it('目录准确显示四组24项及其顺序，旧条件不出现在新增目录且不提供关系选择', async () => {
-    const { 草稿, 来源 } = 准备规则('审单规则', true), page = await 打开(草稿, 来源)
+  it.each<规则类型>(['审单规则', '订单标发规则', '分仓规则'])('%s目录按类型追加发货仓库，原四组24项不变且不提供关系选择', async type => {
+    const { 草稿, 来源 } = 准备规则(type, true), page = await 打开(草稿, 来源)
     const groups = page.findAll('.可选分组')
     expect(groups.map(组 => ({ title: 组.get('h4').text(), labels: 组.findAll('.el-checkbox').map(项 => 项.text()) }))).toEqual([
       { title: '基础信息', labels: ['订单平台', '订单站点', '订单店铺'] },
-      { title: '物流信息', labels: ['收货国家', '收货省/州', '收货城市', '订单地址', '平台配送方式'] },
+      { title: '物流信息', labels: ['收货国家', '收货省/州', '收货城市', '订单地址', '平台配送方式', ...(type === '分仓规则' ? [] : ['发货仓库'])] },
       { title: '订单信息', labels: ['订单重量（kg）', '订单总金额范围', '客付运费范围', '买家留言', '商品单价金额范围'] },
       { title: '货品信息', labels: ['产品尺寸', '仓库SKU', '平台SKU', '产品数量', '长宽高', '三边之和', '最长边', '次长边', '长+(宽+高)×2', '产品销售负责人', '材积范围'] },
     ])
     const labels = groups.flatMap(组 => 组.findAll('.el-checkbox').map(项 => 项.text()))
-    expect(labels).toHaveLength(24)
+    expect(labels).toHaveLength(type === '分仓规则' ? 24 : 25)
+    expect(labels.filter(label => label === '发货仓库')).toHaveLength(type === '分仓规则' ? 0 : 1)
+    expect(条件分组.flatMap(组 => 组.fields)).toHaveLength(24)
+    expect(条件分组.flatMap(组 => 组.fields)).not.toContain('shippingWarehouse')
     expect(labels).not.toContain('指定仓库SKU')
     expect(labels).not.toContain('订单运费金额范围')
     expect(labels).not.toContain('买家运费')

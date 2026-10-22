@@ -69,11 +69,35 @@ describe('基础分仓与剩余库存检测', () => {
     expect(JSON.stringify(source)).toBe(before)
     expect(校验分仓策略(source)).toBe('')
   })
-  it.each(['price'] as const)('二期%s模式即使伪造也不能保存或命中', mode => {
+  it('旧库龄策略缺省全批次并累加，独立批次口径不借用比价暂存口径', () => {
+    const source = 创建规则样例()[1]!
+    source.warehouseAction = { mode: 'age', checkRemainingStock: false, ageRoutes: [{ ...source.routeAction! }], agePreference: 'recent' }
+    const before = JSON.stringify(source)
+    expect(校验分仓策略(source)).toBe('')
+    expect(格式化分仓策略(source)).toBe('库龄分仓；优先库龄高（全批次）；多个SKU按库龄累加比较')
+    expect(source.warehouseAction.ageBatchPreference).toBeUndefined()
+    const draft = structuredClone(source)
+    draft.warehouseAction!.ageBatchPreference = 'recent'
+    draft.warehouseAction!.agePreference = 'all'
+    expect(校验分仓策略(draft)).toBe('')
+    expect(格式化分仓策略(draft)).toBe('库龄分仓；优先库龄高（最近批次）；多个SKU按库龄累加比较')
+    expect(draft.warehouseAction!.agePreference).toBe('all')
+    expect(JSON.stringify(source)).toBe(before)
+  })
+  it.each(['', 'oldest', null, 0])('库龄分仓拒绝非法独立批次口径 %s，比价模式不校验隐藏库龄配置', value => {
     const rule = 创建规则样例()[1]!
-    rule.warehouseAction = { mode, checkRemainingStock: false }
-    expect(校验规则配置(rule, [rule])).toContain('二期上线')
+    rule.warehouseAction = { mode: 'age', checkRemainingStock: false, ageRoutes: [{ ...rule.routeAction! }], priceRoutes: [{ ...rule.routeAction! }] }
+    Object.assign(rule.warehouseAction, { ageBatchPreference: value })
+    expect(校验分仓策略(rule)).toContain('库龄分仓批次口径')
+    rule.warehouseAction.mode = 'price'
+    expect(校验分仓策略(rule)).toBe('')
+  })
+  it('比价模式必须完整配置候选，不能借用基础暂存路由', () => {
+    const rule = 创建规则样例()[1]!
+    rule.warehouseAction = { mode: 'price', checkRemainingStock: false }
+    expect(校验规则配置(rule, [rule])).toContain('请至少选择一个比价分仓')
     expect(试算规则([rule], 全渠道订单模拟数据[0]!, '分仓规则').hit).toBeUndefined()
+    expect(读取分仓路由(rule, 创建规则渠道样例())).toBeUndefined()
   })
   it.each(['', '-1', '1.5', '1e3', ' 5 ', '1234567890123456789012345'])('启用时拒绝非法阈值%s，关闭后保留并忽略', value => {
     const rule = 创建规则样例()[1]!
@@ -110,5 +134,106 @@ describe('基础分仓与剩余库存检测', () => {
     expect(JSON.stringify({ rule, order })).toBe(before)
     rule.warehouseAction.checkRemainingStock = false
     expect(试算规则([rule], order, '分仓规则').gates.join('')).not.toContain('剩余可用库存')
+  })
+})
+
+describe('比价分仓比较逻辑配置', () => {
+  function 综合规则() {
+    const rule = 创建规则样例()[1]!
+    rule.warehouseAction = { mode: 'price', checkRemainingStock: false, priceRoutes: [{ ...rule.routeAction! }], priceComparison: 'priceAge', priceAgeLogic: 'priceGap', priceDifference: '1.000001', priceDifferenceCurrency: 'USD', agePreference: 'recent', ageDifferenceDays: '30' }
+    return rule
+  }
+
+  it('未配置比较逻辑的旧比价规则继续按最低价，读取与初始化不写回源对象', () => {
+    const source = 综合规则()
+    delete source.warehouseAction!.priceComparison
+    delete source.warehouseAction!.priceDifference
+    delete source.warehouseAction!.agePreference
+    delete source.warehouseAction!.ageDifferenceDays
+    const before = JSON.stringify(source)
+    expect(校验规则配置(source, [source], 创建规则渠道样例())).toBe('')
+    expect(格式化分仓策略(source)).toBe('比价分仓；优先分配接口试算总费用最低的仓库及渠道')
+    expect(读取分仓策略(source).priceComparison).toBeUndefined()
+    const draft = structuredClone(source)
+    初始化分仓策略(draft)
+    Object.assign(draft.warehouseAction!, { priceComparison: 'priceAge', priceDifference: '2', agePreference: 'all', ageDifferenceDays: '10' })
+    expect(校验分仓策略(draft)).toBe('')
+    expect(JSON.stringify(source)).toBe(before)
+    expect(Object.prototype.hasOwnProperty.call(source.warehouseAction!, 'priceComparison')).toBe(false)
+  })
+
+  it('旧综合规则缺省价格差额优先，不校验未选库龄天数且不写回来源', () => {
+    const source = 综合规则()
+    delete source.warehouseAction!.priceAgeLogic
+    source.warehouseAction!.ageDifferenceDays = '旧未选值'
+    const before = JSON.stringify(source)
+    expect(校验规则配置(source, [source], 创建规则渠道样例())).toBe('')
+    expect(格式化分仓策略(source)).toContain('价格相差不到 1.000001 USD')
+    expect(格式化分仓策略(source)).not.toContain('库龄相差不到')
+    expect(JSON.stringify(source)).toBe(before)
+    expect(Object.prototype.hasOwnProperty.call(source.warehouseAction!, 'priceAgeLogic')).toBe(false)
+  })
+
+  it.each([
+    { price: '0', days: '0', preference: 'recent' },
+    { price: '0.000001', days: '1', preference: 'all' },
+    { price: '999999999999999999999999', days: '999999999999999999999999', preference: 'recent' },
+    { price: '999999999999999999.999999', days: '9007199254740993', preference: 'all' },
+  ].flatMap(item => (['priceGap', 'ageGap'] as const).map(logic => ({ ...item, logic }))))('$logic 接受所选精度边界 $price、$days 天及 $preference，摘要不混入另一逻辑', ({ price, days, preference, logic }) => {
+    const rule = 综合规则()
+    Object.assign(rule.warehouseAction!, { priceAgeLogic: logic, priceDifference: logic === 'priceGap' ? price : '未选非法金额', agePreference: preference, ageDifferenceDays: logic === 'ageGap' ? days : '未选非法天数' })
+    const before = JSON.stringify(rule)
+    expect(校验规则配置(rule, [rule], 创建规则渠道样例())).toBe('')
+    expect(格式化分仓策略(rule)).toContain(preference === 'all' ? '全批次' : '最近批次')
+    if (logic === 'priceGap') {
+      expect(格式化分仓策略(rule)).toContain(`价格相差不到 ${price} USD`)
+      expect(格式化分仓策略(rule)).not.toContain('库龄相差不到')
+    } else {
+      expect(格式化分仓策略(rule)).toContain(`库龄相差不到 ${days} 天`)
+      expect(格式化分仓策略(rule)).not.toContain('价格相差不到')
+    }
+    expect(JSON.stringify(rule)).toBe(before)
+  })
+
+  it.each([
+    ...[undefined, '', 'usd', 'BTC', 1].map(value => ({ field: 'priceDifferenceCurrency', value, error: '价格差额币种', logic: 'priceGap' })),
+    ...['', '-1', '+1', '1e3', '.5', '1.', '1.0000001', '1234567890123456789012345', '1234567890123456789.123456', undefined, 1].map(value => ({ field: 'priceDifference', value, error: '价格差额', logic: 'priceGap' })),
+    ...['', '-1', '1.5', '1e3', ' 5 ', '1234567890123456789012345', undefined, 1].map(value => ({ field: 'ageDifferenceDays', value, error: '库龄差额', logic: 'ageGap' })),
+    ...['', 'oldest', undefined, null].flatMap(value => (['priceGap', 'ageGap'] as const).map(logic => ({ field: 'agePreference', value, error: '库龄优先口径', logic }))),
+  ])('$logic 拦截所选 $field=$value，另一逻辑忽略未选阈值、最低价忽略综合草稿', ({ field, value, error, logic }) => {
+    const rule = 综合规则()
+    Object.assign(rule.warehouseAction!, { priceAgeLogic: logic, [field]: value })
+    const before = JSON.stringify(rule)
+    expect(校验分仓策略(rule)).toContain(error)
+    expect(校验规则配置(rule, [rule], 创建规则渠道样例())).toContain(error)
+    expect(格式化分仓策略(rule)).toBe('分仓策略配置待完善')
+    expect(JSON.stringify(rule)).toBe(before)
+    rule.warehouseAction!.priceAgeLogic = logic === 'priceGap' ? 'ageGap' : 'priceGap'
+    expect(校验分仓策略(rule)).toBe(field === 'agePreference' ? '请选择有效的库龄优先口径' : '')
+    rule.warehouseAction!.priceComparison = 'lowest'
+    const lowestBefore = JSON.stringify(rule)
+    expect(校验分仓策略(rule)).toBe('')
+    expect(格式化分仓策略(rule)).toBe('比价分仓；优先分配接口试算总费用最低的仓库及渠道')
+    expect(JSON.stringify(rule)).toBe(lowestBefore)
+  })
+
+  it.each([{ value: '' }, { value: 'legacy' }, { value: null }, { value: 0 }, { value: ['priceGap', 'ageGap'] }])('拒绝非法或多选综合判断逻辑 $value，最低价模式保留并忽略', ({ value }) => {
+    const rule = 综合规则()
+    Object.assign(rule.warehouseAction!, { priceAgeLogic: value })
+    const before = JSON.stringify(rule)
+    expect(校验分仓策略(rule)).toContain('综合判断逻辑')
+    expect(格式化分仓策略(rule)).toBe('分仓策略配置待完善')
+    expect(JSON.stringify(rule)).toBe(before)
+    rule.warehouseAction!.priceComparison = 'lowest'
+    expect(校验分仓策略(rule)).toBe('')
+  })
+
+  it.each(['', 'legacy', null, 0, true])('拒绝未知比较逻辑 %s，不悄悄降级为最低价', value => {
+    const rule = 综合规则()
+    Object.assign(rule.warehouseAction!, { priceComparison: value })
+    const before = JSON.stringify(rule)
+    expect(校验分仓策略(rule)).toContain('比较逻辑')
+    expect(格式化分仓策略(rule)).toBe('分仓策略配置待完善')
+    expect(JSON.stringify(rule)).toBe(before)
   })
 })

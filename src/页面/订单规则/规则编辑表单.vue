@@ -6,7 +6,7 @@ import type { 全渠道订单 } from '../全渠道订单/类型'
 import { 条件字段名, 规则动作, eBay平台订单状态选项, 校验规则配置, type 订单规则, type 条件字段 } from './规则逻辑'
 import { 规则标注 } from './规则标注'
 import { 渠道会话 } from '../仓配管理/仓配会话'
-import { 条件分组, 条件定义, 条件操作符, 创建空条件, 是否多选条件字段, 是否多行文本字段, 是否已移除条件, 格式化条件值, 读取条件多选值 } from './规则条件定义'
+import { 读取可选条件分组, 条件定义, 条件操作符, 创建空条件, 是否多选条件字段, 是否多行文本字段, 是否已移除条件, 格式化条件值, 读取条件多选值 } from './规则条件定义'
 import ConditionValue from './规则条件输入.vue'
 import SizeHelp from './尺寸材积帮助.vue'
 import ShippingAction from './标发动作输入.vue'
@@ -26,8 +26,9 @@ const 错误 = reactive<Record<string, string>>({})
 const 尝试保存 = ref(false)
 watch(() => 编辑.conditions, () => { delete 错误.conditions }, { deep: true })
 const 已选字段 = computed(() => [...new Set(编辑.conditions.map(项 => 项.field))])
+const 可选条件分组 = computed(() => 读取可选条件分组(编辑.type))
 function 选项(field: 条件字段): { value: string; label: string }[] {
-  if (是否多选条件字段(field)) return 规则基础选项(field, props.orders)
+  if (是否多选条件字段(field)) return 规则基础选项(field, props.orders, 渠道会话.value)
   if (field === 'salesOwner') return 中台系统用户资料.value
   if (field === 'platformOrderStatus') return eBay平台订单状态选项.map(项 => ({ ...项 }))
   if (field === 'fulfillmentMode') return [{ value: '自配送', label: '自配送' }, { value: '平台履约', label: '平台履约' }]
@@ -58,7 +59,7 @@ function 保存() {
   else delete 保存项.orderNote
   if (保存项.type !== '订单标发规则' || 保存项.action === '无需标发') delete 保存项.shippingAction
   if (保存项.type !== '分仓规则') delete 保存项.warehouseAction
-  else 保存项.action = 保存项.warehouseAction?.mode === 'age' ? '优先分配订单SKU库龄最长的仓库' : 读取分仓路由(保存项, 渠道会话.value)!.warehouse
+  else 保存项.action = 保存项.warehouseAction?.mode === 'age' ? '按所选批次口径优先分配库龄合计较高的仓库' : 保存项.warehouseAction?.mode === 'price' ? (保存项.warehouseAction.priceComparison === 'priceAge' ? '按价格与库龄综合匹配仓库及渠道' : '优先分配接口试算总费用最低的仓库及渠道') : 读取分仓路由(保存项, 渠道会话.value)!.warehouse
   emit('save', 保存项)
 }
 </script>
@@ -74,7 +75,7 @@ function 保存() {
           <ElFormItem label="规则状态"><ElSelect v-model="编辑.enabled" aria-label="规则状态"><ElOption label="停用" :value="false" /><ElOption label="启用" :value="true" /></ElSelect></ElFormItem>
         </ElForm>
         <div class="可选标题"><h3>可选条件</h3><span>已选 {{ 已选字段.length }} 类</span></div>
-        <section v-for="组 in 条件分组" :key="组.title" class="可选分组"><h4>{{ 组.title }}</h4><ElCheckbox v-for="field in 组.fields" :key="field" :model-value="已选字段.includes(field)" @change="切条件(field, Boolean($event))">{{ 条件字段名[field] }}</ElCheckbox></section>
+        <section v-for="组 in 可选条件分组" :key="组.title" class="可选分组"><h4>{{ 组.title }}</h4><ElCheckbox v-for="field in 组.fields" :key="field" :model-value="已选字段.includes(field)" @change="切条件(field, Boolean($event))">{{ 条件字段名[field] }}</ElCheckbox></section>
         <p class="侧栏帮助">勾选左侧条件，在右侧填写适用范围。</p>
       </aside>
       <div class="编辑正文">

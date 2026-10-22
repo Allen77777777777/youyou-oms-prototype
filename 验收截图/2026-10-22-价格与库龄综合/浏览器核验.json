@@ -1,0 +1,95 @@
+{
+  "aging": [
+    {
+      "batch": "库龄口径库龄高（最近批次）",
+      "description": "按所选批次口径取得订单各 SKU 的库龄，订单包含多个 SKU 时累加比较，优先分配库龄较高的仓库。",
+      "scrollWidth": 1280,
+      "width": 1280
+    },
+    {
+      "batch": "库龄口径库龄高（最近批次）",
+      "description": "按所选批次口径取得订单各 SKU 的库龄，订单包含多个 SKU 时累加比较，优先分配库龄较高的仓库。",
+      "scrollWidth": 1440,
+      "width": 1440
+    },
+    {
+      "batch": "库龄口径库龄高（最近批次）",
+      "description": "按所选批次口径取得订单各 SKU 的库龄，订单包含多个 SKU 时累加比较，优先分配库龄较高的仓库。",
+      "scrollWidth": 1920,
+      "width": 1920
+    }
+  ],
+  "pricing": [
+    {
+      "amount": "2",
+      "batch": "当价格相差不到（报价币种）时，优先库龄高（全批次）当库龄相差不到天时，优先价格低，否则优先库龄高全批次：每个 SKU 取所有有货批次中的最大库龄。订单包含多个 SKU 时，将各 SKU 的库龄相加后比较。",
+      "days": "5",
+      "overflow": false,
+      "scrollWidth": 1280,
+      "width": 1280
+    },
+    {
+      "amount": "2",
+      "batch": "当价格相差不到（报价币种）时，优先库龄高（全批次）当库龄相差不到天时，优先价格低，否则优先库龄高全批次：每个 SKU 取所有有货批次中的最大库龄。订单包含多个 SKU 时，将各 SKU 的库龄相加后比较。",
+      "days": "5",
+      "overflow": false,
+      "scrollWidth": 1440,
+      "width": 1440
+    },
+    {
+      "amount": "2",
+      "batch": "当价格相差不到（报价币种）时，优先库龄高（全批次）当库龄相差不到天时，优先价格低，否则优先库龄高全批次：每个 SKU 取所有有货批次中的最大库龄。订单包含多个 SKU 时，将各 SKU 的库龄相加后比较。",
+      "days": "5",
+      "overflow": false,
+      "scrollWidth": 1920,
+      "width": 1920
+    }
+  ],
+  "trial": [
+    {
+      "hasFakeTime": false,
+      "headers": [
+        "仓库及物流渠道",
+        "接口总费用",
+        "比较库龄（天）"
+      ],
+      "missingAge": true,
+      "recommended": 0,
+      "scrollWidth": 1280,
+      "width": 1280
+    },
+    {
+      "hasFakeTime": false,
+      "headers": [
+        "仓库及物流渠道",
+        "接口总费用",
+        "比较库龄（天）"
+      ],
+      "missingAge": true,
+      "recommended": 0,
+      "scrollWidth": 1440,
+      "width": 1440
+    },
+    {
+      "hasFakeTime": false,
+      "headers": [
+        "仓库及物流渠道",
+        "接口总费用",
+        "比较库龄（天）"
+      ],
+      "missingAge": true,
+      "recommended": 0,
+      "scrollWidth": 1920,
+      "width": 1920
+    }
+  ],
+  "annotation": {
+    "entry": 1,
+    "inputInteractive": true
+  },
+  "finalRefill": {
+    "amount": "2",
+    "days": "5",
+    "text": "当价格相差不到（报价币种）时，优先库龄高（最近批次）当库龄相差不到天时，优先价格低，否则优先库龄高最近批次：每个 SKU 取最近有货批次的库龄。订单包含多个 SKU 时，将各 SKU 的库龄相加后比较。"
+  }
+}

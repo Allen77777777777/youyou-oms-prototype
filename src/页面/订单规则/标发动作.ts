@@ -1,4 +1,4 @@
-export const 标发基础动作 = ['仓库发货完成后标发', '无需标发']
+export const 标发基础动作 = ['仓库发货完成后标发', '物流下单后标发', '无需标发']
 export const 标发常用小时数 = ['1', '2', '4', '6', '12', '24', '48', '72']
 export const 标发小时数上限 = 72
 export type 标发时机 = 'immediate' | 'delay' | 'beforeDeadline'
@@ -27,6 +27,11 @@ export function 格式化标发动作(规则: 标发规则): string {
   if (校验标发动作(规则)) return `${规则.action || '标发动作未选择'}（配置待完善）`
   if (规则.action === '无需标发') return '无需标发'
   const 配置 = 读取标发时机(规则)
+  if (规则.action === '物流下单后标发') {
+    if (配置.timing === 'delay') return `获取跟踪号后延迟 ${配置.delayHours} 小时标发`
+    if (配置.timing === 'beforeDeadline') return `获取跟踪号后按最晚标发时间前 ${配置.beforeDeadlineHours} 小时安排标发`
+    return '获取跟踪号后立即标发'
+  }
   if (配置.timing === 'delay') return `仓库发货完成后延迟 ${配置.delayHours} 小时标发`
   if (配置.timing === 'beforeDeadline') return `最晚标发时间前 ${配置.beforeDeadlineHours} 小时标发`
   return '仓库发货完成后立即标发'
@@ -35,6 +40,11 @@ export function 标发动作说明(规则: 标发规则): string {
   if (校验标发动作(规则)) return '请完善标发动作与时间设置。'
   if (规则.action === '无需标发') return '命中规则的订单无需由 OMS 回传发货信息，不代表平台标发成功，也不改变订单发货状态。'
   const 配置 = 读取标发时机(规则)
+  if (规则.action === '物流下单后标发') {
+    if (配置.timing === 'delay') return `计划标发时间 = 跟踪号获取时间 + ${配置.delayHours} 小时`
+    if (配置.timing === 'beforeDeadline') return `计划标发时间 = 最晚标发时间 − ${配置.beforeDeadlineHours} 小时；若届时尚未获取跟踪号，待获取后尽快标发。`
+    return '获取到跟踪号后，立即安排标发。'
+  }
   if (配置.timing === 'delay') return `计划标发时间 = 仓库发货完成时间 + ${配置.delayHours} 小时`
   if (配置.timing === 'beforeDeadline') return `计划标发时间 = 最晚标发时间 − ${配置.beforeDeadlineHours} 小时；若届时仓库尚未完成发货，待发货完成后标发。`
   return '仓库发货完成且订单已发货后，立即安排标发。'

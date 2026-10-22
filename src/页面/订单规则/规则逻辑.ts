@@ -4,7 +4,10 @@ import { 订单备注字数上限 } from '../订单处理/订单备注模型'
 import { 标发基础动作, 校验标发动作, 读取标发时机, type 标发时机配置 } from './标发动作'
 import { 创建规则渠道样例, 读取分仓路由, 校验分仓路由, 校验分仓策略, 检查分仓剩余库存, type 分仓路由动作, type 分仓策略配置 } from './规则路由'
 import { 计算库龄分仓, type 候选库龄资料 } from './库龄分仓'
+import { 计算比价分仓, type 运费试算报价 } from './比价分仓'
+import type { 比价汇率快照 } from './比价汇率'
 import { 是否多选条件字段, 是否多行文本字段, 读取条件多选值, 读取条件多行值, 读取范围边界, 条件字段名, 校验条件配置, 解析条件定点值, type 条件字段, type 规则条件 } from './规则条件定义'
+import { 创建发货仓库选项, 读取发货仓库来源 } from './规则仓库条件'
 
 export type { 分仓路由动作 } from './规则路由'
 export type { 条件字段, 规则条件 } from './规则条件定义'
@@ -34,6 +37,11 @@ function 重复条件字段(conditions: 规则条件[]) {
   }
   return undefined
 }
+function 发货仓库选值有效(条件: 规则条件, 渠道: readonly 渠道配置[]): boolean {
+  const selected = 读取条件多选值(条件)
+  const available = new Set(创建发货仓库选项(渠道).map(项 => 项.value))
+  return selected.length > 0 && selected.every(值 => available.has(值))
+}
 function 校验动作附加配置(规则: 订单规则): string {
   const 分仓错误 = 校验分仓策略(规则)
   if (分仓错误) return 分仓错误
@@ -57,8 +65,10 @@ export function 校验规则配置(规则: 订单规则, 全部规则: 订单规
   const 重复字段 = 重复条件字段(规则.conditions)
   if (重复字段) return `${条件字段名[重复字段] || '同一条件字段'}仅能配置一行，请在该条件中维护多个值`
   for (const 条件 of 规则.conditions) {
+    if (条件.field === 'shippingWarehouse' && 规则.type === '分仓规则') return '发货仓库条件仅适用于审单规则和订单标发规则'
     const 条件错误 = 校验条件配置(条件)
     if (条件错误) return 条件错误
+    if (条件.field === 'shippingWarehouse' && !发货仓库选值有效(条件, 渠道)) return '发货仓库条件包含未识别或已失效的仓库身份，请重新选择'
     if (条件.field === 'platformOrderStatus' && !有效eBay状态(条件.value)) return '平台订单状态仅支持已确认的 eBay 履约状态'
   }
   if (规则.conditions.some(条件 => 条件.field === 'platformOrderStatus') && !有eBay平台限制(规则)) return '平台订单状态条件须限定平台等于 eBay'
@@ -69,8 +79,12 @@ export function 校验规则配置(规则: 订单规则, 全部规则: 订单规
   return ''
 }
 
-type 已核验来源 = { kind: 'text'; value: string } | { kind: 'textLines'; values: string[] } | { kind: 'money'; value: bigint; currency: string }
-function 读取条件来源(字段: 条件字段, 订单: 全渠道订单): 已核验来源 | undefined {
+type 已核验来源 = { kind: 'text'; value: string } | { kind: 'textLines'; values: string[] } | { kind: 'money'; value: bigint; currency: string } | { kind: 'warehouses'; values: string[] }
+function 读取条件来源(字段: 条件字段, 订单: 全渠道订单, 类型: 规则类型, 渠道: readonly 渠道配置[], 动作?: string): 已核验来源 | undefined {
+  if (字段 === 'shippingWarehouse') {
+    const values = 读取发货仓库来源(订单, 类型, 渠道, 动作)
+    return values ? { kind: 'warehouses', values } : undefined
+  }
   if (字段 === 'orderAmount' || 字段 === 'buyerPaidShipping') {
     const 金额 = 订单.amount?.[字段]
     const value = 解析条件定点值(金额?.value)
@@ -95,15 +109,17 @@ function 读取条件来源(字段: 条件字段, 订单: 全渠道订单): 已�
   return { kind: 'text', value: value.trim() }
 }
 
-function 计算规则命中(规则: 订单规则, 订单: 全渠道订单): { matched: boolean; unknownFields: string[] } {
+function 计算规则命中(规则: 订单规则, 订单: 全渠道订单, 渠道: readonly 渠道配置[]): { matched: boolean; unknownFields: string[] } {
   if (!规则.enabled || 规则.mode !== '全部满足' || !规则.conditions.length || 重复条件字段(规则.conditions)) return { matched: false, unknownFields: [] }
+  if (规则.type === '分仓规则' && 规则.conditions.some(条件 => 条件.field === 'shippingWarehouse')) return { matched: false, unknownFields: [] }
   if (校验动作附加配置(规则)) return { matched: false, unknownFields: [] }
   const 未知字段 = new Set<string>()
   const 结果 = 规则.conditions.map((条件) => {
     if (校验条件配置(条件)) return false
-    const 原值 = 读取条件来源(条件.field, 订单)
+    if (条件.field === 'shippingWarehouse' && !发货仓库选值有效(条件, 渠道)) { 未知字段.add(条件字段名[条件.field]); return false }
+    const 原值 = 读取条件来源(条件.field, 订单, 规则.type, 渠道, 规则.action)
     const 留言存在判断 = 条件.field === 'buyerMessage' && (条件.operator === '存在' || 条件.operator === '不存在')
-    if (!原值 || (原值.kind === 'text' && !原值.value && !留言存在判断) || (原值.kind === 'textLines' && !原值.values.length)) {
+    if (!原值 || (原值.kind === 'text' && !原值.value && !留言存在判断) || ((原值.kind === 'textLines' || 原值.kind === 'warehouses') && !原值.values.length)) {
       未知字段.add(条件字段名[条件.field])
       return false
     }
@@ -114,6 +130,11 @@ function 计算规则命中(规则: 订单规则, 订单: 全渠道订单): { ma
       const minimum = 边界.lowerEnabled ? 解析条件定点值(条件.value) : undefined
       const maximum = 边界.upperEnabled ? 解析条件定点值(条件.upperValue) : undefined
       return (minimum === undefined || (边界.lowerInclusive ? 原值.value >= minimum : 原值.value > minimum)) && (maximum === undefined || (边界.upperInclusive ? 原值.value <= maximum : 原值.value < maximum))
+    }
+    if (原值.kind === 'warehouses') {
+      const selected = 读取条件多选值(条件)
+      const overlap = 原值.values.some(值 => selected.includes(值))
+      return 条件.operator === '等于' ? overlap : 条件.operator === '不等于' ? !overlap : false
     }
     if (是否多行文本字段(条件.field)) {
       const 保留大小写 = 条件.field === 'buyerMessage' || 条件.field === 'warehouseSku' || 条件.field === 'platformSku'
@@ -149,12 +170,12 @@ function 计算规则命中(规则: 订单规则, 订单: 全渠道订单): { ma
   const 平台状态范围有效 = !规则.conditions.some(条件 => 条件.field === 'platformOrderStatus') || (有eBay平台限制(规则) && 订单.platformCode === 'eBay')
   return { matched: 平台状态范围有效 && 结果.every(Boolean), unknownFields: [...未知字段] }
 }
-export function 命中规则(规则: 订单规则, 订单: 全渠道订单): boolean {
-  return 计算规则命中(规则, 订单).matched
+export function 命中规则(规则: 订单规则, 订单: 全渠道订单, 渠道: readonly 渠道配置[] = 创建规则渠道样例()): boolean {
+  return 计算规则命中(规则, 订单, 渠道).matched
 }
-export function 试算规则(规则: 订单规则[], 订单: 全渠道订单, 类型: 规则类型, 渠道: readonly 渠道配置[] = 创建规则渠道样例(), 库龄资料: readonly 候选库龄资料[] = []) {
+export function 试算规则(规则: 订单规则[], 订单: 全渠道订单, 类型: 规则类型, 渠道: readonly 渠道配置[] = 创建规则渠道样例(), 库龄资料: readonly 候选库龄资料[] = [], 运费报价: readonly 运费试算报价[] = [], 汇率快照?: 比价汇率快照) {
   const 候选 = (JSON.parse(JSON.stringify(规则)) as 订单规则[]).filter((项) => 项.type === 类型).sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id))
-  const 轨迹 = 候选.map((项) => ({ rule: 项, ...计算规则命中(项, 订单) }))
+  const 轨迹 = 候选.map((项) => ({ rule: 项, ...计算规则命中(项, 订单, 渠道) }))
   const 首个命中 = 轨迹.find((项) => 项.matched)?.rule
   const 门禁: string[] = []
   if (订单.fulfillmentMode !== '自配送') 门禁.push('平台履约订单不进入自配送作业')
@@ -167,19 +188,28 @@ export function 试算规则(规则: 订单规则[], 订单: 全渠道订单, �
     if (订单.processingStatus !== '待审核') 门禁.push('审单与首次路由分配只在待审核阶段执行')
   }
   if (类型 === '订单标发规则') {
-    if (订单.processingStatus !== '已发货') 门禁.push('来源 OMS 订单尚未已发货，不得生成或调度标发')
-    if (!订单.fulfillmentOrders.some((项) => 项.isActive && 项.shippedQuantity > 0 && 项.shippedAt)) 门禁.push('未取得有效出库事实，不得标发')
-    if (首个命中?.action === '仓库发货完成后标发' && 读取标发时机(首个命中).timing === 'beforeDeadline') 门禁.push('未取得平台最晚标发时间，无法确定提前标发计划')
+    if (首个命中?.action === '物流下单后标发') {
+      const 已取跟踪号 = 订单.fulfillmentOrders.some(项 => 项.isActive === true && 项.status !== '已终止' && typeof 项.trackingNumber === 'string' && !!项.trackingNumber.trim())
+      if (!已取跟踪号) 门禁.push('未取得本次有效履约的跟踪号，不得标发')
+      // 现有订单摘要没有首次可信获取跟踪号的时间，不借创建、出库或试算时刻计算延迟。
+      if (读取标发时机(首个命中).timing === 'delay') 门禁.push('未取得跟踪号获取时间，无法确定延迟标发计划')
+    } else {
+      if (订单.processingStatus !== '已发货') 门禁.push('来源 OMS 订单尚未已发货，不得生成或调度标发')
+      if (!订单.fulfillmentOrders.some((项) => 项.isActive && 项.shippedQuantity > 0 && 项.shippedAt)) 门禁.push('未取得有效出库事实，不得标发')
+    }
+    if (首个命中 && 首个命中.action !== '无需标发' && 读取标发时机(首个命中).timing === 'beforeDeadline') 门禁.push('未取得平台最晚标发时间，无法确定提前标发计划')
   }
   const 库龄比较 = 首个命中?.type === '分仓规则' && 首个命中.warehouseAction?.mode === 'age' ? 计算库龄分仓(首个命中, 订单, 渠道, 库龄资料) : undefined
-  const 路由 = 库龄比较 ? 库龄比较.route : 首个命中?.type === '分仓规则' ? 读取分仓路由(首个命中, 渠道) : undefined
+  const 比价比较 = 首个命中?.type === '分仓规则' && 首个命中.warehouseAction?.mode === 'price' ? 计算比价分仓(首个命中, 订单, 渠道, 运费报价, 库龄资料, 汇率快照) : undefined
+  const 路由 = 库龄比较 ? 库龄比较.route : 比价比较 ? 比价比较.route : 首个命中?.type === '分仓规则' ? 读取分仓路由(首个命中, 渠道) : undefined
   if (库龄比较) 门禁.push(...库龄比较.gates)
+  if (比价比较) 门禁.push(...比价比较.gates)
   if (首个命中?.type === '分仓规则') {
     const 路由错误 = 校验分仓路由(首个命中, 渠道)
     if (路由错误) 门禁.push(`分仓路由：${路由错误}`)
-    if (!库龄比较 && 检查分仓剩余库存(首个命中) === 'unknown') 门禁.push('未取得分仓后剩余可用库存，无法判断是否跳过该仓库')
+    if (!库龄比较 && !比价比较 && 检查分仓剩余库存(首个命中) === 'unknown') 门禁.push('未取得分仓后剩余可用库存，无法判断是否跳过该仓库')
   }
-  return { trace: 轨迹, hit: 首个命中, route: 路由, aging: 库龄比较, gates: 门禁, unknownFields: [...new Set(轨迹.flatMap(项 => 项.unknownFields))] }
+  return { trace: 轨迹, hit: 首个命中, route: 路由, aging: 库龄比较, pricing: 比价比较, gates: 门禁, unknownFields: [...new Set(轨迹.flatMap(项 => 项.unknownFields))] }
 }
 
 export function 创建规则样例(): 订单规则[] {

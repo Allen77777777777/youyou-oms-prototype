@@ -4,17 +4,20 @@ import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/tes
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { ElDrawer, ElDropdown, ElDropdownItem, ElMessage, ElMessageBox, type MessageBoxData } from 'element-plus'
 import RulePage from './订单规则页面.vue'
+import PricingResult from './比价试算结果.vue'
 import MultiSelectFilter from '@/组件/筛选/多选筛选.vue'
 import { 共享规则, 共享规则日志, 记录规则操作 } from './演示会话'
 import { 当前规则分类 } from './规则编辑会话'
 import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本 } from '../订单处理/演示会话'
+import { 渠道会话 } from '../仓配管理/仓配会话'
+import { 中台比价汇率快照 } from './比价汇率资料'
 
 // 只替换浮层外壳，表单、表格及规则编辑组件仍使用实际组件和事件。
 const 浮层桩 = {
   props: ['modelValue', 'title'], emits: ['update:modelValue'],
   template: '<section v-if="modelValue" class="测试浮层" :data-title="title"><slot /><footer><slot name="footer" /></footer></section>',
 }
-const 初始 = JSON.stringify({ rules: 共享规则.value, logs: 共享规则日志.value, orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value })
+const 初始 = JSON.stringify({ rules: 共享规则.value, logs: 共享规则日志.value, orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value, channels: 渠道会话.value, exchangeRates: 中台比价汇率快照.value ?? null })
 let 页面: VueWrapper | undefined
 
 function 恢复() {
@@ -22,6 +25,8 @@ function 恢复() {
   共享规则.value = data.rules; 共享规则日志.value = data.logs; 共享订单.value = data.orders
   仓库执行记录.value = data.executions; 操作核查证据.value = data.evidence
   演示库存.value = data.inventory; 订单版本.value = data.versions
+  渠道会话.value = data.channels
+  中台比价汇率快照.value = data.exchangeRates ?? undefined
 }
 function 订单事实快照() {
   return JSON.stringify({ orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value })
@@ -214,6 +219,138 @@ describe('订单规则工作台的草稿与只读边界', () => {
     expect(JSON.stringify(共享规则日志.value)).toBe(前日志)
     expect(JSON.stringify(共享规则.value)).toBe(前规则)
     expect(订单事实快照()).toBe(前订单)
+  })
+
+  it('缺汇率时保留原报价且不推荐，接收新快照后须重试，并固定每轮人民币比较依据', async () => {
+    const source = 共享规则.value.find(rule => rule.type === '分仓规则')!
+    const channels = ['DEMO-CF-CHANNEL-WYT', 'DEMO-CF-CHANNEL-GC'].map(id => 渠道会话.value.find(channel => channel.id === id)!)
+    source.conditions = [{ field: 'platformCode', operator: '等于', value: 'eBay' }]
+    source.enabled = true
+    source.warehouseAction = {
+      mode: 'price', checkRemainingStock: false,
+      priceRoutes: channels.map(channel => ({ providerId: channel.providerId, accountId: channel.accountId, warehouseId: channel.warehouseId, channelId: channel.id })),
+      priceComparison: 'priceAge', priceAgeLogic: 'priceGap', priceDifference: '1', priceDifferenceCurrency: 'CNY', agePreference: 'recent',
+    }
+    共享规则.value = [source]
+    当前规则分类.value = '分仓规则'
+    中台比价汇率快照.value = undefined
+    const beforeRules = JSON.stringify(共享规则.value), beforeLogs = JSON.stringify(共享规则日志.value), beforeOrders = 订单事实快照(), beforeChannels = JSON.stringify(渠道会话.value)
+    const page = await 打开()
+    await 按钮(page, '规则试算').trigger('click'); await 稳定()
+    const simulation = 浮层(page, '规则试算')
+    await 按钮(simulation, '开始试算').trigger('click'); await 稳定()
+    const result = () => simulation.getComponent(PricingResult).props('result')
+    const originalAmounts = () => result().ranked.map(item => [item.route.id, item.quote.totalAmount, item.quote.currencyCode])
+    const originalQuotes = [['DEMO-CF-CHANNEL-WYT', '13.40', 'USD'], ['DEMO-CF-CHANNEL-GC', '15.30', 'USD']]
+    expect(originalAmounts()).toEqual(originalQuotes)
+    expect(result().gates).toContain('未取得中台货币汇率快照，无法统一人民币比较')
+    expect(result().route).toBeUndefined()
+    expect(simulation.find('.比价选中').exists()).toBe(false)
+    expect(simulation.find('.过期提示').exists()).toBe(false)
+
+    // 虚构中台快照；shallowRef 接入口以替换整个对象接收新一轮资料。
+    const firstRates = { snapshotId: 'DEMO-FX-7', effectiveAt: '2026-10-22T09:00:00+08:00', source: '中台货币汇率', rates: [{ currencyCode: 'USD', cnyRate: '7' }] }
+    const beforeFirstRates = JSON.stringify(firstRates)
+    中台比价汇率快照.value = firstRates; await 稳定()
+    expect(simulation.get('.过期提示').text()).toContain('请重新试算')
+    expect(result().route).toBeUndefined()
+    expect(result().exchangeRateSnapshot).toBeUndefined()
+    await 按钮(simulation, '开始试算').trigger('click'); await 稳定()
+    expect(simulation.find('.过期提示').exists()).toBe(false)
+    expect(result().gates).toEqual([])
+    expect(result().route?.id).toBe('DEMO-CF-CHANNEL-WYT')
+    expect(result().ranked.map(item => [item.comparisonAmount, item.comparisonCurrency, item.exchangeRate])).toEqual([['93.8', 'CNY', '7'], ['107.1', 'CNY', '7']])
+    expect(result().exchangeRateSnapshot).toEqual({ snapshotId: firstRates.snapshotId, effectiveAt: firstRates.effectiveAt, source: firstRates.source })
+    expect(simulation.get('.比价结果表').text()).toContain('人民币比较金额')
+    expect(simulation.get('.比价试算结果').text()).toContain('1 USD = 7 CNY')
+    expect(simulation.get('.比价试算结果').text()).toContain('汇率来源：中台货币汇率；生效时间（北京时间）：2026-10-22 09:00:00')
+    expect(simulation.findAll('.比价选中')).toHaveLength(1)
+    expect(originalAmounts()).toEqual(originalQuotes)
+
+    中台比价汇率快照.value = { ...firstRates, snapshotId: 'DEMO-FX-8', effectiveAt: '2026-10-22T10:00:00+08:00', rates: [{ currencyCode: 'USD', cnyRate: '8' }] }; await 稳定()
+    expect(simulation.find('.过期提示').exists()).toBe(true)
+    expect(result().exchangeRateSnapshot?.snapshotId).toBe('DEMO-FX-7')
+    expect(result().ranked.map(item => item.exchangeRate)).toEqual(['7', '7'])
+    await 按钮(simulation, '开始试算').trigger('click'); await 稳定()
+    expect(simulation.find('.过期提示').exists()).toBe(false)
+    expect(result().exchangeRateSnapshot?.snapshotId).toBe('DEMO-FX-8')
+    expect(result().ranked.map(item => [item.comparisonAmount, item.exchangeRate])).toEqual([['107.2', '8'], ['122.4', '8']])
+    expect(originalAmounts()).toEqual(originalQuotes)
+    expect(JSON.stringify(firstRates)).toBe(beforeFirstRates)
+    expect(JSON.stringify(共享规则.value)).toBe(beforeRules)
+    expect(JSON.stringify(共享规则日志.value)).toBe(beforeLogs)
+    expect(JSON.stringify(渠道会话.value)).toBe(beforeChannels)
+    expect(订单事实快照()).toBe(beforeOrders)
+  })
+
+  it.each(['审单规则', '订单标发规则'] as const)('%s试算不依赖比价汇率快照，资料到达或替换均不使结果过期', async type => {
+    const source = 共享规则.value.find(rule => rule.type === type)!
+    source.enabled = true
+    source.conditions = [{ field: 'platformCode', operator: '等于', value: 'eBay' }]
+    共享规则.value = [source]
+    当前规则分类.value = type
+    中台比价汇率快照.value = undefined
+    const beforeRules = JSON.stringify(共享规则.value), beforeLogs = JSON.stringify(共享规则日志.value), beforeOrders = 订单事实快照()
+    const page = await 打开()
+    await 按钮(page, '规则试算').trigger('click'); await 稳定()
+    const simulation = 浮层(page, '规则试算')
+    await 按钮(simulation, '开始试算').trigger('click'); await 稳定()
+    const beforeResult = simulation.get('.试算结论').text(), beforeGates = simulation.get('.门禁结果').text()
+    expect(simulation.findComponent(PricingResult).exists()).toBe(false)
+    for (const rate of ['7', '8']) {
+      中台比价汇率快照.value = { snapshotId: `DEMO-FX-${rate}`, effectiveAt: '2026-10-22T09:00:00+08:00', source: '中台货币汇率', rates: [{ currencyCode: 'USD', cnyRate: rate }] }; await 稳定()
+      expect(simulation.find('.过期提示').exists()).toBe(false)
+      expect(simulation.get('.试算结论').text()).toBe(beforeResult)
+      expect(simulation.get('.门禁结果').text()).toBe(beforeGates)
+    }
+    expect(JSON.stringify(共享规则.value)).toBe(beforeRules)
+    expect(JSON.stringify(共享规则日志.value)).toBe(beforeLogs)
+    expect(订单事实快照()).toBe(beforeOrders)
+  })
+
+  it.each([
+    { type: '审单规则', hasWarehouse: true },
+    { type: '订单标发规则', hasWarehouse: true },
+    { type: '审单规则', hasWarehouse: false },
+  ] as const)('$type含发货仓库=$hasWarehouse时展示可读身份，并仅对所依赖的渠道变更标记试算过期', async ({ type, hasWarehouse }) => {
+    const source = 共享规则.value.find(rule => rule.type === type)!
+    const channel = 渠道会话.value.find(item => item.enabled && item.labelMode === '仓库回传')!
+    const warehouseKey = JSON.stringify([channel.providerId, channel.accountId, channel.warehouseId])
+    source.conditions = [{ field: 'platformCode', operator: '等于', value: 'eBay' }]
+    if (hasWarehouse) source.conditions.push({ field: 'shippingWarehouse', operator: '等于', value: '', values: [warehouseKey] })
+    source.enabled = true
+    共享规则.value = [source]
+    当前规则分类.value = type
+    const beforeRules = JSON.stringify(共享规则.value), beforeLogs = JSON.stringify(共享规则日志.value), beforeOrders = 订单事实快照()
+    const page = await 打开(), row = 规则身份行(page, source.id)
+    if (hasWarehouse) {
+      const summary = row.get('.条件摘要三行').text()
+      expect(summary).toContain('发货仓库 等于')
+      for (const label of [channel.warehouse, channel.provider, channel.account]) expect(summary).toContain(label)
+      expect(summary).not.toContain(warehouseKey)
+      await row.get('.规则名称').trigger('click'); await 稳定()
+      const details = 浮层(page, '规则详情')
+      const warehouseCondition = details.findAll('.详情条件').find(item => item.get('span').text() === '发货仓库')!
+      expect(warehouseCondition.get('strong').text()).toBe(`${channel.warehouse} · ${channel.provider} · ${channel.account}`)
+      expect(warehouseCondition.text()).not.toContain(warehouseKey)
+      await 按钮(details, '关闭').trigger('click'); await 稳定()
+    } else expect(row.get('.条件摘要三行').text()).not.toContain('发货仓库')
+    await 按钮(page, '规则试算').trigger('click'); await 稳定()
+    const simulation = 浮层(page, '规则试算')
+    await 按钮(simulation, '开始试算').trigger('click'); await 稳定()
+    expect(simulation.find('.试算结论').exists()).toBe(true)
+    expect(simulation.findAll('.轨迹标题行').map(item => item.text()).join(' ')).toContain(source.name)
+    expect(simulation.find('.过期提示').exists()).toBe(false)
+    channel.name = '本轮变更后的演示渠道名称'; await 稳定()
+    expect(simulation.find('.过期提示').exists()).toBe(hasWarehouse)
+    if (hasWarehouse) {
+      expect(simulation.get('.过期提示').text()).toContain('请重新试算')
+      await 按钮(simulation, '开始试算').trigger('click'); await 稳定()
+      expect(simulation.find('.过期提示').exists()).toBe(false)
+    }
+    expect(JSON.stringify(共享规则.value)).toBe(beforeRules)
+    expect(JSON.stringify(共享规则日志.value)).toBe(beforeLogs)
+    expect(订单事实快照()).toBe(beforeOrders)
   })
 
   it('逐规则操作日志初始为空，同名规则也按稳定 ID 隔离操作内容', async () => {

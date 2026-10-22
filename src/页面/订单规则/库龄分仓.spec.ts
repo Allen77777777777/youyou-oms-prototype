@@ -20,7 +20,7 @@ function 准备() {
   }))
   return { rule, order, channels, source }
 }
-describe('库龄分仓按所选仓库中订单SKU的最大库龄匹配', () => {
+describe('库龄分仓按批次取法逐SKU取值并累加比较', () => {
   it('开启库存检测时校验阈值，关闭保留输入但不参与判断', () => {
     const { rule, channels } = 准备()
     rule.warehouseAction!.checkRemainingStock = true
@@ -46,7 +46,7 @@ describe('库龄分仓按所选仓库中订单SKU的最大库龄匹配', () => {
     expect(result.route?.id).toBe('DEMO-CF-CHANNEL-WYT')
     expect(result.gates).toEqual([])
     expect(result.aging?.skipped.map(项 => 项.id)).toEqual(['DEMO-CF-CHANNEL-GC'])
-    expect(result.aging?.ranked.map(项 => 项.ageDays)).toEqual([120])
+    expect(result.aging?.ranked.map(项 => 项.ageDays)).toEqual(['165'])
     expect(分仓配置摘要(rule, channels)[0]).toContain('剩余库存 < 5')
     expect(JSON.stringify({ rule, order, source })).toBe(before)
     source[1]!.remainingStock = [{ systemSku: 'SKU-A', quantity: '5' }, { systemSku: 'SKU-B', quantity: '5' }]
@@ -76,13 +76,15 @@ describe('库龄分仓按所选仓库中订单SKU的最大库龄匹配', () => {
     expect(result.skipped).toHaveLength(2)
     expect(result.gates.join('；')).toContain('所有候选仓库')
   })
-  it('关闭库存检测时，多SKU按最大值选仓并返回该仓渠道', () => {
+  it('关闭库存检测时，多SKU按逐SKU最大值累加选仓并返回该仓渠道', () => {
     const { rule, order, channels, source } = 准备(), before = JSON.stringify({ rule, order, source })
     expect(校验规则配置(rule, [rule], channels)).toBe('')
     expect(检查分仓剩余库存(rule)).toBe('unchecked')
     const result = 试算规则([rule], order, '分仓规则', channels, source)
     expect(result.route?.id).toBe('DEMO-CF-CHANNEL-GC')
-    expect(result.aging?.ranked.map(项 => [项.ageDays, 项.systemSku])).toEqual([[180, 'SKU-B'], [120, 'SKU-A']])
+    expect(result.aging?.ranked.map(项 => [项.ageDays, 项.ageDetails.map(行 => [行.systemSku, 行.ageDays])])).toEqual([
+      ['260', [['SKU-A', '80'], ['SKU-B', '180']]], ['165', [['SKU-A', '120'], ['SKU-B', '45']]],
+    ])
     expect(result.gates).toEqual([])
     expect(JSON.stringify({ rule, order, source })).toBe(before)
     expect(读取分仓路由(rule, channels)).toBeUndefined()
@@ -94,16 +96,51 @@ describe('库龄分仓按所选仓库中订单SKU的最大库龄匹配', () => {
     source[0]!.records = [...source[0]!.records, { ...source[0]!.records[0]!, id: 'batch2', agingDays: 200 }, { ...source[0]!.records[0]!, id: 'empty', agingDays: 999, onHandQty: '0' }, { ...source[0]!.records[0]!, id: 'bad', agingDays: 1000, quality: '不良品' }]
     const result = 计算库龄分仓(rule, order, channels, source)
     expect(result.route?.id).toBe('DEMO-CF-CHANNEL-WYT')
-    expect(result.ranked[0]?.ageDays).toBe(200)
+    expect(result.ranked[0]?.ageDays).toBe('200')
     rule.warehouseAction!.ageRoutes!.splice(0, 1)
     expect(计算库龄分仓(rule, order, channels, source).route?.id).toBe('DEMO-CF-CHANNEL-GC')
+  })
+  it('按图片两仓30/60与33/53：最近批次选第二仓，全批次及缺省选第一仓', () => {
+    const { rule, order, channels, source } = 准备(); order.items.splice(1)
+    source.forEach((项, index) => {
+      项.records = (index ? [33, 53] : [30, 60]).map((agingDays, i) => ({ ...项.records[0]!, id: `DEMO-PICTURE-${index}-${i}`, agingDays }))
+    })
+    expect(计算库龄分仓(rule, order, channels, source).route?.id).toBe('DEMO-CF-CHANNEL-WYT')
+    rule.warehouseAction!.ageBatchPreference = 'recent'
+    const recent = 计算库龄分仓(rule, order, channels, source)
+    expect(recent.route?.id).toBe('DEMO-CF-CHANNEL-GC')
+    expect(recent.ranked.map(项 => 项.ageDays)).toEqual(['33', '30'])
+    rule.warehouseAction!.ageBatchPreference = 'all'
+    const all = 计算库龄分仓(rule, order, channels, source)
+    expect(all.route?.id).toBe('DEMO-CF-CHANNEL-WYT')
+    expect(all.ranked.map(项 => 项.ageDays)).toEqual(['60', '53'])
+  })
+  it('多SKU累加可以胜过单批最大值更大的仓，件数与重复SKU不另加权', () => {
+    const { rule, order, channels, source } = 准备()
+    source[0]!.records = source[0]!.records.map(项 => ({ ...项, agingDays: 170 }))
+    order.items[0]!.orderedQuantity = 100
+    order.items.push({ ...order.items[0]!, externalLineId: 'DEMO-DUPLICATE-SKU', orderedQuantity: 200 })
+    const result = 计算库龄分仓(rule, order, channels, source)
+    expect(result.route?.id).toBe('DEMO-CF-CHANNEL-WYT')
+    expect(result.ranked.map(项 => 项.ageDays)).toEqual(['340', '260'])
+  })
+  it('先排除确定库存不足仓，再校验剩余仓库库龄，不因已排除仓缺龄而误拦截', () => {
+    const { rule, order, channels, source } = 准备()
+    rule.warehouseAction!.checkRemainingStock = true; rule.warehouseAction!.minimumRemainingStock = '5'
+    source[0]!.remainingStock = [{ systemSku: 'SKU-A', quantity: '4' }, { systemSku: 'SKU-B', quantity: '5' }]
+    source[0]!.records = []
+    source[1]!.remainingStock = [{ systemSku: 'SKU-A', quantity: '5' }, { systemSku: 'SKU-B', quantity: '5' }]
+    const result = 计算库龄分仓(rule, order, channels, source)
+    expect(result.route?.id).toBe('DEMO-CF-CHANNEL-GC')
+    expect(result.gates).toEqual([])
+    expect(result.skipped.map(项 => 项.id)).toEqual(['DEMO-CF-CHANNEL-WYT'])
   })
   it('同龄按候选配置顺序，保留来源零天不当缺失，不使用基础暂存路由', () => {
     const { rule, order, channels, source } = 准备()
     source.forEach(项 => { 项.records = 项.records.map(行 => ({ ...行, agingDays: 0 })) })
     rule.warehouseAction!.ageRoutes!.reverse()
     const result = 计算库龄分仓(rule, order, channels, source)
-    expect(result.ranked[0]?.ageDays).toBe(0)
+    expect(result.ranked[0]?.ageDays).toBe('0')
     expect(result.route?.id).toBe('DEMO-CF-CHANNEL-GC')
   })
   it.each([{ agingDays: null }, { agingDays: -1 }, { onHandQty: null }, { unit: '' }, { quality: '未知' }, { mapping: '映射冲突' }, { summaryBlocked: true } ] as Partial<AgingRecord>[])('存在待核验库龄%s时不从剩余已知仓兜底', changes => {
@@ -128,7 +165,7 @@ describe('库龄分仓按所选仓库中订单SKU的最大库龄匹配', () => {
     for (const changes of [{ accountId: 'other' }, { warehouseId: 'other' }, { sourceCustomer: 'other' }, { organization: 'other' }]) {
       source[0]!.records = [...source[0]!.records, { ...source[0]!.records[0]!, id: JSON.stringify(changes), agingDays: 9999, ...changes }]
     }
-    expect(计算库龄分仓(rule, order, channels, source).ranked[0]?.ageDays).toBe(180)
+    expect(计算库龄分仓(rule, order, channels, source).ranked[0]?.ageDays).toBe('260')
     expect(计算库龄分仓(rule, order, channels, source).route?.id).toBe('DEMO-CF-CHANNEL-GC')
   })
   it('仓库不可重复，渠道身份错配或停用不能保存', () => {

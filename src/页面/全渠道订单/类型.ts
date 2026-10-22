@@ -74,6 +74,28 @@ export interface 订单路由 {
   labelMode: '仓配一体' | '仓配分离'
 }
 
+/** 本地人工拆合发货方案；不修改来源订单商品、数量、金额或平台事实。 */
+export interface 人工发货分配 {
+  orderNo: string
+  externalLineId: string
+  quantity: number
+}
+
+export interface 人工发货包裹 {
+  key: string
+  route: 订单路由
+  items: 人工发货分配[]
+}
+
+export interface 人工发货方案 {
+  id: string
+  kind: '拆分发货' | '合并发货'
+  orderNos: string[]
+  packages: 人工发货包裹[]
+  reason: string
+  updatedAt: string
+}
+
 export interface 履约单摘要 {
   fulfillmentOrderNo: string
   status: '待执行' | '执行中' | '已发货' | '已终止'
@@ -133,6 +155,7 @@ export interface 全渠道订单 {
   blockReason?: string
   noShipmentReason?: string
   defaultRoute?: 订单路由
+  manualShippingPlan?: 人工发货方案
   cancelledAt?: string
   cancelledReason?: string
   orderedAt: string

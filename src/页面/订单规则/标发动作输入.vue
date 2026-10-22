@@ -15,11 +15,11 @@ function 常用时长(query: string, callback: (items: { value: string }[]) => v
 <template>
   <div class="标发动作配置">
     <ElFormItem label="标发动作" required>
-      <ElRadioGroup v-model="rule.action" aria-label="标发动作" class="标发基础选项"><ElRadio value="物流下单后标发" disabled>物流下单后标发（二期上线）</ElRadio><ElRadio v-for="动作 in 标发基础动作" :key="动作" :value="动作">{{ 动作 }}</ElRadio></ElRadioGroup>
+      <ElRadioGroup v-model="rule.action" aria-label="标发动作" class="标发基础选项"><ElRadio v-for="动作 in 标发基础动作" :key="动作" :value="动作">{{ 动作 }}</ElRadio></ElRadioGroup>
     </ElFormItem>
     <p v-if="错误" class="标发校验错误" role="alert">{{ 错误 }}</p>
     <ElAlert v-if="!标发基础动作.includes(rule.action)" title="原标发动作需重新选择，请确认本规则的处理方式。" type="warning" :closable="false" />
-    <div v-if="rule.action === '仓库发货完成后标发'" class="标发时机面板">
+    <div v-if="rule.action === '仓库发货完成后标发' || rule.action === '物流下单后标发'" class="标发时机面板">
       <span class="时机标题">标发时机</span>
       <ElRadioGroup v-model="配置.timing" aria-label="标发时机" class="标发时机选项">
         <div class="时机行"><ElRadio value="immediate">立即标发</ElRadio></div>

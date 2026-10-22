@@ -1,0 +1,47 @@
+[
+  {
+    "currency": "",
+    "documentWidth": 1280,
+    "rect": {
+      "bottom": 529.59375,
+      "height": 24,
+      "left": 611,
+      "right": 735,
+      "top": 505.59375,
+      "width": 124,
+      "x": 611,
+      "y": 505.59375
+    },
+    "width": 1280
+  },
+  {
+    "currency": "",
+    "documentWidth": 1440,
+    "rect": {
+      "bottom": 531.59375,
+      "height": 24,
+      "left": 667,
+      "right": 791,
+      "top": 507.59375,
+      "width": 124,
+      "x": 667,
+      "y": 507.59375
+    },
+    "width": 1440
+  },
+  {
+    "currency": "",
+    "documentWidth": 1920,
+    "rect": {
+      "bottom": 531.59375,
+      "height": 24,
+      "left": 667,
+      "right": 791,
+      "top": 507.59375,
+      "width": 124,
+      "x": 667,
+      "y": 507.59375
+    },
+    "width": 1920
+  }
+]

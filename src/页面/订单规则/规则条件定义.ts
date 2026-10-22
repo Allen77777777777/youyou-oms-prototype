@@ -3,7 +3,7 @@ import { 创建尺寸配置, 创建材积组, 校验尺寸配置, 校验材积�
 
 export type 条件字段 =
   | 'platformCode' | 'siteCode' | 'storeId'
-  | 'countryCode' | 'platformShippingMethod' | 'orderAddress' | 'stateProvince' | 'city'
+  | 'countryCode' | 'platformShippingMethod' | 'orderAddress' | 'stateProvince' | 'city' | 'shippingWarehouse'
   | 'orderWeight' | 'orderAmount' | 'transactionAmount' | 'orderShippingAmount' | 'buyerPaidShipping' | 'buyerMessage' | 'unitPrice'
   | 'productDimensions' | 'warehouseSku' | 'platformSku' | 'warehouseSkuQuantity' | 'specifiedWarehouseSku' | 'salesOwner' | 'volume'
   | 'lengthWidthHeight' | 'dimensionSum' | 'longestSide' | 'secondSide' | 'lengthGirth'
@@ -43,6 +43,9 @@ export const 条件分组: { title: string; fields: 条件字段[] }[] = [
   { title: '订单信息', fields: ['orderWeight', 'orderAmount', 'buyerPaidShipping', 'buyerMessage', 'unitPrice'] },
   { title: '货品信息', fields: ['productDimensions', 'warehouseSku', 'platformSku', 'warehouseSkuQuantity', 'lengthWidthHeight', 'dimensionSum', 'longestSide', 'secondSide', 'lengthGirth', 'salesOwner', 'volume'] },
 ]
+export function 读取可选条件分组(type: string): { title: string; fields: 条件字段[] }[] {
+  return 条件分组.map(组 => ({ ...组, fields: 组.title === '物流信息' && (type === '审单规则' || type === '订单标发规则') ? [...组.fields, 'shippingWarehouse'] : [...组.fields] }))
+}
 export const 条件定义: Record<条件字段, 条件元数据> = {
   platformCode: { label: '订单平台', kind: 'multi' },
   siteCode: { label: '订单站点', kind: 'multi' },
@@ -52,6 +55,7 @@ export const 条件定义: Record<条件字段, 条件元数据> = {
   orderAddress: { label: '订单地址', kind: 'text' },
   stateProvince: { label: '收货省/州', kind: 'text' },
   city: { label: '收货城市', kind: 'text' },
+  shippingWarehouse: { label: '发货仓库', kind: 'multi' },
   orderWeight: { label: '订单重量（kg）', kind: 'range', unit: 'kg' },
   orderAmount: { label: '订单总金额范围', kind: 'range', money: true },
   // 已移除的条件仅保留元数据以展示存量配置，不映射为其他金额。
@@ -80,7 +84,7 @@ export const 条件定义: Record<条件字段, 条件元数据> = {
 export const 条件字段名 = Object.fromEntries(Object.entries(条件定义).map(([field, definition]) => [field, definition.label])) as Record<条件字段, string>
 export const 基础多选字段 = ['platformCode', 'siteCode', 'storeId'] as const
 export function 是否基础多选字段(field: unknown): field is typeof 基础多选字段[number] { return 基础多选字段.some(项 => 项 === field) }
-export const 多选条件字段 = [...基础多选字段, 'countryCode'] as const
+export const 多选条件字段 = [...基础多选字段, 'countryCode', 'shippingWarehouse'] as const
 export function 是否多选条件字段(field: unknown): field is typeof 多选条件字段[number] { return 多选条件字段.some(项 => 项 === field) }
 export const 多行文本字段 = ['orderAddress', 'stateProvince', 'city', 'platformShippingMethod', 'buyerMessage', 'warehouseSku', 'platformSku'] as const
 export function 是否多行文本字段(field: unknown): field is typeof 多行文本字段[number] { return 多行文本字段.some(项 => 项 === field) }
@@ -177,6 +181,10 @@ export function 校验条件配置(condition: 规则条件): string {
     const values = 读取条件多选值(condition)
     if (!values.length) return `至少填写一条完整条件（${definition.label}请至少选择一项）`
     if (new Set(values).size !== values.length) return `${definition.label}不能包含重复选项`
+    if (condition.field === 'shippingWarehouse' && values.some(value => {
+      try { const scope: unknown = JSON.parse(value); return !Array.isArray(scope) || scope.length !== 3 || scope.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim()) || JSON.stringify(scope) !== value }
+      catch { return true }
+    })) return '请选择有效的发货仓库，不按仓库名称匹配'
     return ''
   }
   if (typeof condition.value !== 'string') return '至少填写一条完整条件'

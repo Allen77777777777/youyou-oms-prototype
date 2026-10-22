@@ -1,5 +1,7 @@
 import { shallowRef } from 'vue'
 import type { 全渠道订单 } from '../全渠道订单/类型'
+import type { 渠道配置 } from '../仓配管理/物流渠道配置'
+import { 创建发货仓库选项 } from './规则仓库条件'
 
 // 仅为用户授权的虚构占位；正式枚举由优优中台提供，配置保存稳定用户ID。
 export const 中台系统用户资料 = shallowRef([
@@ -45,7 +47,8 @@ export function 创建平台站点演示资料(): 平台站点资料[] {
 }
 export const 中台平台站点资料 = shallowRef<平台站点资料[]>(创建平台站点演示资料())
 export function 站点选择值(项: 平台站点资料): string { return JSON.stringify([项.platformCode, 项.id]) }
-export function 规则基础选项(field: 'platformCode' | 'siteCode' | 'storeId' | 'countryCode', orders: 全渠道订单[]) {
+export function 规则基础选项(field: 'platformCode' | 'siteCode' | 'storeId' | 'countryCode' | 'shippingWarehouse', orders: 全渠道订单[], channels: readonly 渠道配置[] = []) {
+  if (field === 'shippingWarehouse') return 创建发货仓库选项(channels)
   if (field === 'platformCode') return 规则平台资料
   if (field === 'countryCode') return 规则国家资料
   if (field === 'storeId') return [...new Map(orders.map(项 => [项.storeId, { value: 项.storeId, label: `[${规则平台资料.find(平台 => 平台.value === 项.platformCode)?.label || 项.platformCode}].${项.storeName}` }])).values()]
