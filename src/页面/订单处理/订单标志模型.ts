@@ -106,7 +106,9 @@ function 当前退款事实(rows: 标志退款证据[]): 标志退款证据[] {
 
 /** 仅生成当前页面的展示投影，不写 order_tag、tags、日志或处理状态。 */
 export function 计算订单标志(order: 全渠道订单, evidences: 订单标志证据[] = []): 订单标志[] {
-  if (order.platformCode !== 'eBay') return []
+  const plan = order.manualShippingPlan
+  const manualCode = plan?.id && plan.orderNos.includes(order.systemOrderNo) ? plan.kind === '拆分发货' && plan.packages.length > 1 ? 'SPLIT' : plan.kind === '合并发货' && plan.orderNos.length > 1 ? 'MERGED' : undefined : undefined
+  if (order.platformCode !== 'eBay') return manualCode ? [{ code: manualCode, ...订单标志定义[manualCode], reason: '发货安排已保存且仍有关联', sourceOrderNos: [order.systemOrderNo] }] : []
   const identity = { systemOrderNo: order.systemOrderNo, storeId: order.storeId, platformOrderId: order.platformOrderId ?? '' }
   const evidence = 当前可靠证据(identity, evidences)
   const flags: 订单标志[] = []
@@ -132,9 +134,10 @@ export function 计算订单标志(order: 全渠道订单, evidences: 订单标�
   if (evidence) {
     const facts = (evidence.fulfillmentFacts ?? []).filter(fact => fact.operationSuccess && fact.active && !!fact.operationId.trim() && fact.sourceOrderNos.includes(order.systemOrderNo)
       && order.fulfillmentOrders.some(fulfillment => fulfillment.isActive && fulfillment.fulfillmentOrderNo === fact.fulfillmentOrderNo))
-    add('MERGED', facts.some(fact => fact.code === 'MERGED' && new Set(fact.sourceOrderNos.filter(no => !!no.trim())).size > 1) ? ['已成功参与当前有效合并履约方案'] : [])
-    add('SPLIT', facts.some(fact => fact.code === 'SPLIT') ? ['拆分发货操作已成功且对应履约方案仍有效'] : [])
+    add('MERGED', manualCode === 'MERGED' || facts.some(fact => fact.code === 'MERGED' && new Set(fact.sourceOrderNos.filter(no => !!no.trim())).size > 1) ? ['已成功参与当前有效合并履约方案'] : [])
+    add('SPLIT', manualCode === 'SPLIT' || facts.some(fact => fact.code === 'SPLIT') ? ['拆分发货操作已成功且对应履约方案仍有效'] : [])
   }
+  if (!evidence && manualCode) add(manualCode, ['发货安排已保存且仍有关联'])
   return flags.sort((a, b) => 订单标志顺序.indexOf(a.code) - 订单标志顺序.indexOf(b.code))
 }
 

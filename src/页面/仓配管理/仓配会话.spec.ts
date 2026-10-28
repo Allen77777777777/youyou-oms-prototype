@@ -4,13 +4,13 @@ import { 共享订单, 仓库执行记录, 当前版本, 执行演示推单 } fr
 import { 仓库会话单据, 执行仓配会话动作, 创建仓库执行投影 } from './仓配会话'
 
 describe('订单处理与仓库工作台的同源事实', () => {
-  it('默认仅显示十四张完整CK评审单据，旧预置执行保留领域门禁且不自动投影', async () => {
+  it('默认显示十四张完整CK评审单据及四张详情演示仓单，旧预置执行保留领域门禁且不自动投影', async () => {
     expect(仓库执行记录.value.some(item => item.出库单号.startsWith('OUT-'))).toBe(true)
-    expect(仓库会话单据.value).toHaveLength(14)
+    expect(仓库会话单据.value).toHaveLength(18)
     expect(仓库会话单据.value.every(row => row.no.startsWith('CK') && row.outboundDetail!.items.length > 0)).toBe(true)
     共享订单.value[0]!.storeName += '核对'
     await nextTick()
-    expect(仓库会话单据.value).toHaveLength(14)
+    expect(仓库会话单据.value).toHaveLength(18)
     expect(仓库会话单据.value.some(row => row.no.startsWith('OUT-'))).toBe(false)
   })
   it('推单后可用同一履约单定位，核查受理回写订单阶段且不伪造出库', async () => {
@@ -62,7 +62,7 @@ describe('订单处理与仓库工作台的同源事实', () => {
     const rows = session.仓库会话单据.value.filter(row => row.no === result.对象号)
     expect(rows).toHaveLength(1)
     expect(rows[0]!.outboundDetail!.items.map(item => item.plannedQuantity)).toEqual([2])
-    expect(session.仓库会话单据.value).toHaveLength(15)
+    expect(session.仓库会话单据.value).toHaveLength(19)
     expect(session.仓库会话单据.value.some(row => row.no.startsWith('OUT-'))).toBe(false)
   })
 })

@@ -75,6 +75,273 @@ afterEach(() => {
 })
 
 describe('订单完整详情的业务事实展示', () => {
+  it('拆分商品并入各履约行，只展示本次分配的SKU及数量且取消独立发货安排区', async () => {
+    const order = 测试订单()
+    order.items[1]!.systemSku = 'DEMO-SYSTEM-SKU-B'
+    order.fulfillmentOrders = [
+      { fulfillmentOrderNo: 'FL-PRODUCTS-SPLIT-A', isActive: true, status: '已发货', route: 路由('商品一'), plannedQuantity: 1, shippedQuantity: 1, items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 1 }] },
+      { fulfillmentOrderNo: 'FL-PRODUCTS-SPLIT-B', isActive: true, status: '已发货', route: 路由('商品二'), plannedQuantity: 1, shippedQuantity: 1, items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-B', quantity: 1 }] },
+    ]
+    order.manualShippingPlan = { id: 'PLAN-PRODUCTS-SPLIT', kind: '拆分发货', orderNos: [order.systemOrderNo], packages: order.fulfillmentOrders.map((fulfillment, index) => ({ key: `PACKAGE-${index}`, route: fulfillment.route, items: fulfillment.items! })), reason: '', updatedAt: '2026-10-28T08:00:00+08:00' }
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(page.find('.当前路由表').exists()).toBe(false)
+    expect(page.find('.原保存路由').exists()).toBe(false)
+    expect(表行(page, '.履约表')).toHaveLength(2)
+    expect(分区(page, 'fulfillment').findAll('h3').some(item => item.text() === '发货安排')).toBe(false)
+    const 第一包 = 指定行(page, '.履约表', 'FL-PRODUCTS-SPLIT-A').get('.履约商品列表')
+    const 第二包 = 指定行(page, '.履约表', 'FL-PRODUCTS-SPLIT-B').get('.履约商品列表')
+    expect(第一包.findAll('.履约商品项')).toHaveLength(1)
+    expect(第二包.findAll('.履约商品项')).toHaveLength(1)
+    for (const value of ['虚构系统商品 A', 'DEMO-SYSTEM-SKU-A', 'DEMO-PLATFORM-SKU-A', 'DEMO-LINE-A']) expect(第一包.text()).toContain(value)
+    expect(第一包.text()).not.toContain('DEMO-SYSTEM-SKU-B')
+    expect(第一包.text().replace(/\s/g, '')).toContain('计划数量1')
+    for (const value of ['虚构系统商品 B', 'DEMO-SYSTEM-SKU-B', 'DEMO-PLATFORM-SKU-B', 'DEMO-LINE-B']) expect(第二包.text()).toContain(value)
+    expect(第二包.text()).not.toContain('DEMO-SYSTEM-SKU-A')
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('合并履约中同SKU不同来源仍逐行显示，不把整包数量当作本来源分配', async () => {
+    const order = 测试订单()
+    order.items = [order.items[0]!]
+    const other = { ...structuredClone(order), systemOrderNo: 'OMS-DETAIL-MERGED-B', items: [{ ...structuredClone(order.items[0]!), externalLineId: 'DEMO-MERGED-LINE-B', orderedQuantity: 3 }] }
+    const fulfillment = { fulfillmentOrderNo: 'FL-PRODUCTS-MERGED', isActive: true, status: '已发货' as const, route: 路由('共享'), plannedQuantity: 5, shippedQuantity: 5, items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 2 }, { orderNo: other.systemOrderNo, externalLineId: 'DEMO-MERGED-LINE-B', quantity: 3 }] }
+    order.fulfillmentOrders = [fulfillment]
+    other.fulfillmentOrders = [structuredClone(fulfillment)]
+    共享订单.value = [order, other]
+    const 原事实 = JSON.stringify([order, other])
+    const page = await 打开(order)
+    const row = 指定行(page, '.履约表', fulfillment.fulfillmentOrderNo)
+    const 商品 = row.findAll('.履约商品项')
+    expect(商品).toHaveLength(2)
+    expect(商品.every(item => item.text().includes('DEMO-SYSTEM-SKU-A'))).toBe(true)
+    expect(商品[0]!.text()).toContain(order.systemOrderNo)
+    expect(商品[0]!.text()).toContain('DEMO-LINE-A')
+    expect(商品[0]!.text().replace(/\s/g, '')).toContain('计划数量2')
+    expect(商品[1]!.text()).toContain(other.systemOrderNo)
+    expect(商品[1]!.text()).toContain('DEMO-MERGED-LINE-B')
+    expect(商品[1]!.text().replace(/\s/g, '')).toContain('计划数量3')
+    expect(row.text()).toContain('共享履约')
+    expect(字段值(row, '计划')).toBe('5')
+    expect(字段值(row, '有效出库')).toBe('5')
+    expect(JSON.stringify([order, other])).toBe(原事实)
+  })
+
+  it('历史或当前履约缺少本次分配时保留待核实，不借整单商品或最新安排补齐', async () => {
+    const order = 测试订单()
+    order.fulfillmentOrders = [
+      { fulfillmentOrderNo: 'FL-PRODUCTS-MISSING', isActive: true, status: '待执行', route: 路由('缺分配'), plannedQuantity: 2, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'FL-PRODUCTS-OLD-EMPTY', isActive: false, status: '已终止', route: 路由('历史空分配'), plannedQuantity: 1, shippedQuantity: 0, items: [] },
+    ]
+    order.manualShippingPlan = { id: 'PLAN-NEWEST-PRODUCTS', kind: '拆分发货', orderNos: [order.systemOrderNo], packages: [{ key: 'PACKAGE-NEWEST', route: 路由('最新安排'), items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 2 }] }], reason: '', updatedAt: '2026-10-28T08:00:00+08:00' }
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    for (const no of ['FL-PRODUCTS-MISSING', 'FL-PRODUCTS-OLD-EMPTY']) {
+      const row = 指定行(page, '.履约表', no)
+      expect(row.text()).toContain('本次商品明细待核实')
+      expect(row.findAll('.履约商品项')).toHaveLength(0)
+      expect(row.text()).not.toContain('DEMO-SYSTEM-SKU-A')
+      expect(row.text()).not.toContain('虚构系统商品 B')
+    }
+    expect(指定行(page, '.履约表', 'FL-PRODUCTS-OLD-EMPTY').text()).toContain('历史版本')
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('概览只按当前有效履约状态统计进度，历史完成及仅有跟踪号不算已发货', async () => {
+    const order = 测试订单()
+    order.fulfillmentOrders = [
+      { fulfillmentOrderNo: 'FL-PROGRESS-DONE', isActive: true, status: '已发货', route: 路由('已完成'), plannedQuantity: 1, shippedQuantity: 1 },
+      { fulfillmentOrderNo: 'FL-PROGRESS-TRACKING-ONLY', isActive: true, status: '执行中', route: 路由('仅取号'), plannedQuantity: 1, shippedQuantity: 0, trackingNumber: 'DEMO-TRACK-NOT-SHIPPED' },
+      { fulfillmentOrderNo: 'FL-PROGRESS-HISTORY', isActive: false, status: '已发货', route: 路由('历史完成'), plannedQuantity: 1, shippedQuantity: 1 },
+    ]
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    const 概览 = page.get('.履约概览').text()
+    expect(概览).toContain('自配送')
+    expect(概览).toMatch(/2\s*张/)
+    expect(概览).toMatch(/1\s*\/\s*2/)
+    expect(概览).not.toMatch(/2\s*\/\s*2|2\s*\/\s*3/)
+    expect(表行(page, '.履约表')).toHaveLength(3)
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('待审核包裹在商品表展示对应分配，不伪造正式履约且不恢复独立发货安排标题', async () => {
+    const order = 测试订单()
+    order.processingStatus = '待审核'
+    order.items[1]!.systemSku = 'DEMO-SYSTEM-SKU-B'
+    order.manualShippingPlan = { id: 'PLAN-REVIEW-PRODUCTS', kind: '拆分发货', orderNos: [order.systemOrderNo], packages: [
+      { key: 'PREPARED-A', route: 路由('待审一'), items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 2 }] },
+      { key: 'PREPARED-B', route: 路由('待审二'), items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-B', quantity: 1 }] },
+    ], reason: '', updatedAt: '2026-10-28T08:00:00+08:00' }
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(表行(page, '.待审核包裹表')).toHaveLength(2)
+    expect(指定行(page, '.待审核包裹表', '包裹 1').text()).toContain('DEMO-SYSTEM-SKU-A')
+    expect(指定行(page, '.待审核包裹表', '包裹 1').text()).not.toContain('DEMO-SYSTEM-SKU-B')
+    expect(指定行(page, '.待审核包裹表', '包裹 2').text()).toContain('DEMO-SYSTEM-SKU-B')
+    expect(指定行(page, '.待审核包裹表', '包裹 2').text()).not.toContain('DEMO-SYSTEM-SKU-A')
+    expect(page.get('.履约概览').text()).toContain('尚未生成履约单')
+    expect(分区(page, 'fulfillment').findAll('h3').find(item => item.text().startsWith('待审核包裹'))?.text()).toContain('尚未生成当前履约单')
+    expect(分区(page, 'fulfillment').findAll('h3').some(item => item.text() === '发货安排')).toBe(false)
+    expect(page.find('.履约表').exists()).toBe(false)
+    expect(order.fulfillmentOrders).toHaveLength(0)
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('仓储物流归入各自履约行，当前与历史快照独立且不展示旧安排或默认路线', async () => {
+    const order = 测试订单()
+    order.fulfillmentOrders = [
+      { fulfillmentOrderNo: 'FL-ROUTE-HISTORY-1', isActive: false, status: '已终止', route: 路由('历史一'), plannedQuantity: 2, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'FL-ROUTE-CURRENT-1', isActive: true, status: '待执行', route: 路由('当前一'), plannedQuantity: 1, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'FL-ROUTE-HISTORY-2', isActive: false, status: '已终止', route: 路由('历史二'), plannedQuantity: 1, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'FL-ROUTE-CURRENT-2', isActive: true, status: '待执行', route: 路由('当前二'), plannedQuantity: 2, shippedQuantity: 0 },
+    ]
+    order.manualShippingPlan = { id: 'PLAN-OLDER', kind: '拆分发货', orderNos: [order.systemOrderNo], packages: [{ key: 'OLD-PACKAGE', route: 路由('旧安排'), items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 2 }] }], reason: '', updatedAt: '2026-10-21T20:00:00+08:00' }
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(page.find('.当前路由表').exists()).toBe(false)
+    expect(page.find('.原保存路由').exists()).toBe(false)
+    for (const [编号, 后缀] of [['FL-ROUTE-CURRENT-1', '当前一'], ['FL-ROUTE-CURRENT-2', '当前二']]) {
+      const row = 指定行(page, '.履约表', 编号!)
+      for (const value of Object.values(路由(后缀!))) expect(row.text()).toContain(value)
+      for (const value of ['FL-ROUTE-HISTORY-1', 'FL-ROUTE-HISTORY-2', '虚构渠道-历史一', '虚构渠道-历史二', '虚构渠道-默认', '虚构渠道-旧安排']) expect(row.text()).not.toContain(value)
+    }
+    for (const value of ['虚构渠道-默认', '虚构渠道-旧安排']) expect(分区(page, 'fulfillment').text()).not.toContain(value)
+    const 履约行 = 表行(page, '.履约表')
+    expect(履约行).toHaveLength(4)
+    expect(履约行.map(row => row.get('strong').text())).toEqual(order.fulfillmentOrders.map(item => item.fulfillmentOrderNo))
+    for (const [no, suffix] of [['FL-ROUTE-HISTORY-1', '历史一'], ['FL-ROUTE-HISTORY-2', '历史二']] as const) {
+      const row = 指定行(page, '.履约表', no)
+      expect(row.text()).toContain('历史版本')
+      expect(row.text()).toContain('已终止')
+      expect(row.text()).not.toContain('已取消')
+      for (const value of Object.values(路由(suffix))) expect(row.text()).toContain(value)
+    }
+    const 标题 = 分区(page, 'fulfillment').findAll('h3').find(item => item.text().startsWith('履约单'))!
+    expect(标题.text()).toMatch(/4\s*张/)
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('审核前按包裹展示全部已保存仓渠，保存安排不会提前产生履约单', async () => {
+    const order = 测试订单()
+    order.processingStatus = '待审核'
+    order.manualShippingPlan = { id: 'PLAN-PREPARED', kind: '拆分发货', orderNos: [order.systemOrderNo], packages: [
+      { key: 'PACKAGE-A', route: 路由('准备一'), items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 1 }] },
+      { key: 'PACKAGE-B', route: 路由('准备二'), items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 1 }, { orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-B', quantity: 1 }] },
+    ], reason: '', updatedAt: '2026-10-21T20:00:00+08:00' }
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(表行(page, '.待审核包裹表')).toHaveLength(2)
+    for (const [包裹, 后缀] of [['包裹 1', '准备一'], ['包裹 2', '准备二']]) {
+      const row = 指定行(page, '.待审核包裹表', 包裹!)
+      for (const value of Object.values(路由(后缀!))) expect(row.text()).toContain(value)
+    }
+    expect(page.get('.待审核包裹表').text()).not.toContain('虚构渠道-默认')
+    expect(page.find('.履约表').exists()).toBe(false)
+    expect(order.fulfillmentOrders).toHaveLength(0)
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('已有发货安排但包裹缺失时显示待核对空态，不以默认路由冒充当前', async () => {
+    const order = 测试订单()
+    order.processingStatus = '待审核'
+    order.manualShippingPlan = { id: 'PLAN-MISSING-PACKAGES', kind: '拆分发货', orderNos: [order.systemOrderNo], packages: [], reason: '', updatedAt: '2026-10-21T20:00:00+08:00' }
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(表行(page, '.待审核包裹表')).toHaveLength(0)
+    expect(page.get('.待审核包裹表').text()).toContain('暂无包裹商品，请核对发货安排')
+    expect(分区(page, 'fulfillment').text()).not.toContain('虚构渠道-默认')
+    expect(page.find('.原保存路由').exists()).toBe(false)
+    expect(page.find('.履约表').exists()).toBe(false)
+    expect(order.fulfillmentOrders).toHaveLength(0)
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('未审核拆分撤销后保留原历史履约，只有无实际履约时才在空态展示订单保存路由', async () => {
+    const order = 测试订单()
+    order.processingStatus = '待审核'
+    order.fulfillmentOrders = [{ fulfillmentOrderNo: 'FL-PREVIOUS-HISTORY', isActive: false, status: '已终止', route: 路由('旧履约'), plannedQuantity: 2, shippedQuantity: 0 }]
+    order.manualShippingPlan = { id: 'PLAN-TO-REVOKE', kind: '拆分发货', orderNos: [order.systemOrderNo], packages: [{ key: 'PACKAGE-TO-REVOKE', route: 路由('待撤销'), items: [{ orderNo: order.systemOrderNo, externalLineId: 'DEMO-LINE-A', quantity: 2 }] }], reason: '', updatedAt: '2026-10-21T20:00:00+08:00' }
+    const page = await 打开(order)
+    expect(page.get('.待审核包裹表').text()).toContain('虚构渠道-待撤销')
+    const 撤销后 = { ...order, manualShippingPlan: undefined }
+    const 原事实 = JSON.stringify(撤销后)
+    await page.setProps({ order: 撤销后 }); await 稳定()
+    expect(page.find('.当前路由表').exists()).toBe(false)
+    expect(page.find('.待审核包裹表').exists()).toBe(false)
+    expect(分区(page, 'fulfillment').text()).not.toContain('虚构渠道-默认')
+    expect(表行(page, '.履约表')).toHaveLength(1)
+    expect(指定行(page, '.履约表', 'FL-PREVIOUS-HISTORY').text()).toContain('历史版本')
+    expect(分区(page, 'fulfillment').text()).not.toContain('虚构渠道-待撤销')
+    expect(JSON.stringify(撤销后)).toBe(原事实)
+    const 无历史订单 = { ...撤销后, fulfillmentOrders: [] }
+    const 无历史原事实 = JSON.stringify(无历史订单)
+    await page.setProps({ order: 无历史订单 }); await 稳定()
+    expect(表行(page, '.履约表')).toHaveLength(0)
+    expect(page.get('.履约表').text()).toContain('尚未创建履约单')
+    expect(page.get('.履约表').text()).toContain('订单保存的仓储物流')
+    expect(字段值(page.get('.履约表'), '物流渠道')).toBe('虚构渠道-默认')
+    expect(page.get('.履约表').text()).not.toContain('FL-PREVIOUS-HISTORY')
+    expect(JSON.stringify(无历史订单)).toBe(无历史原事实)
+  })
+
+  it('当前履约的路由缺失不使用订单默认值或历史快照补齐', async () => {
+    const order = 测试订单()
+    order.fulfillmentOrders = [
+      { fulfillmentOrderNo: 'FL-EMPTY-ROUTE', isActive: true, status: '待执行', route: { ...路由('空字段'), warehouse: '', shippingChannel: '', shippingChannelCode: '' }, plannedQuantity: 1, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'FL-MISSING-ROUTE', isActive: true, status: '待执行', route: undefined as unknown as 订单路由, plannedQuantity: 1, shippedQuantity: 0 },
+    ]
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(表行(page, '.履约表')).toHaveLength(2)
+    for (const no of ['FL-EMPTY-ROUTE', 'FL-MISSING-ROUTE']) {
+      const row = 指定行(page, '.履约表', no)
+      expect(row.text()).toContain('—')
+      for (const value of ['虚构仓库-默认', '虚构渠道-默认', 'DEMO-CHANNEL-默认']) expect(row.text()).not.toContain(value)
+    }
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('同仓不同渠道仍逐包显示，不按仓库名称折成一行', async () => {
+    const order = 测试订单()
+    const 同仓 = 路由('同仓')
+    order.fulfillmentOrders = [
+      { fulfillmentOrderNo: 'FL-SAME-WAREHOUSE-A', isActive: true, status: '待执行', route: { ...同仓, shippingChannel: '虚构渠道-A', shippingChannelCode: 'DEMO-CHANNEL-A' }, plannedQuantity: 1, shippedQuantity: 0 },
+      { fulfillmentOrderNo: 'FL-SAME-WAREHOUSE-B', isActive: true, status: '待执行', route: { ...同仓, shippingChannel: '虚构渠道-B', shippingChannelCode: 'DEMO-CHANNEL-B' }, plannedQuantity: 2, shippedQuantity: 0 },
+    ]
+    const page = await 打开(order)
+    expect(表行(page, '.履约表')).toHaveLength(2)
+    expect(指定行(page, '.履约表', 'FL-SAME-WAREHOUSE-A').text()).toContain('虚构渠道-A')
+    expect(指定行(page, '.履约表', 'FL-SAME-WAREHOUSE-B').text()).toContain('虚构渠道-B')
+  })
+
+  it('平台履约不以自配送计算概览或展示订单默认路线，即使保留了路由数据', async () => {
+    const order = 测试订单()
+    order.fulfillmentMode = '平台履约'
+    order.processingStatus = undefined
+    order.fulfillmentOrders = [{ fulfillmentOrderNo: 'FL-NOT-SELF-FULFILLED', isActive: true, status: '待执行', route: 路由('不适用'), plannedQuantity: 2, shippedQuantity: 0 }]
+    const 原事实 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(page.find('.当前路由表').exists()).toBe(false)
+    expect(分区(page, 'fulfillment').text()).toContain('平台负责仓储与配送')
+    expect(字段值(page.get('.履约概览'), '当前履约单数量')).toBe('不适用')
+    expect(字段值(page.get('.履约概览'), '已发货进度')).toBe('不适用')
+    expect(分区(page, 'fulfillment').text()).not.toContain('虚构渠道-默认')
+    expect(JSON.stringify(order)).toBe(原事实)
+  })
+
+  it('发货安排默认展示操作原因，未填写时显示空值且不影响来源日志', async () => {
+    const order = 测试订单()
+    order.manualShippingPlan = { id: 'DEMO-MERGE-REASON', kind: '合并发货', orderNos: [order.systemOrderNo, 'OMS-DETAIL-TEST-B'], packages: [], reason: '买家申请同包寄送', updatedAt: '2026-10-21T20:00:00+08:00' }
+    order.operationLogs = [{ operatedAt: '2026-10-21T20:00:00+08:00', operator: '演示操作员', operationType: '合并发货', operationResult: '成功', content: '原因：买家申请同包寄送' }]
+    const page = await 打开(order)
+    expect(page.get('.原因预览').text()).toContain('买家申请同包寄送')
+    expect(分区(page, 'logs').text()).toContain('原因：买家申请同包寄送')
+    await page.setProps({ order: { ...order, manualShippingPlan: { ...order.manualShippingPlan, reason: '' } } })
+    expect(page.get('.原因预览').text()).toContain('—')
+    expect(分区(page, 'logs').text()).toContain('原因：买家申请同包寄送')
+  })
+
   it('多商品 eBay 标题分别链接当前行，切换其他平台后不保留 eBay 外链', async () => {
     const order = 测试订单()
     order.items[0]!.platformItemId = '0011112222333'
@@ -136,10 +403,11 @@ describe('订单完整详情的业务事实展示', () => {
     共享标发单.value = [confirmation, { ...confirmation, no: 'CF-DETAIL-OTHER', orderNo: other.systemOrderNo, status: '标发成功', pendingVerification: false }]
     const page = await 打开(order)
     expect(page.get('.头部状态').text()).toContain('已发货')
-    for (const suffix of ['默认', '当前', '历史']) {
+    for (const suffix of ['当前', '历史']) {
       const section = 分区(page, 'fulfillment').text()
       for (const value of Object.values(路由(suffix))) expect(section).toContain(value)
     }
+    expect(分区(page, 'fulfillment').text()).not.toContain('虚构渠道-默认')
     expect(表行(page, '.履约表')).toHaveLength(2)
     expect(指定行(page, '.履约表', 'FL-DETAIL-HISTORY').text()).toContain('历史版本')
     expect(表行(page, '.仓库执行表')).toHaveLength(2)

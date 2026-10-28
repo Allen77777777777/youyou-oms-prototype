@@ -4,6 +4,8 @@ import type { 全渠道订单, 订单路由 } from '../全渠道订单/类型'
 import { 创建订单标志演示 } from './订单标志演示'
 import { 创建操作演示 } from './操作演示数据'
 import { 创建推单出库快照, type 出库快照 } from '../仓配管理/三方仓出库模型'
+import { 创建已发货详情演示 } from './已发货详情演示'
+import { 创建拆单重拆详情演示 } from './拆单重拆详情演示'
 
 // 所有写操作只在本次浏览器会话内演示；订单详情与作业工作台引用同一主事实。
 export const 演示路由: 订单路由[] = [
@@ -72,11 +74,14 @@ const 标发样例 = [1, 2, 3, 4, 5, 6].map((序号) => {
   return 订单
 })
 const 操作样例 = 创建操作演示(创建作业样例)
+export const 已发货详情样例 = 创建已发货详情演示(创建作业样例, 演示路由)
 export const 操作核查证据 = ref(操作样例.证据)
 export const 共享订单 = ref<全渠道订单[]>([
   ...structuredClone(全渠道订单模拟数据), ...待审样例, ...推单样例, 取消中样例, 系统外样例, 部分履约待审样例, ...标发样例,
   ...创建订单标志演示(创建作业样例),
   ...操作样例.订单,
+  ...已发货详情样例.订单,
+  创建拆单重拆详情演示(创建作业样例, 演示路由),
 ])
 
 export interface 仓库执行 {
@@ -97,9 +102,10 @@ export const 仓库执行记录 = ref<仓库执行[]>(共享订单.value.flatMap
   .filter((履约) => 履约.isActive && ['执行中', '已发货'].includes(履约.status))
   .map((履约) => ({ 履约单号: 履约.fulfillmentOrderNo, 订单号: [订单.systemOrderNo], 出库单号: `OUT-${履约.fulfillmentOrderNo}`, 三方仓出库单号: `WH-DEMO-${履约.fulfillmentOrderNo}`, 状态: 履约.status === '已发货' ? '已出库' as const : '待出库' as const, 待核查: false, 原因: 履约.shippedQuantity > 0 && 履约.shippedQuantity < 履约.plannedQuantity ? '已部分出库；剩余范围暂停，状态及恢复规则待确认。' : '', 更新时间: 履约.fulfillmentOrderNo === 'FL-DEMO-FLAG-08' ? '2026-09-12 09:35:00 UTC+8' : '2026-09-12 09:00:00 UTC+8' }))))
 仓库执行记录.value.push({ 履约单号: 'FL-DEMO-260912-7', 订单号: [推单样例[1]!.systemOrderNo], 出库单号: 'OUT-DEMO-260912-7', 状态: '下单失败', 待核查: false, 原因: '仓库明确拒绝：当前账号未开通所选渠道。修复账号与渠道配置后再重试。', 更新时间: '2026-09-12 09:08:00 UTC+8' }, { 履约单号: 'FL-DEMO-260912-8', 订单号: [推单样例[2]!.systemOrderNo], 出库单号: 'OUT-DEMO-260912-8', 状态: '下单中', 待核查: true, 原因: '请求超时，仓库是否已建单尚待核查；不可重复推仓。', 更新时间: '2026-09-12 09:09:00 UTC+8' })
-仓库执行记录.value = 仓库执行记录.value.filter(项 => !项.履约单号.startsWith('FL-DEMO-OP-') && !项.履约单号.startsWith('FL-DEMO-ACTION-'))
+仓库执行记录.value = 仓库执行记录.value.filter(项 => !项.履约单号.startsWith('FL-DEMO-OP-') && !项.履约单号.startsWith('FL-DEMO-ACTION-') && !项.履约单号.startsWith('FL-DEMO-DETAIL-'))
 仓库执行记录.value.push(...操作样例.执行)
-export const 预置仓库评审执行身份: readonly string[] = Object.freeze(仓库执行记录.value.map(执行 => JSON.stringify([执行.出库单号, 执行.履约单号])))
+仓库执行记录.value.push(...已发货详情样例.执行)
+export const 预置仓库评审执行身份: readonly string[] = Object.freeze(仓库执行记录.value.filter(执行 => !执行.履约单号.startsWith('FL-DEMO-DETAIL-')).map(执行 => JSON.stringify([执行.出库单号, 执行.履约单号])))
 
 // 既有固定虚构样例的数量来自初始化时明确给定的履约摘要；只认领唯一出库路径一次。
 // 后续履约改路由、改组成或出现另一历史仓单，不覆盖该出库对象的原有事实。

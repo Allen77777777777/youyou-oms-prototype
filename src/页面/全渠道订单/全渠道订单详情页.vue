@@ -5,6 +5,8 @@ import { CopyDocument, InfoFilled, Lock, WarningFilled } from '@element-plus/ico
 import { ElButton, ElIcon, ElMessage, ElTable, ElTableColumn, ElTooltip } from 'element-plus'
 import type { 原型标注 } from '@/类型/标注'
 import OrderFlags from '../订单处理/订单标志组件.vue'
+import FulfillmentProducts from './履约商品明细.vue'
+import { 读取分配商品 } from './履约商品展示'
 import { 订单金额字段 } from './订单金额字段'
 import AmountFieldHelp from './金额字段帮助.vue'
 import OrderNotes from '../订单处理/订单备注组件.vue'
@@ -43,6 +45,12 @@ const 当前标志 = computed(() => 计算订单标志(props.order, 订单标志
 const 仓库执行 = computed(() => 订单关联仓库执行(props.order))
 const 标发记录 = computed(() => 共享标发单.value.filter(单 => 单.orderNo === props.order.systemOrderNo))
 const 库存作业 = computed<作业行>(() => ({ key: props.order.systemOrderNo, order: props.order, stage: props.order.processingStatus ?? '待审核' }))
+const 当前履约 = computed(() => props.order.fulfillmentOrders.filter(单 => 单.isActive === true))
+const 发货方式 = computed(() => [props.order.fulfillmentMode, props.order.fulfillmentMode === '自配送' ? props.order.manualShippingPlan?.kind : undefined].filter(Boolean).join(' · '))
+const 已发货进度 = computed(() => props.order.fulfillmentMode !== '自配送' ? '不适用' : 当前履约.value.length ? `${当前履约.value.filter(单 => 单.status === '已发货').length} / ${当前履约.value.length} 张` : '尚未生成履约单')
+const 履约展示列表 = computed(() => props.order.fulfillmentOrders.map(单 => ({ ...单, 商品: 读取分配商品(单.items, props.order, 共享订单.value) })))
+const 显示待审核包裹 = computed(() => props.order.fulfillmentMode === '自配送' && !当前履约.value.length && Boolean(props.order.manualShippingPlan))
+const 待审核包裹 = computed(() => 显示待审核包裹.value ? (props.order.manualShippingPlan?.packages ?? []).map((包裹, index) => ({ key: 包裹.key, label: `包裹 ${index + 1}`, route: 包裹.route, 来源: [...new Set(包裹.items.map(项 => 项.orderNo))], 商品: 读取分配商品(包裹.items, props.order, 共享订单.value) })) : [])
 const 字段 = (label: string, value?: string, wide = false) => ({ label, value: value?.trim() || '—', wide })
 const 基础字段 = computed(() => [
   字段('系统订单号', props.order.systemOrderNo), 字段('平台订单号', props.order.platformOrderNo),
@@ -75,7 +83,7 @@ function 路由字段(路由?: 订单路由) {
     字段('物流渠道', 路由?.shippingChannel), 字段('渠道代码', 路由?.shippingChannelCode), 字段('面单获取模式', 路由?.labelMode)]
 }
 function 履约来源(编号: string) {
-  return [...new Set([props.order.systemOrderNo, ...共享订单.value.filter(单 => 单.fulfillmentOrders.some(履约 => 履约.fulfillmentOrderNo === 编号)).map(单 => 单.systemOrderNo)])]
+  return [...new Set([props.order.systemOrderNo, ...(props.order.fulfillmentOrders.find(单 => 单.fulfillmentOrderNo === 编号)?.items?.map(项 => 项.orderNo).filter(Boolean) ?? []), ...共享订单.value.filter(单 => 单.fulfillmentOrders.some(履约 => 履约.fulfillmentOrderNo === 编号)).map(单 => 单.systemOrderNo)])]
 }
 function 跳转分区(id: string) {
   const 目标 = 页面.value?.querySelector<HTMLElement>('[data-section="' + id + '"]')
@@ -120,7 +128,8 @@ const 详情标注 = 标注('oms.all-order.detail', '订单完整详情与分区
 const 状态标注 = 标注('oms.all-order.detail.statuses', '平台状态与 OMS 状态分离', '平台订单状态、OMS 六态、仓库状态、标发状态各自展示；不以其中任一状态推算或覆盖另一状态。', '已确认', ['PRD/订单单据字段标准.md#61-订单头-oms_order'])
 const 金额标注 = 标注('oms.all-order.detail.amount', '订单金额字段释义', '六项订单金额及页头总金额旁的小问号以《订单单据字段标准》第 6.4 节为依据，面向业务用户解释定义、费用范围及空值／零值，与订单处理列表共用文案。', '已确认', ['PRD/订单单据字段标准.md#64-订单金额明细-oms_order_amount'], ['悬停、聚焦或点击显示业务释义，不展示研发备注或 PRD 来源，Esc 关闭；不依赖原型标注开关，不修改金额或触发订单操作。'])
 const 商品标注 = 标注('oms.all-order.detail.items', '全部商品行与金额', '逐行展示图片、来源行和商品 ID、平台 SKU 与规格、系统 SKU 与品名、映射结果、下单及可履约数量、单价、行金额和商品实收金额。缺失不按单价乘数量补造实收，零值保留；不分摊共享履约金额。', '合理假设', 本轮引用)
-const 路由标注 = 标注('oms.all-order.detail.routing', '履约路由与全部关联执行', '订单保存路由与每张履约执行快照分别展示。包括历史履约与所有稳定关联仓单、标发单；共享单据数量标为整张单据，不作为本订单实际量、不分摊、不从状态反推数量。仓库库存沿用只读来源明细。', '合理假设', 本轮引用)
+const 路由标注 = 标注('oms.all-order.detail.routing', '履约概览与履约单', '用户明确两组为顶部概览和履约单，删除重复的当前仓库与渠道分组；商品信息与仓储物流均在对应履约内展示。关联仓库出库单新增履约单／来源列，拆开首列堆叠的信息。', '合理假设', [...本轮引用, 'PRD/全渠道订单功能PRD.md#24-2026-10-28-履约商品并表与顶部概览'], ['仓储物流读取各履约自己的快照，不跨来源补值；待审核包裹在同表显示各自路由。无履约无方案时仅在空态保留明确标识的订单保存值。进度只统计当前有效履约中已发货的张数，历史不计入，不靠跟踪号或平台状态推算。', '履约商品只读取该履约的明确来源订单及商品行分配；保留计划数量和合并单逐来源归属。缺分配显示待核实，不借当前方案或整单商品重建历史。', '尚无有效履约时，已保存包裹的商品在待审核包裹表显示，不生成履约号。操作原因保留；原历史排序、状态、数量、仓单和标发记录及跳转保持，库存仍为原有只读入口。'])
+路由标注.版本 = '2026-10-28'
 const 敏感信息标注 = 标注('oms.all-order.detail.masked-address', '完整收件信息默认脱敏', '原型仅用虚构脱敏信息；公司、县区、地址两行、手机、电话、邮箱和买家留言分别展示。明文权限、原因及审计待评审。', '待确认', ['PRD/订单单据字段标准.md#63-收件信息-oms_order_address', ...本轮引用])
 const 日志标注 = 标注('oms.all-order.detail.operation-logs', '订单操作日志', '只展示已有操作时间、操作者、类型、结果及内容；无记录显示空态，不将审核轮次改名充当操作日志，不单独恢复审核记录分区。', '已确认', ['PRD/全渠道订单功能PRD.md#19-2026-09-14-详情页评审调整'])
 const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间口径', '已有时间按明确来源时区转为北京时间至秒；缺失显示—，无时区或非法时间显示时间待核实，悬停保留原值。同步与操作日志独立展示，不直接铺开原始报文。', '合理假设', 本轮引用)
@@ -164,18 +173,32 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
       </section>
 
       <section data-section="fulfillment" v-prototype="路由标注" class="详情分区"><div class="分区标题"><h2>履约与物流</h2><ElButton v-if="order.fulfillmentMode === '自配送'" link type="primary" @click="库存打开 = true">查看仓库库存</ElButton><span v-else>平台履约</span></div>
-        <dl class="字段网格 路由网格"><div v-for="项 in 路由字段(order.defaultRoute)" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl>
+        <dl class="履约概览"><div><dt>发货方式</dt><dd>{{ 发货方式 }}</dd></div><div><dt>当前履约单数量</dt><dd>{{ order.fulfillmentMode === '自配送' ? `${当前履约.length} 张` : '不适用' }}</dd></div><div><dt>已发货进度</dt><dd>{{ 已发货进度 }}</dd></div></dl>
         <p v-if="order.fulfillmentMode === '平台履约'" class="空态">平台负责仓储与配送，OMS 自配送履约链路不适用。</p>
-        <h3 class="子标题">履约单 <span>{{ order.fulfillmentOrders.length }} 张</span></h3>
-        <ElTable :data="order.fulfillmentOrders" row-key="fulfillmentOrderNo" class="明细表 履约表" table-layout="fixed" empty-text="尚未创建履约单">
-          <ElTableColumn label="履约单 / 范围" min-width="218"><template #default="{ row }"><div class="复合信息"><strong class="等宽">{{ row.fulfillmentOrderNo }}</strong><div class="内联状态"><b class="状态徽标" :class="row.isActive ? 'tone-info' : 'tone-neutral'">{{ row.status }}</b><span>{{ row.isActive ? '当前有效' : '历史版本' }}</span></div><span v-if="履约来源(row.fulfillmentOrderNo).length > 1" class="范围提示">共享履约 · 以下数量为整张履约单</span><span v-for="来源 in 履约来源(row.fulfillmentOrderNo)" :key="来源" class="等宽">来源：{{ 来源 }}</span></div></template></ElTableColumn>
-          <ElTableColumn label="本次仓储物流" min-width="280"><template #default="{ row }"><dl class="单元字段"><div v-for="项 in 路由字段(row.route)" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></template></ElTableColumn>
-          <ElTableColumn label="履约数量" width="114" align="right"><template #default="{ row }"><dl class="单元字段 数量金额"><div><dt>计划</dt><dd>{{ row.plannedQuantity ?? '—' }}</dd></div><div><dt>有效出库</dt><dd>{{ row.shippedQuantity ?? '—' }}</dd></div></dl></template></ElTableColumn>
-          <ElTableColumn label="发货信息" min-width="210"><template #default="{ row }"><dl class="单元字段 垂直字段"><div><dt>跟踪号</dt><dd>{{ row.trackingNumber || '—' }}</dd></div><div><dt>实际出库时间</dt><dd :title="row.shippedAt">{{ 格式化北京时间(row.shippedAt) }}</dd></div></dl></template></ElTableColumn>
-        </ElTable>
+        <template v-if="显示待审核包裹">
+          <h3 class="子标题">待审核包裹 <span>{{ 待审核包裹.length }} 个 · 尚未生成当前履约单</span></h3>
+          <ElTable :data="待审核包裹" row-key="key" class="明细表 待审核包裹表" table-layout="fixed" empty-text="暂无包裹商品，请核对发货安排">
+            <ElTableColumn label="包裹 / 范围" min-width="220"><template #default="{ row }"><div class="复合信息"><strong>{{ row.label }}</strong><b class="状态徽标 tone-info">待审核包裹</b><span v-for="来源 in row.来源" :key="来源" class="等宽">来源：{{ 来源 || '—' }}</span></div></template></ElTableColumn>
+            <ElTableColumn label="商品信息" min-width="300"><template #default="{ row }"><FulfillmentProducts :data="row.商品" :show-source="(order.manualShippingPlan?.orderNos.length ?? 0) > 1" /></template></ElTableColumn>
+            <ElTableColumn label="仓储物流" min-width="280"><template #default="{ row }"><dl class="单元字段"><div v-for="项 in 路由字段(row.route)" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></template></ElTableColumn>
+          </ElTable>
+        </template>
+        <template v-if="!显示待审核包裹 || order.fulfillmentOrders.length">
+          <h3 class="子标题">履约单 <span>{{ order.fulfillmentOrders.length }} 张</span></h3>
+          <ElTable :data="履约展示列表" row-key="fulfillmentOrderNo" class="明细表 履约表" table-layout="fixed" empty-text="尚未创建履约单">
+            <ElTableColumn label="履约单 / 范围" min-width="200"><template #default="{ row }"><div class="复合信息"><strong class="等宽">{{ row.fulfillmentOrderNo }}</strong><div class="内联状态"><b class="状态徽标" :class="row.isActive ? 'tone-info' : 'tone-neutral'">{{ row.status }}</b><span>{{ row.isActive ? '当前有效' : '历史版本' }}</span></div><span v-if="履约来源(row.fulfillmentOrderNo).length > 1" class="范围提示">共享履约 · 以下数量为整张履约单</span><span v-for="来源 in 履约来源(row.fulfillmentOrderNo)" :key="来源" class="等宽">来源：{{ 来源 }}</span></div></template></ElTableColumn>
+            <ElTableColumn label="商品信息" min-width="260"><template #default="{ row }"><FulfillmentProducts :data="row.商品" :show-source="履约来源(row.fulfillmentOrderNo).length > 1" /></template></ElTableColumn>
+            <ElTableColumn label="仓储物流" min-width="250"><template #default="{ row }"><dl class="单元字段"><div v-for="项 in 路由字段(row.route)" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></template></ElTableColumn>
+            <ElTableColumn label="履约数量" width="110" align="right"><template #default="{ row }"><dl class="单元字段 数量金额"><div><dt>计划</dt><dd>{{ row.plannedQuantity ?? '—' }}</dd></div><div><dt>有效出库</dt><dd>{{ row.shippedQuantity ?? '—' }}</dd></div></dl></template></ElTableColumn>
+            <ElTableColumn label="发货信息" min-width="210"><template #default="{ row }"><dl class="单元字段 垂直字段"><div><dt>跟踪号</dt><dd>{{ row.trackingNumber || '—' }}</dd></div><div><dt>实际出库时间</dt><dd :title="row.shippedAt">{{ 格式化北京时间(row.shippedAt) }}</dd></div></dl></template></ElTableColumn>
+            <template #empty><div class="履约空态"><p>尚未创建履约单</p><template v-if="order.fulfillmentMode === '自配送'"><span>订单保存的仓储物流</span><dl class="字段网格 路由网格"><div v-for="项 in 路由字段(order.defaultRoute)" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></template></div></template>
+          </ElTable>
+        </template>
+        <div v-if="order.manualShippingPlan && order.fulfillmentMode === '自配送'" class="原因预览"><span>操作原因</span><p>{{ order.manualShippingPlan.reason || '—' }}</p></div>
         <h3 class="子标题">关联仓库出库单 <span>{{ 仓库执行.length }} 张</span></h3>
         <ElTable :data="仓库执行" row-key="出库单号" class="明细表 仓库执行表" table-layout="fixed" empty-text="暂无关联仓库执行记录">
-          <ElTableColumn label="出库单 / 来源" min-width="270"><template #default="{ row }"><div class="复合信息"><strong class="等宽">{{ row.出库单号 }}</strong><dl class="单元字段 垂直字段"><div><dt>三方仓出库单号</dt><dd>{{ row.三方仓出库单号 || '—' }}</dd></div><div><dt>物流商单号</dt><dd>{{ row.externalLogisticsOrderNo || '—' }}</dd></div><div><dt>履约单号</dt><dd>{{ row.履约单号 }}</dd></div></dl><span v-for="来源 in row.订单号" :key="来源" class="等宽">来源：{{ 来源 }}</span><span v-if="row.订单号.length > 1" class="范围提示">共享仓单 · 数量为整张出库单</span><ElButton link type="primary" class="表内入口" @click="查看仓单(row.履约单号, row.出库单号)">查看仓库执行</ElButton></div></template></ElTableColumn>
+          <ElTableColumn label="出库单号" min-width="220"><template #default="{ row }"><div class="复合信息"><strong class="等宽">{{ row.出库单号 }}</strong><dl class="单元字段 垂直字段"><div><dt>三方仓出库单号</dt><dd>{{ row.三方仓出库单号 || '—' }}</dd></div><div><dt>物流商单号</dt><dd>{{ row.externalLogisticsOrderNo || '—' }}</dd></div></dl><ElButton link type="primary" class="表内入口" @click="查看仓单(row.履约单号, row.出库单号)">查看仓库执行</ElButton></div></template></ElTableColumn>
+          <ElTableColumn label="履约单 / 来源" min-width="220"><template #default="{ row }"><div class="复合信息"><strong class="等宽">{{ row.履约单号 }}</strong><span v-for="来源 in row.订单号" :key="来源" class="等宽">来源：{{ 来源 }}</span><span v-if="row.订单号.length > 1" class="范围提示">共享仓单 · 数量为整张出库单</span></div></template></ElTableColumn>
           <ElTableColumn label="仓库执行状态" min-width="145"><template #default="{ row }"><div class="复合信息"><b class="状态徽标" :class="row.待核查 || ['下单失败', '出库异常'].includes(row.状态) ? 'tone-warning' : row.状态 === '已出库' ? 'tone-success' : 'tone-info'">{{ row.状态 }}</b><span v-if="row.待核查" class="待核查字">外部结果待核查</span><span :title="row.更新时间">{{ 格式化北京时间(row.更新时间) }}</span></div></template></ElTableColumn>
           <ElTableColumn label="出库事实" min-width="190"><template #default="{ row }"><dl class="单元字段 垂直字段"><div><dt>整单计划 / 有效出库</dt><dd>{{ row.出库事实?.planned ?? '—' }} / {{ row.出库事实?.shipped ?? '—' }}</dd></div><div><dt>跟踪号</dt><dd>{{ row.出库事实?.tracking || '—' }}</dd></div><div><dt>实际出库时间</dt><dd :title="row.出库事实?.shippedAt">{{ 格式化北京时间(row.出库事实?.shippedAt ?? undefined) }}</dd></div></dl></template></ElTableColumn>
           <ElTableColumn label="处理原因 / 结果说明" min-width="240"><template #default="{ row }"><span class="完整正文">{{ row.原因 || '—' }}</span></template></ElTableColumn>

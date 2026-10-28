@@ -70,22 +70,23 @@ beforeEach(async () => {
 afterEach(async () => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; 恢复数据(); await 稳定(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('三方仓出库单的订单同源及操作交互', () => {
-  it('正常默认工作台仅14条完整CK样例，翻页覆盖全部，旧执行保留但查不到旧OUT评审投影', async () => {
+  it('正常默认工作台含14条完整CK样例及4条详情演示仓单，翻页覆盖全部，旧执行保留但查不到旧OUT评审投影', async () => {
     const page = await 打开()
-    expect(仓库会话单据.value).toHaveLength(14)
+    expect(仓库会话单据.value).toHaveLength(18)
     expect(仓库执行记录.value.some(execution => execution.出库单号 === 'OUT-DEMO-ACTION-12')).toBe(true)
-    expect(page.get('.出库分页').text()).toContain('共 14 单')
+    expect(page.get('.出库分页').text()).toContain('共 18 单')
     const numbers = 主行(page).map(row => row.get('.单号').text())
     expect(numbers).toHaveLength(10)
     await page.get('.出库分页 .btn-next').trigger('click'); await 稳定()
     numbers.push(...主行(page).map(row => row.get('.单号').text()))
-    expect(numbers).toHaveLength(14)
-    expect(new Set(numbers).size).toBe(14)
-    expect(numbers.every(no => /^CK261010\d{4}$/.test(no))).toBe(true)
+    expect(numbers).toHaveLength(18)
+    expect(new Set(numbers).size).toBe(18)
+    expect(numbers.filter(no => /^CK261010\d{4}$/.test(no))).toHaveLength(14)
+    expect(numbers.filter(no => no.startsWith('CK-DEMO-DETAIL-'))).toHaveLength(4)
     await 搜索(page, 'no', 'OUT-DEMO-ACTION-12')
     expect(主行(page)).toHaveLength(0)
     expect(page.get('.出库分页').text()).toContain('共 0 单')
-    expect(仓库会话单据.value).toHaveLength(14)
+    expect(仓库会话单据.value).toHaveLength(18)
   })
 
   it('重新推单只在全部和下单失败页签显示，截单仅在适用页签显示', async () => {

@@ -31,8 +31,8 @@ function 来源(no = 'OMS-TEST-OUTBOUND'): 全渠道订单 {
 }
 
 describe('三方仓出库快照及同源筛选', () => {
-  it('普通工作台基线仅含十四张完整CK单据，不混入旧操作评审投影', () => {
-    expect(截单基线.rows).toHaveLength(14)
+  it('普通工作台基线包含十四张完整CK单据及四张详情演示仓单，不混入旧操作评审投影', () => {
+    expect(截单基线.rows).toHaveLength(18)
     expect(截单基线.rows.every(row => row.no.startsWith('CK') && row.outboundDetail!.items.length > 0)).toBe(true)
     expect(截单基线.executions.some(item => item.出库单号.startsWith('OUT-'))).toBe(true)
   })

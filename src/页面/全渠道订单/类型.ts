@@ -105,6 +105,9 @@ export interface 履约单摘要 {
   shippedQuantity: number
   trackingNumber?: string
   shippedAt?: string
+  /** 整个包裹的来源行快照；共享履约的各来源摘要保存同一份组成。 */
+  items?: 人工发货分配[]
+  manualPlanId?: string
 }
 
 export interface 审核记录 {

@@ -1,0 +1,41 @@
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1849 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                          0.48 kB │ gzip:   0.33 kB
+dist/assets/优优侧栏标识-m0KTBP9H.png         12.62 kB
+dist/assets/旗舰手机商品占位-概念图-BqeHoJoS.png  109.07 kB
+dist/assets/收件信息摘要-DDRzZARH.css          0.38 kB │ gzip:   0.27 kB
+dist/assets/三方仓库龄页面-2bdvU2Is.css         5.17 kB │ gzip:   1.37 kB
+dist/assets/三方仓库存页面-BsSCF0NB.css         5.67 kB │ gzip:   1.50 kB
+dist/assets/订单标发页面-C1Rj-RzM.css          6.59 kB │ gzip:   1.81 kB
+dist/assets/物流下单页面-DPygp90u.css          9.42 kB │ gzip:   2.33 kB
+dist/assets/物流渠道管理页面-DmEMCfQr.css       10.06 kB │ gzip:   2.65 kB
+dist/assets/三方仓出库单页面-BjkMs30p.css       11.20 kB │ gzip:   2.69 kB
+dist/assets/订单规则页面-qpo6Q4ac.css         14.72 kB │ gzip:   3.32 kB
+dist/assets/规则编辑页面-BoR9JScw.css         25.61 kB │ gzip:   4.85 kB
+dist/assets/订单处理页面-DsrMwLkV.css         31.28 kB │ gzip:   6.42 kB
+dist/assets/index-Ctn9N-BZ.css         440.00 kB │ gzip:  63.25 kB
+dist/assets/收件信息摘要-DWX1vShA.js           1.59 kB │ gzip:   0.81 kB
+dist/assets/index-DtAzcWWU.js            2.06 kB │ gzip:   0.91 kB
+dist/assets/index-9gumP3sY.js            4.99 kB │ gzip:   1.74 kB
+dist/assets/index-eZeDn_Wl.js           12.35 kB │ gzip:   5.16 kB
+dist/assets/仓配会话-mZJoFxoW.js            15.68 kB │ gzip:   6.54 kB
+dist/assets/三方仓库存页面-C4BEGVa-.js         23.39 kB │ gzip:   9.13 kB
+dist/assets/三方仓库龄页面-CrI1dZk1.js         28.78 kB │ gzip:  11.19 kB
+dist/assets/订单规则页面-DiW8dOez.js          35.04 kB │ gzip:  12.87 kB
+dist/assets/物流下单页面-E-nyqeaA.js          35.11 kB │ gzip:  13.18 kB
+dist/assets/订单标发页面-CCH2O0ul.js          51.26 kB │ gzip:  16.86 kB
+dist/assets/规则编辑页面-rkzcgvot.js          59.97 kB │ gzip:  18.82 kB
+dist/assets/三方仓出库单页面-CCJxniMq.js        71.38 kB │ gzip:  23.04 kB
+dist/assets/物流渠道管理页面-CsBfGqz5.js        78.81 kB │ gzip:  27.68 kB
+dist/assets/规则编辑会话-BZnShTfL.js          96.84 kB │ gzip:  36.40 kB
+dist/assets/订单处理页面-DkZWcIWM.js         108.78 kB │ gzip:  34.97 kB
+dist/assets/index-BzOTCdGo.js          998.86 kB │ gzip: 328.74 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 11.85s
