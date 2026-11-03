@@ -1,0 +1,22 @@
+✓ Lockfile passes supply-chain policies (verified 12d ago)
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +162
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: D:\.pnpm-store\v11
+  Virtual store is at:             ../../原型/node_modules/.pnpm
+Progress: resolved 162, reused 161, downloaded 0, added 12
+Progress: resolved 162, reused 161, downloaded 0, added 91
+Progress: resolved 162, reused 162, downloaded 0, added 136
+Progress: resolved 162, reused 162, downloaded 0, added 155
+Progress: resolved 162, reused 162, downloaded 0, added 159
+Progress: resolved 162, reused 162, downloaded 0, added 160
+Progress: resolved 162, reused 162, downloaded 0, added 161
+Progress: resolved 162, reused 162, downloaded 0, added 162
+Progress: resolved 162, reused 162, downloaded 0, added 162, done
+.../esbuild@0.28.2/node_modules/esbuild postinstall$ node install.js
+.../esbuild@0.28.2/node_modules/esbuild postinstall: Done
+
+Done in 32.4s using pnpm v11.25.0
+$ vue-tsc -b

@@ -351,7 +351,7 @@ export function 推单阻断原因(订单: 全渠道订单, 履约单号: string
   return [...new Set(原因)]
 }
 
-export function 执行演示推单(订单号: string, 履约单号: string, 期望版本: number, 来源版本?: Record<string, number>): 命令结果 {
+export function 执行演示推单(订单号: string, 履约单号: string, 期望版本: number, 来源版本?: Record<string, number>, 操作人 = '演示操作员'): 命令结果 {
   const 订单 = 共享订单.value.find((项) => 项.systemOrderNo === 订单号)
   if (!订单 || 当前版本(订单号) !== 期望版本) return { 成功: false, 信息: '对象已变化，请刷新后重新预检' }
   const 来源 = 共享订单.value.filter(项 => 项.fulfillmentOrders.some(路径 => 路径.fulfillmentOrderNo === 履约单号))
@@ -362,7 +362,7 @@ export function 执行演示推单(订单号: string, 履约单号: string, 期�
   const 提交时间 = 演示时间()
   const 出库快照 = 创建推单出库快照(来源, 履约单号, 提交时间)
   仓库执行记录.value.push({ 履约单号, 订单号: 来源.map(项 => 项.systemOrderNo), 出库单号, 状态: '下单中', 待核查: true, 原因: '演示请求已受理，等待读取仓库结果；提交受理不代表建仓成功。', 更新时间: 提交时间, 出库快照, 出库事实: { planned: 出库快照.quantitySummary.plannedQuantity, shipped: 0, tracking: null, shippedAt: null } })
-  for (const 单 of 来源) 记录操作(单, '提交仓库', `创建 ${出库单号}；全部来源：${来源.map(项 => 项.systemOrderNo).join('、')}；状态为下单中，订单保持待推单。演示不调用外部接口。`)
+  for (const 单 of 来源) 记录操作(单, '提交仓库', `创建 ${出库单号}；全部来源：${来源.map(项 => 项.systemOrderNo).join('、')}；状态为下单中，订单保持待推单。演示不调用外部接口。`, true, 操作人)
   return { 成功: true, 信息: '推单已受理，订单保持待推单；请同步仓库状态查看结果。', 对象号: 出库单号, 待核查: true }
 }
 

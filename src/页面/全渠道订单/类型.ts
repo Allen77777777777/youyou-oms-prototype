@@ -99,6 +99,8 @@ export interface 人工发货方案 {
 }
 
 export interface 履约单摘要 {
+  /** 本地自动化隔离：异常恢复的路径交人工推单，重新审核新建履约后不继承。 */
+  autoPushHold?: boolean
   fulfillmentOrderNo: string
   status: '待执行' | '执行中' | '已发货' | '已终止'
   isActive: boolean

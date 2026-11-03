@@ -1,0 +1,23 @@
+$ vitest run "src/页面/业务配置" "src/页面/订单处理/操作功能模型.spec.ts" "src/页面/订单处理/拆合发货联动.spec.ts" "src/页面/手工订单" "--maxWorkers=1"
+
+ RUN  v3.2.7 D:/优优电商/.本轮工作/GitHub同步2026-11-03-自动推单固定副本
+
+ ✓ src/页面/手工订单/模型.spec.ts (9 tests) 318ms
+ ✓ src/页面/手工订单/手工订单页面.spec.ts (4 tests) 6079ms
+   ✓ 手工订单直接建单页面 > 入口直接显示表单，不含列表、队列或新建弹窗，未提交不生成订单  1705ms
+   ✓ 手工订单直接建单页面 > 缺失信息阻断创建、保留当前输入并展示具体错误  1170ms
+   ✓ 手工订单直接建单页面 > 离开后重新进入页面保留未提交草稿，清空须确认  1854ms
+   ✓ 手工订单直接建单页面 > 成功仅创建一张待审核共享订单并自动精确跳转，清理草稿  1344ms
+ ✓ src/页面/订单处理/操作功能模型.spec.ts (37 tests) 293ms
+ ✓ src/页面/订单处理/拆合发货联动.spec.ts (8 tests) 97ms
+ ✓ src/页面/业务配置/业务配置页面.spec.ts (4 tests) 642ms
+   ✓ 业务配置与规则执行设置 > 默认关闭并使用两小时间隔，取消编辑保留生效值  353ms
+ ✓ src/页面/业务配置/自动推单.spec.ts (7 tests) 592ms
+   ✓ 自动推单配置与执行 > 保存星期集合与频率，取消不改生效配置，导航切换保留独立草稿  440ms
+ ✓ src/页面/业务配置/循环审单.spec.ts (2 tests) 148ms
+
+ Test Files  7 passed (7)
+      Tests  71 passed (71)
+   Start at  17:15:40
+   Duration  52.43s (transform 5.50s, setup 0ms, collect 31.94s, tests 8.17s, environment 7.64s, prepare 1.48s)
+

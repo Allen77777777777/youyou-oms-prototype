@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { Clock, EditPen, Setting } from '@element-plus/icons-vue'
 import { ElButton, ElIcon, ElInputNumber, ElMessage, ElSwitch, ElTag } from 'element-plus'
 import type { 原型标注 } from '@/类型/标注'
 import { 共享审单执行设置 as settings, 保存审单执行设置 } from './规则执行设置'
+import PushSettingsPanel from './自动推单设置面板.vue'
 
+const section = ref<'review' | 'push'>('review')
 const editing = ref(false)
 const draftEnabled = ref(false)
 const draftHours = ref<number | undefined>(2)
 const error = ref('')
 const settingsHeading = ref<HTMLElement>()
 
-function openRuleSettings() {
+async function openRuleSettings() {
+  section.value = 'review'
+  await nextTick()
   settingsHeading.value?.scrollIntoView?.({ block: 'start' })
   settingsHeading.value?.focus({ preventScroll: true })
 }
@@ -54,8 +58,9 @@ const navigationAnnotation: 原型标注 = {
   标题: '业务配置左侧导航',
   分类: '交互',
   事实等级: '已确认',
-  说明: '业务配置采用左侧页内导航、右侧配置内容的布局，当前开放规则执行设置。',
-  交互规则: ['规则执行设置默认高亮，点击定位右侧内容。重复选择保留当前编辑草稿，保存或取消仍由配置表单处理。'],
+  版本: '0.3',
+  说明: '左侧提供规则执行设置、自动推单设置，分别维护审单与推仓任务。',
+  交互规则: ['规则执行设置默认高亮。切换或重复选择保留各自未保存草稿，只有保存使设置生效。'],
 }
 </script>
 
@@ -64,13 +69,17 @@ const navigationAnnotation: 原型标注 = {
     <header class="page-heading"><h1>业务配置</h1></header>
     <div class="settings-layout">
       <nav v-prototype="navigationAnnotation" class="settings-navigation" aria-label="业务配置导航">
-        <button type="button" class="navigation-item active" aria-current="page"
+        <button type="button" class="navigation-item" :class="{ active: section === 'review' }" :aria-current="section === 'review' ? 'page' : undefined"
           aria-controls="rule-execution-settings" @click="openRuleSettings">
           <ElIcon :size="17"><Setting /></ElIcon>
           <span>规则执行设置</span>
         </button>
+        <button type="button" class="navigation-item" :class="{ active: section === 'push' }"
+          :aria-current="section === 'push' ? 'page' : undefined" aria-controls="auto-push-settings" @click="section = 'push'">
+          <ElIcon :size="17"><Clock /></ElIcon><span>自动推单设置</span>
+        </button>
       </nav>
-      <div class="settings-body">
+      <div v-show="section === 'review'" class="settings-body">
         <h2 id="rule-execution-settings" ref="settingsHeading" tabindex="-1">规则执行设置</h2>
         <section v-prototype="annotation" class="settings-panel" aria-labelledby="review-schedule-title">
           <header class="panel-heading">
@@ -111,6 +120,7 @@ const navigationAnnotation: 原型标注 = {
         </section>
         <p class="schedule-tip">需要立即检查时，可在「订单处理 → 待审核」点击「执行审单规则」。</p>
       </div>
+      <div v-show="section === 'push'" class="settings-body"><PushSettingsPanel /></div>
     </div>
   </section>
 </template>

@@ -1,0 +1,84 @@
+$ vue-tsc -b && vite build
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 2028 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                            0.48 kB │ gzip:   0.33 kB
+dist/assets/优优侧栏标识-m0KTBP9H.png           12.62 kB
+dist/assets/旗舰手机商品占位-概念图-BqeHoJoS.png    109.07 kB
+dist/assets/收件信息摘要-DDRzZARH.css            0.38 kB │ gzip:   0.27 kB
+dist/assets/富文本编辑器-Dl7hbx-t.css            1.60 kB │ gzip:   0.54 kB
+dist/assets/范围条件输入-Bk0XvZJq.css            1.67 kB │ gzip:   0.63 kB
+dist/assets/买家站内信-BBT8jkQb.css             3.12 kB │ gzip:   0.99 kB
+dist/assets/手工订单页面-DrqQsCDm.css            3.19 kB │ gzip:   1.05 kB
+dist/assets/三方仓库龄页面-2bdvU2Is.css           5.17 kB │ gzip:   1.37 kB
+dist/assets/业务配置页面-CTYpzj5b.css            5.47 kB │ gzip:   1.30 kB
+dist/assets/三方仓库存页面-BsSCF0NB.css           5.67 kB │ gzip:   1.50 kB
+dist/assets/订单标发页面-C1Rj-RzM.css            6.59 kB │ gzip:   1.81 kB
+dist/assets/eBay评价统计页面-B-4ifM6l.css        7.67 kB │ gzip:   1.86 kB
+dist/assets/eBay取消订单申请页面-DD_uK4py.css      8.86 kB │ gzip:   2.06 kB
+dist/assets/物流下单页面-DPygp90u.css            9.42 kB │ gzip:   2.33 kB
+dist/assets/消息模板管理页面-D6_ZVaCF.css          9.78 kB │ gzip:   2.03 kB
+dist/assets/物流渠道管理页面-DmEMCfQr.css         10.06 kB │ gzip:   2.65 kB
+dist/assets/三方仓出库单页面-BkrET9n3.css         11.20 kB │ gzip:   2.69 kB
+dist/assets/eBay退换货申请页面-CyUc27Xq.css      13.40 kB │ gzip:   2.84 kB
+dist/assets/订单规则页面-qpo6Q4ac.css           14.72 kB │ gzip:   3.32 kB
+dist/assets/规则样式-DiGEUrM8.css             15.68 kB │ gzip:   3.58 kB
+dist/assets/eBay评价页面-CFF8yJ0L.css         17.66 kB │ gzip:   3.94 kB
+dist/assets/回复编辑器-BVXSLpJL.css            21.09 kB │ gzip:   4.10 kB
+dist/assets/规则编辑页面-Dz1Es6Ap.css           23.94 kB │ gzip:   4.56 kB
+dist/assets/退货详情页面-xYrrtnJC.css           29.03 kB │ gzip:   5.38 kB
+dist/assets/eBay站内信页面-oCO1ZrNL.css        48.55 kB │ gzip:   9.35 kB
+dist/assets/订单处理页面-CSKi5v4q.css           54.14 kB │ gzip:  10.10 kB
+dist/assets/index-CodktbVA.css           440.00 kB │ gzip:  63.25 kB
+dist/assets/validator-BNL93hIZ.js          0.09 kB │ gzip:   0.10 kB
+dist/assets/关联导航-CyjqZ21N.js               0.90 kB │ gzip:   0.45 kB
+dist/assets/收件信息摘要-BrWf1bB-.js             1.59 kB │ gzip:   0.81 kB
+dist/assets/index-BFF1wgWw.js              2.06 kB │ gzip:   0.91 kB
+dist/assets/审单轮次会话-C8wFwMnU.js             2.35 kB │ gzip:   1.28 kB
+dist/assets/评价模板模型-C1sGfKLz.js             2.42 kB │ gzip:   1.25 kB
+dist/assets/范围条件输入-l5zgz5LI.js             3.17 kB │ gzip:   1.44 kB
+dist/assets/买家站内信-BUmAs_oY.js              4.52 kB │ gzip:   2.23 kB
+dist/assets/index-BT9BdjS9.js              4.98 kB │ gzip:   1.73 kB
+dist/assets/富文本编辑器-C1wjxItp.js             5.92 kB │ gzip:   2.47 kB
+dist/assets/index-Bd827dx6.js              6.97 kB │ gzip:   2.83 kB
+dist/assets/模型-D6YCkVgT.js                 8.86 kB │ gzip:   4.01 kB
+dist/assets/eBay退换货申请页面-BQykU2gf.js        8.97 kB │ gzip:   4.02 kB
+dist/assets/index-aXbjAvMS.js             11.36 kB │ gzip:   4.23 kB
+dist/assets/业务配置页面-BBTJe033.js            11.99 kB │ gzip:   4.75 kB
+dist/assets/模型-D6r_HaEB.js                13.89 kB │ gzip:   5.49 kB
+dist/assets/index-BwA0tGJ8.js             13.89 kB │ gzip:   5.55 kB
+dist/assets/自动客服规则页面-C2sPlROz.js          15.59 kB │ gzip:   5.81 kB
+dist/assets/仓配会话-C4YpIqCT.js              15.69 kB │ gzip:   6.54 kB
+dist/assets/手工订单页面-BBl2Z7rT.js            18.07 kB │ gzip:   7.06 kB
+dist/assets/eBay评价统计页面-BWlahp8e.js        20.03 kB │ gzip:   8.03 kB
+dist/assets/比价币种-BLQyxlmp.js              21.20 kB │ gzip:   7.93 kB
+dist/assets/邮箱模型-Bnf63swv.js              22.84 kB │ gzip:   9.46 kB
+dist/assets/三方仓库存页面-CuiXOyiV.js           23.39 kB │ gzip:   9.13 kB
+dist/assets/消息模板管理页面-BQ8dqV0d.js          28.17 kB │ gzip:  10.11 kB
+dist/assets/三方仓库龄页面-C2jn4EOm.js           28.78 kB │ gzip:  11.20 kB
+dist/assets/eBay取消订单申请页面-C6QTpYhL.js      31.21 kB │ gzip:  11.67 kB
+dist/assets/演示会话-gqYt8Jl9.js              31.92 kB │ gzip:  11.27 kB
+dist/assets/规则编辑页面-yOxFBSuh.js            32.36 kB │ gzip:  10.57 kB
+dist/assets/规则编辑会话-CydHhXC1.js            32.73 kB │ gzip:  14.43 kB
+dist/assets/规则样式-D55yUYjI.js              34.94 kB │ gzip:  14.22 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+dist/assets/物流下单页面-DKgkD37K.js            35.10 kB │ gzip:  13.19 kB
+dist/assets/订单规则页面-DARGmNgT.js            35.20 kB │ gzip:  12.93 kB
+dist/assets/订单标发页面-DD_gDxkR.js            51.26 kB │ gzip:  16.86 kB
+dist/assets/退货详情页面-CBrPPLD9.js            52.90 kB │ gzip:  17.57 kB
+dist/assets/规则编辑页面-Y06VXWZq.js            57.23 kB │ gzip:  18.09 kB
+dist/assets/标注-SAOwzxWT.js                57.77 kB │ gzip:  21.85 kB
+dist/assets/物流渠道管理页面-D93WgE87.js          70.64 kB │ gzip:  25.04 kB
+dist/assets/三方仓出库单页面-CR9_jylZ.js          71.62 kB │ gzip:  23.13 kB
+dist/assets/eBay站内信页面-Bm7O_5I2.js         75.49 kB │ gzip:  23.95 kB
+dist/assets/回复编辑器-BJBdEEN_.js             75.51 kB │ gzip:  27.69 kB
+dist/assets/eBay评价页面-D8NgR8P8.js          81.69 kB │ gzip:  24.20 kB
+dist/assets/订单处理页面-Dk1bTQuB.js           185.56 kB │ gzip:  58.84 kB
+dist/assets/index-D3eMGusb.js          1,090.58 kB │ gzip: 358.09 kB
+✓ built in 55.50s

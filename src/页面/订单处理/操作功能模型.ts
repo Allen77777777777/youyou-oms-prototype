@@ -252,7 +252,7 @@ export function 执行演示恢复发货(订单号: string, 期望版本: number
   if (目标 !== '待发货') {
     const 原方案 = 查找.fulfillmentOrders[查找.fulfillmentOrders.length - 1]!
     停止旧方案(查找)
-    if (目标 === '待推单') 查找.fulfillmentOrders.push({ ...原方案, fulfillmentOrderNo: `FL-${订单号}-RECOVER-V${当前版本(订单号) + 1}`, route: { ...原方案.route }, isActive: true, status: '待执行', plannedQuantity: 查找.items.reduce((总, 行) => 总 + 行.fulfillableQuantity!, 0), shippedQuantity: 0, trackingNumber: undefined, shippedAt: undefined })
+    if (目标 === '待推单') 查找.fulfillmentOrders.push({ ...原方案, autoPushHold: true, fulfillmentOrderNo: `FL-${订单号}-RECOVER-V${当前版本(订单号) + 1}`, route: { ...原方案.route }, isActive: true, status: '待执行', plannedQuantity: 查找.items.reduce((总, 行) => 总 + 行.fulfillableQuantity!, 0), shippedQuantity: 0, trackingNumber: undefined, shippedAt: undefined })
   }
   查找.processingStatus = 目标; 查找.blockReason = undefined
   记录操作(查找, '恢复发货', `异常 → ${目标}；原异常：${原异常 || '未填写'}；原因：${原因.trim()}；${目标 === '待发货' ? '继续唯一原仓单，不重新推单' : 目标 === '待推单' ? '旧仓单保持结束，原有效方案另建待执行路径，本次不推单' : '旧方案停止，待资料修复后重新审核'}。仅本地演示。`)
@@ -272,7 +272,7 @@ export function 执行演示撤销不发货(订单号: string, 期望版本: num
   return { 成功: true, 信息: '已撤销不发货并返回待审核，旧仓库单不会恢复', 对象号: 订单号 }
 }
 
-export function 同步演示仓库状态(出库单号: string): 命令结果 {
+export function 同步演示仓库状态(出库单号: string, 操作人 = '演示操作员'): 命令结果 {
   const 查找 = 查仓单(出库单号)
   if ('成功' in 查找) return 查找
   const 阻断 = 同步仓库状态阻断原因(查找)
@@ -300,7 +300,7 @@ export function 同步演示仓库状态(出库单号: string): 命令结果 {
     const 正常主链 = ['待推单', '待发货'].includes(订单.processingStatus ?? '') && 平台发货条件已允许(订单)
     if (正常主链 && 有效.length && 有效.every(项 => 项.shippedQuantity === 项.plannedQuantity && 项.plannedQuantity > 0 && 项.status === '已发货') && 有效.reduce((总, 项) => 总 + (项.items ? 项.items.filter(行 => 行.orderNo === 订单.systemOrderNo).reduce((小计, 行) => 小计 + 行.quantity, 0) : 项.plannedQuantity), 0) === 订单.items.reduce((总, 行) => 总 + (行.fulfillableQuantity ?? 0), 0)) 订单.processingStatus = '已发货'
     else if (正常主链 && 订单.processingStatus === '待推单' && 有效.length && 有效.every(项 => 仓库执行记录.value.some(仓单 => 仓单.履约单号 === 项.fulfillmentOrderNo && !仓单.待核查 && ['待出库', '出库异常', '已出库'].includes(仓单.状态)))) 订单.processingStatus = '待发货'
-    记录操作(订单, '同步仓库状态', `${出库单号}：${原状态} → ${查找.状态}；订单当前${订单.processingStatus}；取得明确仓库事实，不自动解除异常或回退终态。仅本地演示查询。`)
+    记录操作(订单, '同步仓库状态', `${出库单号}：${原状态} → ${查找.状态}；订单当前${订单.processingStatus}；取得明确仓库事实，不自动解除异常或回退终态。仅本地演示查询。`, true, 操作人)
   }
   if (查找.状态 === '已出库' && 结果 === '已出库') {
     // 该固定查询回放明确命中本出库对象；固化本次已知累计事实，不能让历史仓单读到随后变化的履约摘要。

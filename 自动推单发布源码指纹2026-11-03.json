@@ -1,0 +1,45 @@
+{
+  "baseline": "b2f78b2161d58f29204425b29f0df546f1f41931",
+  "files": [
+    {
+      "path": "src/App.vue",
+      "sha256": "59A40F877555760489D35B95F78095AF1C1FDA99BCE51A0900A423476DBB40A8"
+    },
+    {
+      "path": "src/页面/业务配置/业务配置页面.vue",
+      "sha256": "123579921ECA146A5AE1396031C9195711E406AE330F29A298698E1C2789F52F"
+    },
+    {
+      "path": "src/页面/业务配置/自动推单设置.ts",
+      "sha256": "8247ADFE13E0296E7E653D01791030F6CC9EFA2E3BEE34DB85A1A0F7E7C8E011"
+    },
+    {
+      "path": "src/页面/业务配置/自动推单设置面板.vue",
+      "sha256": "26634C53A69DA0ADAF926625AA7A141C242075B4005A3A361D01D1EB1BA8A480"
+    },
+    {
+      "path": "src/页面/业务配置/自动推单执行.ts",
+      "sha256": "EE5EBCEC329AEAB43B5C8C348976B11C6C9923DDFE81BAA27459E5FFF5BA5272"
+    },
+    {
+      "path": "src/页面/业务配置/循环推单.ts",
+      "sha256": "5829AB59E08BA32D403849A508EBC21717471F624F494A0B86B19BDB1CBA716F"
+    },
+    {
+      "path": "src/页面/业务配置/自动推单.spec.ts",
+      "sha256": "67447B05206DD5EEFE554E6BB9CE756A0E84A40F448518B9853D987B29E2F9C5"
+    },
+    {
+      "path": "src/页面/全渠道订单/类型.ts",
+      "sha256": "DFF4445383A5753FAFDA2CDC75274B81CE833AC4FCE11776C1F11D3E437911BA"
+    },
+    {
+      "path": "src/页面/订单处理/操作功能模型.ts",
+      "sha256": "CDFF2BB34AA5793890D0888ED9BA1D8B6F8BA56D30C1040176C44B465D509062"
+    },
+    {
+      "path": "src/页面/订单处理/演示会话.ts",
+      "sha256": "879D97FBE990FADF81BF4BA81C20AB1BDDBA4B8A76E0E7D154D4FEEF8BE5D96C"
+    }
+  ]
+}
