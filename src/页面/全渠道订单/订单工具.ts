@@ -99,10 +99,11 @@ const 平台简称: Record<全渠道订单['platformCode'], string> = {
   OZON: 'OZ',
   'TikTok Shop': 'TK',
   Rakuten: 'RT',
+  手工: '手',
 }
 
 export function 格式化金额(金额值?: 金额): string {
-  if (!金额值) return '—'
+  if (!金额值 || !金额值.value.trim() || !金额值.currency.trim()) return '—'
   const 数值 = Number(金额值.value)
   if (!Number.isFinite(数值)) return 金额值.currency + ' ' + 金额值.value
   return 金额值.currency + ' ' + 数值.toLocaleString('en-US', {
@@ -156,6 +157,7 @@ export function 获取OMS状态说明(订单: 全渠道订单): 状态说明 {
 }
 
 export function 获取平台状态说明(订单: 全渠道订单): 状态说明 {
+  if (订单.manualOrder || 订单.platformCode === '手工') return { text: '不适用', tone: 'neutral', helper: '手工创建，无平台订单状态' }
   if (订单.platformCode !== 'eBay') return {
     text: '状态映射待接入',
     tone: 'neutral',
@@ -245,7 +247,7 @@ export function 筛选全渠道订单(
     if (Array.isArray(条件.store) ? !命中多选(条件.store, 订单.storeId) : !命中多选(条件.store, 订单.storeName)) return false
     if (!命中多选(条件.processingStatus, 订单.processingStatus || '__EMPTY__')) return false
     if (!命中时间范围(订单[条件.dateType], 条件.dateRange)) return false
-    if (!命中多选(条件.platformStatus, 订单.platformCode === 'eBay' ? 订单.platformOrderStatus : '__NOT_INTEGRATED__')) return false
+    if (!命中多选(条件.platformStatus, 订单.manualOrder || 订单.platformCode === '手工' ? undefined : 订单.platformCode === 'eBay' ? 订单.platformOrderStatus : '__NOT_INTEGRATED__')) return false
     if (!命中多选(条件.syncStatus, 订单.sync.status)) return false
     if (!命中多选(条件.countryCode, 订单.address.countryCode)) return false
     if ((条件.skuStatus.length || (商品字段 && 条件.keyword.trim())) && !订单.items.some(商品 => 命中多选(条件.skuStatus, 商品.skuResolutionStatus)

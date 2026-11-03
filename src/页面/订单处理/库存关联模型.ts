@@ -109,6 +109,11 @@ export function 取得最大库龄(identity: 关联来源身份, allRows: 关联
   return { ...result, text: `${Math.max(...positive.map(row => row.agingDays!))} 天`, status: '已取得', reason: `同来源在库正数量批次的来源库龄最大值${oldNote}` }
 }
 
+export function 取得库存查询商品(row: 作业行) {
+  const allocations = row.fulfillment?.items
+  return allocations === undefined ? row.order.items : row.order.items.filter(item => allocations.some(allocation => allocation.orderNo === row.order.systemOrderNo && allocation.externalLineId === item.externalLineId && allocation.quantity > 0))
+}
+
 export function 取得库存查询范围(row: 作业行, scopes: 关联仓库范围[] = 关联演示数据.scopes) {
   const routes: 订单路由[] = row.fulfillment ? [row.fulfillment.route]
     : row.stage === '待审核' ? row.order.defaultRoute ? [row.order.defaultRoute] : []
@@ -127,7 +132,7 @@ export function 取得库存查询范围(row: 作业行, scopes: 关联仓库范
     mode: candidates ? '候选仓库范围（尚未分仓）' : row.fulfillment ? '履约单实际仓库快照' : usesDefault ? '订单首次／默认仓库' : '订单当前有效执行仓库',
     candidates,
     reason: ambiguousRoute ? '仓库账号归属待核实' : !candidates && !matched.length ? '当前路由暂无可核实的仓库资料' : '',
-    itemScopeNote: row.fulfillment ? '当前履约摘要没有逐商品分配明细；下方为来源订单商品候选，不能作为本次履约商品及数量证据。' : '',
+    itemScopeNote: row.fulfillment ? row.fulfillment.items === undefined ? '当前履约摘要没有逐商品分配明细；下方为来源订单商品候选，不能作为本次履约商品及数量证据。' : '仅展示本次履约中当前来源订单的商品；发货数量以本包履约分配为准。' : '',
   }
 }
 
@@ -144,7 +149,7 @@ export function 关联数量文本(row: 关联展示行, key: 数量键): string
 /** 模拟只读服务返回；可用库存逐来源行展示，没有求和、默认零或审核副作用。 */
 export function 查询订单关联库存(row: 作业行, data: 关联查询数据 = 关联演示数据): 关联展示行[] {
   const range = 取得库存查询范围(row, data.scopes)
-  return row.order.items.flatMap(item => {
+  return 取得库存查询商品(row).flatMap(item => {
     const sku = item.systemSku?.trim() ?? ''
     if (!sku) return [缺项(item.externalLineId, item.externalLineId, '', '未匹配系统 SKU')]
     if (item.skuResolutionStatus !== '成功') return [缺项(item.externalLineId, item.externalLineId, sku, `系统 SKU 解析${item.skuResolutionStatus}，仓库关联待核实`)]
@@ -234,4 +239,22 @@ for (const config of configs) {
     config.ages.forEach((days, index) => aging.push({ ...scope, ...identity, id: `link-age-${fixtureKey}-${index}`, sourceRecordKey: `LINK-DEMO-AGE-KEY-${fixtureKey}-${index}`, systemSku: mapping.systemSku, name: '订单关联虚构商品', specification: '', snapshotDate: '2026-09-23', batchNo: `LINK-DEMO-AGE-${index + 1}`, consignmentNo: `LINK-DEMO-CN-${config.index}-${index}`, serialNo: String(index + 1), agingDays: days, onHandQty: index ? '5' : '3', putawayAt: '', expiryDate: '', updatedAt: '2026-09-23T02:30:00Z', sourceAt: '', mapping: '已映射', issues: [], summaryBlocked: false }))
   }
 }
+// 人工分包评审沿用同一份只读来源数据，不建立或扣减另一套库存账。
+// 各仓数值显式给定；可用量未知的其他数量继续为空，不能从可用量反推。
+for (const scope of scopes.filter(item => ['order-demo-winit', 'order-demo-good'].includes(item.id))) {
+  for (const sku of ['DEMO-SKU-1', 'DEMO-SKU-2', 'DEMO-SKU-3', 'DEMO-SKU-A', 'DEMO-SKU-B', 'DEMO-SKU-C', 'DEMO-SKU-D', 'DEMO-SKU-LOW-STOCK']) {
+    const warehouseSku = `MANUAL-${scope.provider === '万邑通' ? 'WYT' : 'GC'}-${sku}`
+    const available = sku === 'DEMO-SKU-LOW-STOCK' ? 1 : sku === 'DEMO-SKU-A' && scope.provider === '万邑通' ? 6 : 50
+    mappings.push({ scopeId: scope.id, systemSku: sku, warehouseSku, status: '已映射' })
+    inventory.push({
+      ...scope, id: `manual-inventory-${scope.id}-${sku}`, sourceCustomer: 'MANUAL-DEMO-CUSTOMER', warehouseSku,
+      quality: '良品', unit: '件', systemSku: sku, name: '人工分包虚构商品', specification: '', batchNo: 'MANUAL-DEMO-STOCK',
+      quantities: { available, reserved: null, unavailable: null, transit: null, onHand: null, defective: null, frozen: null, putaway: null },
+      mapping: '已映射', issues: [], updatedAt: '2026-10-21T01:05:00Z', sourceAt: '2026-10-21T01:00:00Z',
+      lastAttempt: '2026-10-21T01:05:00Z', attemptResult: '成功', enabled: true, presence: '已确认存在',
+    })
+  }
+}
+// 手工寄样的折叠收纳箱在万邑通北美账号已配对；其他账号须各自具备映射。
+mappings.push({ scopeId: 'order-demo-winit', systemSku: 'DEMO-STORAGE-01', warehouseSku: 'LINK-DEMO-STORAGE-W1', status: '已映射' })
 export const 关联演示数据: 关联查询数据 = { scopes, mappings, inventory, aging, snapshots }

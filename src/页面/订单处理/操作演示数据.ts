@@ -136,7 +136,6 @@ export function 创建操作演示(创建: (序号: number, 覆盖?: Partial<全
     if (编号 === '06') {
       单.platformOrderStatus = 'IN_PROGRESS'
       单.items[0]!.fulfillableQuantity = undefined
-      单.blockReason = '平台部分履约，请人工核实已履约范围和剩余数量。'
       单.reviews = [{ round: 1, type: '自动审核', triggerSource: '虚构审核规则', status: '已拦截', decisionNote: '命中 eBay 部分履约规则；已履约及剩余商品数量尚未取得可信核查依据，保留待审核，不得按整单再次发货。', completedAt: 核查时间 }]
     }
     if (状态 !== '待审核' && 编号 !== '23') {

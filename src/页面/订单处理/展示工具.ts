@@ -19,7 +19,8 @@ export interface 作业行 { key: string; order: 全渠道订单; fulfillment?: 
 /** 列表及仓库筛选共用实际路由；完整身份包含账号，不把同仓不同账号压成首条。 */
 export function 获取作业路由(行: 作业行) {
   const 有效路由 = 行.order.fulfillmentOrders.filter(项 => 项.isActive).map(项 => 项.route)
-  const 路由 = 行.fulfillment ? [行.fulfillment.route] : 行.stage !== '待审核' && 有效路由.length ? 有效路由 : 行.order.defaultRoute ? [行.order.defaultRoute] : []
+  const 人工路线 = 行.order.manualShippingPlan?.packages.map(包 => 包.route)
+  const 路由 = 行.fulfillment ? [行.fulfillment.route] : 行.stage === '待审核' && 人工路线?.length ? 人工路线 : 行.stage !== '待审核' && 有效路由.length ? 有效路由 : 行.order.defaultRoute ? [行.order.defaultRoute] : []
   const 已见 = new Set<string>()
   return 路由.filter(项 => {
     const 身份 = JSON.stringify([项.warehouseProvider, 项.warehouseAccount, 项.warehouse, 项.shippingChannelCode, 项.shippingChannel, 项.labelMode])
@@ -43,6 +44,7 @@ export function 命中作业关注(行: 作业行, 关注: 作业关注, 阻断:
   if (关注 === '结果待核查') return !!行.execution?.待核查 || 行.execution?.状态 === '下单中'
   if (关注 === '部分出库') return !!行.fulfillment && 行.fulfillment.shippedQuantity > 0 && 行.fulfillment.shippedQuantity < 行.fulfillment.plannedQuantity
   if (['下单失败', '待出库', '出库异常', '取消中'].includes(关注)) return 行.execution?.状态 === 关注
+  if ((行.order.manualOrder || 行.order.platformCode === '手工') && 行.stage === '已发货') return 关注 === '无需标发'
   if (关注 === '无标发记录') return 行.stage === '已发货' && !标发状态
   return 行.stage === '已发货' && 标发状态 === 关注
 }

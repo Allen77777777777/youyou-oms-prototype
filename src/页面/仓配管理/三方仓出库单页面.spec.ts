@@ -7,8 +7,8 @@ import OutboundPage from './三方仓出库单页面.vue'
 import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import MultiSelectFilter from '@/组件/筛选/多选筛选.vue'
 import { 仓库会话单据, 创建仓库执行投影 } from './仓配会话'
-import { 取得出库详情 } from './三方仓出库模型'
-import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本, 当前版本, 执行演示推单 } from '../订单处理/演示会话'
+import { 创建出库工作台样例, 取得出库详情 } from './三方仓出库模型'
+import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本, 当前版本, 执行演示推单, 评价跟踪OMS样例, 取消申请OMS样例 } from '../订单处理/演示会话'
 
 const 页面路径 = '/oms/warehouse-delivery/outbound-orders'
 const 初始 = JSON.stringify({ orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value, rows: 仓库会话单据.value })
@@ -70,23 +70,62 @@ beforeEach(async () => {
 afterEach(async () => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; 恢复数据(); await 稳定(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('三方仓出库单的订单同源及操作交互', () => {
-  it('正常默认工作台含14条完整CK样例及4条详情演示仓单，翻页覆盖全部，旧执行保留但查不到旧OUT评审投影', async () => {
+  it('正常工作台保留原CK、拆分、详情及评价组并追加取消关联CK，逐页完整覆盖且不显示旧OUT投影', async () => {
     const page = await 打开()
-    expect(仓库会话单据.value).toHaveLength(18)
+    const originalCount = 仓库会话单据.value.length
+    const 原十四张 = 仓库会话单据.value.filter(row => /^CK261010\d{4}$/.test(row.no))
+    expect(原十四张).toHaveLength(14)
+    expect(原十四张).toEqual(创建出库工作台样例())
+    const 阶段单号 = ['PARTIAL-P1', 'WAITING-P1', 'WAITING-P2', 'SHIPPED-P1', 'SHIPPED-P2', 'EXCEPTION-P1', 'EXCEPTION-P2', 'STOPPED-P1', 'STOPPED-P2'].map(suffix => `CK-DEMO-SPLIT-STAGE-${suffix}`)
+    const 阶段 = 仓库会话单据.value.filter(row => row.no.startsWith('CK-DEMO-SPLIT-STAGE-'))
+    expect(阶段.map(row => row.no).sort()).toEqual([...阶段单号].sort())
+    for (const row of 阶段) {
+      const suffix = row.no.replace('CK-DEMO-SPLIT-STAGE-', ''), 包 = suffix.endsWith('P1') ? 1 : 2
+      const 订单号 = `OMS-DEMO-SPLIT-STAGE-${suffix.replace(/-P[12]$/, '')}`
+      expect(row.fulfillment).toBe(`FL-DEMO-SPLIT-STAGE-${suffix}`)
+      expect(row.order).toBe(订单号)
+      expect(row.outboundDetail!.snapshotReliable).toBe(true)
+      expect(row.outboundDetail!.items).toEqual([expect.objectContaining({ sourceOrderNo: 订单号, externalLineId: `DEMO-SPLIT-STAGE-${suffix.replace(/-P[12]$/, '')}-L${包}`, plannedQuantity: 包 === 1 ? 4 : 6 })])
+    }
+    const 详情单号 = ['SPLIT-P1', 'SPLIT-P2', 'NORMAL', 'MERGE'].map(suffix => `CK-DEMO-DETAIL-${suffix}`)
+    expect(仓库会话单据.value.filter(row => row.no.startsWith('CK-DEMO-DETAIL-')).map(row => row.no).sort()).toEqual([...详情单号].sort())
+    const 评价跟踪单号 = 评价跟踪OMS样例.执行.map(execution => execution.出库单号)
+    expect(仓库会话单据.value.filter(row => row.no.startsWith('CK-DEMO-AWAIT-')).map(row => row.no).sort()).toEqual([...评价跟踪单号].sort())
+    const 取消申请单号 = 取消申请OMS样例.执行.map(execution => execution.出库单号)
+    const 取消申请组 = 仓库会话单据.value.filter(row => row.no.startsWith('CK-DEMO-CXL-'))
+    expect(取消申请组.map(row => row.no).sort()).toEqual([...取消申请单号].sort())
+    expect(new Set(取消申请组.map(row => row.id)).size).toBe(取消申请单号.length)
+    for (const row of 取消申请组) {
+      const executions = 取消申请OMS样例.执行.filter(execution => execution.出库单号 === row.no && execution.履约单号 === row.fulfillment)
+      expect(executions).toHaveLength(1)
+      expect(row.id).toBe(`shared-${row.no}`)
+      expect(row.outboundDetail!.snapshotReliable).toBe(true)
+      expect(row.outboundDetail!.sourceOrders.map(order => order.systemOrderNo)).toEqual(executions[0]!.订单号)
+      expect(row.outboundDetail!.items.length).toBeGreaterThan(0)
+    }
+    expect(originalCount).toBe(原十四张.length + 阶段单号.length + 详情单号.length + 评价跟踪单号.length + 取消申请单号.length)
     expect(仓库执行记录.value.some(execution => execution.出库单号 === 'OUT-DEMO-ACTION-12')).toBe(true)
-    expect(page.get('.出库分页').text()).toContain('共 18 单')
+    expect(page.get('.出库分页').text()).toContain(`共 ${originalCount} 单`)
     const numbers = 主行(page).map(row => row.get('.单号').text())
     expect(numbers).toHaveLength(10)
     await page.get('.出库分页 .btn-next').trigger('click'); await 稳定()
     numbers.push(...主行(page).map(row => row.get('.单号').text()))
-    expect(numbers).toHaveLength(18)
-    expect(new Set(numbers).size).toBe(18)
-    expect(numbers.filter(no => /^CK261010\d{4}$/.test(no))).toHaveLength(14)
-    expect(numbers.filter(no => no.startsWith('CK-DEMO-DETAIL-'))).toHaveLength(4)
+    expect(numbers).toHaveLength(20)
+    for (let currentPage = 2; currentPage < Math.ceil(originalCount / 10); currentPage++) {
+      await page.get('.出库分页 .btn-next').trigger('click'); await 稳定()
+      numbers.push(...主行(page).map(row => row.get('.单号').text()))
+    }
+    expect(numbers).toHaveLength(originalCount)
+    expect(new Set(numbers).size).toBe(originalCount)
+    expect(numbers.filter(no => /^CK261010\d{4}$/.test(no)).sort()).toEqual(原十四张.map(row => row.no).sort())
+    expect(numbers.filter(no => no.startsWith('CK-DEMO-SPLIT-STAGE-')).sort()).toEqual([...阶段单号].sort())
+    expect(numbers.filter(no => no.startsWith('CK-DEMO-DETAIL-')).sort()).toEqual([...详情单号].sort())
+    expect(numbers.filter(no => no.startsWith('CK-DEMO-AWAIT-')).sort()).toEqual([...评价跟踪单号].sort())
+    expect(numbers.filter(no => no.startsWith('CK-DEMO-CXL-')).sort()).toEqual([...取消申请单号].sort())
     await 搜索(page, 'no', 'OUT-DEMO-ACTION-12')
     expect(主行(page)).toHaveLength(0)
     expect(page.get('.出库分页').text()).toContain('共 0 单')
-    expect(仓库会话单据.value).toHaveLength(18)
+    expect(仓库会话单据.value).toHaveLength(originalCount)
   })
 
   it('重新推单只在全部和下单失败页签显示，截单仅在适用页签显示', async () => {
@@ -170,6 +209,7 @@ describe('三方仓出库单的订单同源及操作交互', () => {
 
   it('订单处理推单形成一张出库单，履约深链能查询同一身份，受理不伪造已出库', async () => {
     const originalCount = 仓库会话单据.value.length
+    expect(originalCount).toBe(14 + 9 + 4 + 评价跟踪OMS样例.执行.length + 取消申请OMS样例.执行.length)
     const order = 单('07'), fulfillment = order.fulfillmentOrders[0]!
     const result = 执行演示推单(order.systemOrderNo, fulfillment.fulfillmentOrderNo, 当前版本(order.systemOrderNo))
     expect(result.成功).toBe(true); await 稳定()

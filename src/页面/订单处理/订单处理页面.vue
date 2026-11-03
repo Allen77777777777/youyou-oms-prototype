@@ -5,7 +5,7 @@ import { ArrowDown, CircleCheck, Clock, CopyDocument, Document, InfoFilled, Ques
 import { ElAlert, ElButton, ElCheckbox, ElConfigProvider, ElDialog, ElDrawer, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElMessage, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTabs, ElTabPane, ElTag, ElTooltip } from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { 订单处理标注 as 标注 } from './订单处理原型标注'
-import type { 全渠道订单, 订单处理状态 } from '../全渠道订单/类型'
+import type { 全渠道订单, 订单处理状态, 人工发货方案 } from '../全渠道订单/类型'
 import { 共享订单, 仓库执行记录, 当前版本, 审核阻断原因, 推单阻断原因, 执行演示审核, 执行演示推单, 核查演示仓库结果, 演示库存, 演示路由, type 命令结果 } from './演示会话'
 import { 展示处理原因, 获取处理建议, 获取仓库结束提示 } from './处理提示展示'
 import { 获取作业路由, 展示计划数量, 命中作业关注, type 作业行, type 作业关注 } from './展示工具'
@@ -17,6 +17,13 @@ import WorkProductSummary from './作业商品摘要.vue'
 import OrderNotes from './订单备注组件.vue'
 import WarehouseChannelSelect from './仓库物流选择.vue'
 import ActionSettings, { type 设置操作 } from './操作设置弹窗.vue'
+import ReviewRuleRunner from './审单轮次操作.vue'
+import ManualShippingActions from './拆合发货操作.vue'
+import ManualPlanSummary from './拆合发货方案展示.vue'
+import { 保存人工发货方案, 保存多组合并发货方案, 撤销人工发货方案 } from './拆合发货模型'
+import { 人工发货上下文, 执行演示保存并审核, 执行演示合并保存并审核 } from './演示会话'
+import { 查询人工方案库存 } from './拆合发货库存'
+import { 拆合发货标注 } from './拆合发货原型标注'
 import { 订单关联仓库执行, 同步演示仓库状态 } from './操作功能模型'
 import { 路由仓库键, 查找所选仓库物流 } from './仓库物流选择模型'
 import WarehouseInventoryDetails from './库存关联明细.vue'
@@ -121,9 +128,14 @@ const 全部作业 = computed<作业行[]>(() => {
   }
   return 结果
 })
-const 命中筛选 = (行: 作业行) => 命中订单处理筛选(行, 已应用筛选, { orders: 共享订单.value, executions: 仓库执行记录.value, inventory: 演示库存.value, flags: 订单 => 计算订单标志(订单, 订单标志演示证据), now: 查询时刻.value })
+const 列表库存 = computed<Record<string, '充足' | '不足' | '结果未知'>>(() => Object.fromEntries(共享订单.value.map(单 => {
+  if (单.processingStatus !== '待审核' || 单.manualShippingPlan?.kind !== '拆分发货') return [单.systemOrderNo, 演示库存.value[单.systemOrderNo] ?? '充足']
+  const 结果 = 查询人工方案库存(单.manualShippingPlan, 共享订单.value)
+  return [单.systemOrderNo, !结果.rows.length || 结果.rows.some(行 => 行.status === '待核实') ? '结果未知' : 结果.rows.some(行 => 行.status === '不足') ? '不足' : 结果.reasons.length ? '结果未知' : '充足']
+})))
+const 命中筛选 = (行: 作业行) => 命中订单处理筛选(行, 已应用筛选, { orders: 共享订单.value, executions: 仓库执行记录.value, inventory: 列表库存.value, flags: 订单 => 计算订单标志(订单, 订单标志演示证据), now: 查询时刻.value })
 function 匹配来源订单(行: 作业行) {
-  return 获取作业来源订单(行, 共享订单.value).filter(订单 => 命中订单处理筛选({ ...行, order: 订单 }, 已应用筛选, { orders: [订单], executions: 仓库执行记录.value, inventory: 演示库存.value, flags: 项 => 计算订单标志(项, 订单标志演示证据), now: 查询时刻.value }))
+  return 获取作业来源订单(行, 共享订单.value).filter(订单 => 命中订单处理筛选({ ...行, order: 订单 }, 已应用筛选, { orders: [订单], executions: 仓库执行记录.value, inventory: 列表库存.value, flags: 项 => 计算订单标志(项, 订单标志演示证据), now: 查询时刻.value }))
 }
 const 共享履约行 = (行: 作业行) => !!行.fulfillment && 获取作业来源订单(行, 共享订单.value).length > 1
 const 筛选后作业 = computed(() => 全部作业.value.filter(命中筛选))
@@ -138,7 +150,7 @@ function 切换关注(关注: 作业关注) { 当前关注.value = 关注; 当�
 const 当前页数据 = computed(() => 当前结果.value.slice((当前页.value - 1) * 每页条数.value, 当前页.value * 每页条数.value))
 const 可选仓库 = computed(() => [...new Set(全部作业.value.flatMap(行 => 行路由(行).map(项 => 项.warehouse)).filter(Boolean))] as string[])
 const 可选来源订单 = computed(() => [...new Map(全部作业.value.flatMap(行 => 获取作业来源订单(行, 共享订单.value)).map(订单 => [订单.systemOrderNo, 订单])).values()])
-const 可选店铺 = computed(() => [...new Map(可选来源订单.value.filter(订单 => !筛选.platform.length || 筛选.platform.includes(订单.platformCode)).map(订单 => [订单.storeId, { value: 订单.storeId, label: 订单.storeName }])).values()])
+const 可选店铺 = computed(() => [...new Map(可选来源订单.value.filter(订单 => 订单.storeId && (!筛选.platform.length || 筛选.platform.includes(订单.platformCode))).map(订单 => [订单.storeId, { value: 订单.storeId, label: 订单.storeName }])).values()])
 const 可选渠道 = computed(() => [...new Map(全部作业.value.flatMap(行 => 行路由(行)).filter(路由 => !筛选.warehouse.length || 筛选.warehouse.includes(路由.warehouse) || (筛选.warehouse.includes('UNASSIGNED') && !路由.warehouse.trim())).filter(路由 => 路由.shippingChannelCode).map(路由 => [路由.shippingChannelCode, { value: 路由.shippingChannelCode, label: 路由.shippingChannel }])).values()])
 const 仓库选项 = computed(() => [{ value: 'UNASSIGNED', label: '未分配仓库' }, ...可选仓库.value.map(value => ({ value, label: value }))])
 const 渠道选项 = computed(() => [{ value: 'UNASSIGNED', label: '未分配渠道' }, ...可选渠道.value])
@@ -147,7 +159,7 @@ const 可选国家 = computed(() => [...new Set(可选来源订单.value.map(订
 watch(可选店铺, 店铺 => { 筛选.store = 筛选.store.filter(value => 店铺.some(项 => 项.value === value)) })
 watch(渠道选项, 渠道 => { 筛选.channel = 筛选.channel.filter(value => 渠道.some(项 => 项.value === value)) })
 const 批量操作配置 = computed(() => ({
-  待审核: ['审核', '修改仓库物流', '增加备注', '不发货', '同步仓库状态'],
+  待审核: ['审核', '修改仓库物流', '增加备注', '不发货', '同步仓库状态', '合并发货'],
   待推单: ['推单', '同步仓库状态', '退回待审核', '增加备注', '不发货'],
   待发货: ['同步仓库状态', '退回待审核', '增加备注', '不发货'],
   已发货: ['同步仓库状态', '增加备注'],
@@ -155,6 +167,19 @@ const 批量操作配置 = computed(() => ({
   不发货: ['同步仓库状态', '增加备注'],
 })[当前队列.value])
 const 操作设置 = ref<InstanceType<typeof ActionSettings>>()
+const 人工发货操作 = ref<InstanceType<typeof ManualShippingActions>>()
+const 人工发货来源 = ref<全渠道订单[]>([])
+const 方案详情订单 = ref<全渠道订单>()
+const 方案详情打开 = ref(false)
+async function 打开人工发货(类型: '拆分发货' | '合并发货' | '编辑发货方案' | '撤销方案', 订单?: 全渠道订单) {
+  人工发货来源.value = 订单 ? [订单] : 已选来源订单.value
+  if (!人工发货来源.value.length) return ElMessage.warning('请先勾选需要合并发货的订单')
+  await nextTick()
+  人工发货操作.value?.open(类型)
+}
+function 查看人工方案(订单: 全渠道订单) { 方案详情订单.value = 订单; 方案详情打开.value = true }
+function 读取人工方案库存(plan: 人工发货方案) { return 查询人工方案库存(plan, 共享订单.value) }
+function 人工发货已保存(类型: string) { 清除选择(); ElMessage.success(类型 === '保存并审核订单' ? '保存并审核成功，订单进入待推单' : `${类型}成功，订单保留待审核`) }
 const 同步中 = ref(false)
 function 设置操作入口(类型: 设置操作, 行?: 作业行) { 操作设置.value?.open(类型, 行 ? [行] : 已选.value, !行) }
 function 接收操作结果(类型: string, 结果: Array<{ key: string; result: 命令结果 }>) { 批次结果.value = 结果; 结果标题.value = `${类型}结果`; 结果打开.value = true; 清除选择() }
@@ -174,6 +199,7 @@ async function 同步仓库状态(行?: 作业行) {
   } finally { 同步中.value = false }
 }
 function 批量入口(操作: string) {
+  if (操作 === '合并发货') return void 打开人工发货('合并发货')
   if (操作 === '同步仓库状态') return void 同步仓库状态()
   if (操作 === '修改仓库物流' || 操作 === '增加备注') return 打开批量操作(操作 === '增加备注' ? '批量备注' : '修改仓库物流')
   设置操作入口(操作 as 设置操作)
@@ -214,6 +240,7 @@ function 行主要操作(行: 作业行): string[] {
 }
 function 行更多操作(行: 作业行): string[] {
   const 操作: string[] = []
+  if (行.stage === '待审核') 操作.push(...(行.order.manualShippingPlan ? ['编辑发货方案', '撤销发货方案'] : ['拆分发货']))
   if (行关联执行(行).length && !行主要操作(行).includes('同步仓库状态')) 操作.push('同步仓库状态')
   if (['待推单', '待发货'].includes(行.stage)) 操作.push('退回待审核')
   if (['待审核', '待推单', '待发货'].includes(行.stage)) 操作.push('不发货')
@@ -222,6 +249,8 @@ function 行更多操作(行: 作业行): string[] {
   return 操作
 }
 function 行操作入口(操作: string, 行: 作业行) {
+  if (操作 === '拆分发货' || 操作 === '编辑发货方案') return void 打开人工发货(操作, 行.order)
+  if (操作 === '撤销发货方案') return void 打开人工发货('撤销方案', 行.order)
   if (操作 === '同步仓库状态') return void 同步仓库状态(行)
   if (['审核', '推单', '重新推单', '退回待审核', '不发货', '恢复发货', '撤销不发货'].includes(操作)) return 设置操作入口(操作 as 设置操作, 行)
   选择来源操作(操作 as 来源动作, 行)
@@ -263,16 +292,38 @@ function 查看执行(行: 作业行, 目标: '仓库' | '物流' = '仓库') {
 }
 const 详情打开 = ref(false)
 const 当前详情 = ref<作业行>()
+const 详情商品 = computed(() => {
+  const 行 = 当前详情.value
+  if (!行) return []
+  if (行.fulfillment?.items !== undefined) return 行.fulfillment.items.map(分配 => ({
+    sourceOrderNo: 分配.orderNo,
+    lineId: 分配.externalLineId,
+    item: 共享订单.value.find(单 => 单.systemOrderNo === 分配.orderNo)?.items.find(商品 => 商品.externalLineId === 分配.externalLineId),
+    quantity: 分配.quantity,
+  }))
+  return 行.order.items.map(item => ({ sourceOrderNo: 行.order.systemOrderNo, lineId: item.externalLineId, item, quantity: undefined }))
+})
 function 查看履约摘要(行: 作业行) { 当前详情.value = 行; 详情打开.value = true }
 const 详情执行列表 = computed(() => 仓库执行记录.value.filter(项 => 当前详情.value?.fulfillment ? 项.履约单号 === 当前详情.value.fulfillment.fulfillmentOrderNo : 项.订单号.includes(当前详情.value?.order.systemOrderNo ?? '')))
 const 详情执行 = computed(() => 详情执行列表.value[0])
-function 下一步(行: 作业行): string { return 获取处理建议(行, 资格原因(行), 有标发失败(行) ? '标发失败' : 行标发状态(行)) }
+function 最近自动拦截(行: 作业行) {
+  const 最近审核 = 行.order.reviews[行.order.reviews.length - 1]
+  if (行.stage === '待审核' && 最近审核?.type === '自动审核' && 最近审核.status === '已拦截') return 最近审核.decisionNote
+}
+function 下一步(行: 作业行): string {
+  const 原因 = 资格原因(行)
+  if (!原因.length && 最近自动拦截(行)) return '请人工复核后审核'
+  return 获取处理建议(行, 原因, 有标发失败(行) ? '标发失败' : 行标发状态(行))
+}
 const 默认原因: Record<订单处理状态, string> = { 待审核: '当前发货条件齐备', 待推单: '当前推单条件齐备', 待发货: '等待仓库出库结果', 已发货: '请核对仓库出库与平台标发结果', 异常: '异常原因待核实', 不发货: '不发货原因待核实' }
 function 原因正文(行: 作业行): string {
   const 结束提示 = 获取仓库结束提示(行)
   if (结束提示) return 结束提示.原因
   const 系统原因 = 行.execution?.原因 || 行.order.blockReason
+  if (!系统原因 && 行.stage === '已发货' && 行.order.manualOrder) return '仓库已完成发货，无需平台标发'
   if (系统原因) return 展示处理原因(系统原因)
+  const 最近拦截 = 最近自动拦截(行)
+  if (最近拦截) return `上轮审单：${展示处理原因(最近拦截)}`
   // 人工填写的不发货原因按原文展示。
   if (行.order.noShipmentReason) return 行.order.noShipmentReason
   return 展示处理原因((行.stage === '待审核' || 行.stage === '待推单' ? 资格原因(行).join('；') : '') || 默认原因[行.stage])
@@ -285,7 +336,7 @@ const 详情步骤 = computed(() => {
   const 已建仓 = !!仓单.length && 仓单.every(项 => !!项.三方仓出库单号)
   const 已出库 = 行.fulfillment ? 行.fulfillment.shippedQuantity >= 行.fulfillment.plannedQuantity && 行.fulfillment.plannedQuantity > 0 : 行.order.processingStatus === '已发货'
   const 标发 = 行标发记录(行)
-  return [{ 标题: '订单审核', 内容: 已审 ? '已有通过记录' : '无通过记录', 完成: 已审 }, { 标题: '仓库接单', 内容: 已建仓 ? '已有三方仓出库单号' : 仓单.length ? '查看执行结果' : '尚未提交', 完成: 已建仓 }, { 标题: '实际出库', 内容: 已出库 ? '已有足量出库事实' : 行.fulfillment?.shippedQuantity ? `已出库 ${行.fulfillment.shippedQuantity} / ${行.fulfillment.plannedQuantity} 件` : '无有效出库事实', 完成: 已出库 }, { 标题: '平台标发', 内容: 行标发状态(行) || '暂无标发记录', 完成: 标发.length > 0 && 标发.every(单 => 单.status === '标发成功') }]
+  return [{ 标题: '订单审核', 内容: 已审 ? '已有通过记录' : '无通过记录', 完成: 已审 }, { 标题: '仓库接单', 内容: 已建仓 ? '已有三方仓出库单号' : 仓单.length ? '查看执行结果' : '尚未提交', 完成: 已建仓 }, { 标题: '实际出库', 内容: 已出库 ? '已有足量出库事实' : 行.fulfillment?.shippedQuantity ? `已出库 ${行.fulfillment.shippedQuantity} / ${行.fulfillment.plannedQuantity} 件` : '无有效出库事实', 完成: 已出库 }, { 标题: '平台标发', 内容: 行.order.manualOrder ? '无需平台标发' : 行标发状态(行) || '暂无标发记录', 完成: 标发.length > 0 && 标发.every(单 => 单.status === '标发成功') }]
 })
 
 const 结果打开 = ref(false)
@@ -394,10 +445,14 @@ function 保存路由() {
         <MultiFilter v-model="筛选.remainingShippingTime" :options="订单处理剩余发货时间选项.map(value => ({ value, label: value }))" placeholder="剩余发货时间" :width="145" />
       </div>
     </section>
-    <div v-prototype="标注.关注" class="关注栏"><strong>作业关注</strong><div class="关注选项"><button v-for="关注 in 关注配置[当前队列]" :key="关注" :class="{ 激活: 当前关注 === 关注 }" :aria-pressed="当前关注 === 关注" @click="切换关注(关注)">{{ 关注 }} <b>{{ 关注数量(关注) }}</b></button></div><span v-if="标注模式">当前查询范围 · 标签可重叠</span></div>
+    <div v-prototype="标注.关注" class="关注栏">
+      <strong>作业关注</strong><div class="关注选项"><button v-for="关注 in 关注配置[当前队列]" :key="关注" :class="{ 激活: 当前关注 === 关注 }" :aria-pressed="当前关注 === 关注" @click="切换关注(关注)">{{ 关注 }} <b>{{ 关注数量(关注) }}</b></button></div>
+      <span v-if="标注模式">当前查询范围 · 标签可重叠</span>
+      <ReviewRuleRunner v-if="当前队列 === '待审核'" @executed="清除选择" />
+    </div>
     <section v-prototype="标注.批量扩展" class="作业工具栏" :class="{ 已选择: 已选.length }">
       <div class="批量操作组">
-        <ElButton v-for="操作 in 批量操作配置" :key="操作" :type="['审核', '推单'].includes(操作) || (当前队列 === '异常' && 操作 === '不发货') ? 'primary' : 'default'" :disabled="!已选.length || 同步中" :loading="操作 === '同步仓库状态' && 同步中" @click="批量入口(操作)">{{ 操作 === '增加备注' ? '批量备注' : '批量' + 操作 }}</ElButton>
+        <ElButton v-for="操作 in 批量操作配置" :key="操作" :type="['审核', '推单'].includes(操作) || (当前队列 === '异常' && 操作 === '不发货') ? 'primary' : 'default'" :disabled="!已选.length || 同步中" :loading="操作 === '同步仓库状态' && 同步中" @click="批量入口(操作)">{{ 操作 === '合并发货' ? 操作 : 操作 === '增加备注' ? '批量备注' : '批量' + 操作 }}</ElButton>
       </div>
       <div v-prototype="标注.选择" class="作业工具"><span v-if="已选.length" class="勾选摘要">已选 {{ 已选.length }} 项<template v-if="已选来源订单.length !== 已选.length"> · {{ 已选来源订单.length }} 张来源订单</template></span><ElButton v-if="已选.length" link @click="清除选择">清空</ElButton><ElButton v-if="批次结果.length" @click="结果打开 = true">批次结果</ElButton><ElTooltip :content="刷新时间 === '尚未手动刷新' ? 刷新时间 : `最近刷新 ${刷新时间} UTC+8`"><ElButton v-prototype="标注.刷新" :icon="Refresh" aria-label="刷新订单处理列表" @click="刷新" /></ElTooltip></div>
     </section>
@@ -414,8 +469,8 @@ function 保存路由() {
               </template>
               <span class="字段名">{{ row.fulfillment ? '来源系统订单号' : '系统订单号' }}</span>
               <div class="编号行"><button class="编号" @click="查看全渠道(row.order)">{{ row.order.systemOrderNo }}</button><button class="复制按钮" :aria-label="'复制系统订单号 ' + row.order.systemOrderNo" @click="复制编号(row.order.systemOrderNo)"><ElIcon><CopyDocument /></ElIcon></button></div>
-              <span class="字段名">平台订单号</span>
-              <div class="编号行"><span class="等宽">{{ row.order.platformOrderNo }}</span><button class="复制按钮" :aria-label="'复制平台订单号 ' + row.order.platformOrderNo" @click="复制编号(row.order.platformOrderNo)"><ElIcon><CopyDocument /></ElIcon></button></div>
+              <span class="字段名">{{ row.order.manualOrder ? '业务用途' : '平台订单号' }}</span>
+              <div class="编号行"><span class="等宽">{{ row.order.manualOrder?.scenario || row.order.platformOrderNo || '—' }}</span><button v-if="row.order.platformOrderNo" class="复制按钮" :aria-label="'复制平台订单号 ' + row.order.platformOrderNo" @click="复制编号(row.order.platformOrderNo)"><ElIcon><CopyDocument /></ElIcon></button></div>
               <span>买家 ID：{{ row.order.buyerExternalId || '—' }}</span>
               <div v-if="共享履约行(row as 作业行)" class="匹配来源订单">
                 <ElTooltip :content="`商品、金额、时间等订单摘要取自 ${row.order.systemOrderNo}；本履约的操作范围仍包含全部来源订单。`" placement="top"><span class="字段名" tabindex="0">代表来源摘要 · 查询命中来源：</span></ElTooltip>
@@ -424,8 +479,8 @@ function 保存路由() {
             </div>
           </template>
         </ElTableColumn>
-        <ElTableColumn :label="当前单位 === '履约单' ? '来源订单商品' : '商品信息'" min-width="245">
-          <template #default="{ row }"><WorkProductSummary v-prototype="标注.商品" :key="row.key" :order="row.order" :source-order="!!row.fulfillment" /></template>
+        <ElTableColumn :label="当前单位 === '履约单' && !['待推单', '待发货'].includes(当前队列) ? '来源订单商品' : '商品信息'" min-width="245">
+          <template #default="{ row }"><WorkProductSummary v-prototype="标注.商品" :key="row.key" :order="row.order" :source-order="!!row.fulfillment" :fulfillment="row.fulfillment" :parcel-view="['待推单', '待发货'].includes(row.stage) && row.order.manualShippingPlan?.kind === '拆分发货'" /></template>
         </ElTableColumn>
         <ElTableColumn label="收件信息" min-width="210">
           <template #default="{ row }">
@@ -455,7 +510,7 @@ function 保存路由() {
               <div><span class="字段名">OMS</span><ElTag size="small" :type="row.order.processingStatus === '异常' ? 'danger' : row.order.processingStatus === '已发货' ? 'success' : row.order.processingStatus === '不发货' ? 'info' : 'primary'">{{ row.order.processingStatus }}</ElTag></div>
               <ElTooltip :content="获取平台状态说明(row.order).helper || '平台订单状态，与 OMS 处理状态分别保存'" placement="top"><span v-prototype="标注.平台状态" tabindex="0">平台：<b :class="{ 危险字: 获取平台状态说明(row.order).tone === 'warning' }">{{ 获取平台状态说明(row.order).text }}</b></span></ElTooltip>
               <span v-if="row.execution">仓库：{{ row.execution.状态 }}<b v-if="row.execution.待核查" class="危险字"> · 待核查</b></span>
-              <ElTooltip v-else-if="row.stage === '待审核'" content="查看仓库 SKU、可用库存和最大库龄" placement="top"><ElButton v-prototype="标注.数量库存" class="库存明细入口" link type="primary" @click="查看库存明细(row as 作业行)">库存校验：{{ 演示库存[row.order.systemOrderNo] ?? '充足' }}</ElButton></ElTooltip>
+              <ElTooltip v-else-if="row.stage === '待审核'" content="查看仓库 SKU、可用库存和最大库龄" placement="top"><ElButton v-prototype="标注.数量库存" class="库存明细入口" link type="primary" @click="查看库存明细(row as 作业行)">库存校验：{{ 列表库存[row.order.systemOrderNo] ?? '结果未知' }}</ElButton></ElTooltip>
               <span v-else>仓库：{{ row.stage === '待推单' ? '尚未提交' : '见关联执行' }}</span>
               <ElButton v-if="row.stage !== '待审核'" v-prototype="标注.数量库存" class="库存明细入口" link type="primary" @click="查看库存明细(row as 作业行)">查看仓库库存</ElButton>
               <template v-if="row.fulfillment">
@@ -463,7 +518,7 @@ function 保存路由() {
               </template>
               <ElTooltip v-else-if="row.stage === '待审核'" content="读取订单商品的可履约数量；数量未核实则不合计，不表示已创建履约单或已占用库存。" placement="top"><span tabindex="0">{{ 展示计划数量(row.order.items) }}</span></ElTooltip>
               <div v-if="row.stage === '待发货' || row.stage === '已发货'" v-prototype="标注.标发状态" class="订单标发状态">
-                <div v-if="!行标发记录(row as 作业行).length" class="标发记录行"><span>标发：</span><span class="浅色字">无标发记录</span></div>
+                <div v-if="!行标发记录(row as 作业行).length" class="标发记录行"><span>标发：</span><span class="浅色字">{{ row.order.manualOrder ? '无需平台标发' : '无标发记录' }}</span></div>
                 <div v-for="单 in 行标发记录(row as 作业行)" :key="单.no" class="标发记录行">
                   <span>标发：</span>
                   <ElTooltip :content="单.no + ' · ' + 单.orderNo + ' · ' + 单.fulfillmentNo" placement="top">
@@ -472,6 +527,7 @@ function 保存路由() {
                 </div>
               </div>
               <OrderFlags class="列表订单标志" :flags="行标志(row as 作业行)" />
+              <ElButton v-if="row.order.manualShippingPlan" v-prototype="拆合发货标注.预览" link type="primary" class="人工方案入口" @click="查看人工方案(row.order)">{{ row.order.manualShippingPlan.kind }} · {{ row.order.manualShippingPlan.packages.length }} 包裹</ElButton>
             </div>
           </template>
         </ElTableColumn>
@@ -519,6 +575,11 @@ function 保存路由() {
     <WarehouseInventoryDetails v-if="当前库存行" v-model="库存明细打开" :row="当前库存行" />
 
     <ActionSettings ref="操作设置" @result="接收操作结果" />
+    <ManualShippingActions ref="人工发货操作" :orders="人工发货来源" :all-orders="共享订单" :executions="仓库执行记录" :route-options="演示路由" :version-of="当前版本" :inventory="读取人工方案库存" :save="(plan, versions) => 保存人工发货方案(人工发货上下文(), plan, versions)" :save-batch="(plans, versions) => 保存多组合并发货方案(人工发货上下文(), plans, versions)" :save-batch-and-review="执行演示合并保存并审核" :save-and-review="执行演示保存并审核" :withdraw="(nos, versions, reason) => 撤销人工发货方案(人工发货上下文(), nos, versions, reason)" @saved="人工发货已保存" />
+    <ElDialog v-model="方案详情打开" title="发货安排" width="min(1100px, 94vw)" top="5vh" append-to-body destroy-on-close>
+      <template v-if="方案详情订单?.manualShippingPlan"><ManualPlanSummary :plan="方案详情订单.manualShippingPlan" :orders="共享订单" /></template>
+      <template #footer><ElButton @click="方案详情打开 = false">关闭</ElButton><ElButton v-if="方案详情订单?.processingStatus === '待审核'" type="primary" @click="方案详情打开 = false; 打开人工发货('编辑发货方案', 方案详情订单)">编辑发货方案</ElButton></template>
+    </ElDialog>
     <OrderNotes ref="备注控制" :order-no="备注订单号" mode="controller" />
     <ElDialog v-model="来源窗口" :title="来源动作 + ' · 选择来源订单'" width="min(620px, 92vw)" append-to-body>
       <p v-if="来源窗口" v-prototype="标注.来源选择" class="浅色字">请选择本次操作的来源订单，不默认第一张。</p><ElSelect v-model="目标来源" placeholder="请选择来源订单" aria-label="选择来源订单" style="width:100%"><ElOption v-for="订单 in 全部来源" :key="订单.systemOrderNo" :value="订单.systemOrderNo" :label="订单.systemOrderNo" /></ElSelect>
@@ -544,7 +605,7 @@ function 保存路由() {
 
     <ElDialog v-model="路由打开" title="修改仓库物流" width="min(620px, 92vw)" append-to-body :close-on-click-modal="false"><div v-prototype="标注.路由"><div class="路由订单">{{ 路由目标?.systemOrderNo }}<ElTag size="small">待审核</ElTag></div><p class="浅色字">原方案：{{ 路由目标?.defaultRoute?.warehouse || '未分配' }} / {{ 路由目标?.defaultRoute?.shippingChannel || '未分配' }}</p><ElAlert v-if="路由目标 && 修改仓库物流阻断原因(路由目标).length" :title="展示处理原因(修改仓库物流阻断原因(路由目标).join('；'))" type="warning" :closable="false" /><ElForm label-position="top"><WarehouseChannelSelect v-model:warehouse="路由草稿.warehouse" v-model:channel="路由草稿.code" :routes="演示路由" /><div class="路由信息"><div><span>仓储服务商</span><strong>{{ 所选路由?.warehouseProvider || '—' }}</strong></div><div><span>仓库账号</span><strong>{{ 所选路由?.warehouseAccount || '—' }}</strong></div><div><span>渠道代码</span><strong>{{ 所选路由?.shippingChannelCode || '—' }}</strong></div><div><span>面单模式</span><strong>{{ '仓配一体，由仓库提供面单并发货' }}</strong></div></div><ElFormItem label="修改原因" required><ElInput v-model="路由草稿.reason" type="textarea" :rows="3" maxlength="2000" show-word-limit placeholder="说明本次仓库物流修改依据，写入操作日志" /></ElFormItem></ElForm><ElAlert title="将默认发货方案修改为所选仓库／渠道，订单保持待审核。后续审核通过后再推单，本次不会向仓库发货。" type="info" :closable="false" /></div><template #footer><ElButton @click="路由打开 = false">取消</ElButton><ElButton type="primary" :disabled="!所选路由 || !路由草稿.reason.trim() || !!(路由目标 && 修改仓库物流阻断原因(路由目标).length)" @click="保存路由">保存仓库物流</ElButton></template></ElDialog>
 
-    <ElDrawer v-model="详情打开" size="min(800px, 94vw)" append-to-body :with-header="false"><template v-if="当前详情"><div v-prototype="标注.证据" class="详情页眉"><div><small>履约执行摘要</small><h2>{{ 当前详情.key }}</h2></div><ElButton @click="详情打开 = false">关闭</ElButton></div><div class="详情状态"><ElTag :type="当前详情.order.processingStatus === '异常' ? 'danger' : 'primary'">{{ 当前详情.order.processingStatus }}</ElTag><span>{{ 当前详情.order.platformCode }} · {{ 当前详情.order.storeName }}</span></div><OrderFlags class="详情订单标志" :flags="行标志(当前详情)" /><ElAlert v-if="当前详情.order.blockReason || 当前详情.order.noShipmentReason" v-prototype="标注.发货条件" :title="当前详情.order.blockReason || 当前详情.order.noShipmentReason" :type="当前详情.order.blockReason ? 'warning' : 'info'" :closable="false" show-icon /><div v-prototype="标注.进度" class="履约节点"><div v-for="步骤 in 详情步骤" :key="步骤.标题" :class="{ 已完成: 步骤.完成 }"><ElIcon><CircleCheck v-if="步骤.完成" /><Clock v-else /></ElIcon><strong>{{ 步骤.标题 }}</strong><span>{{ 步骤.内容 }}</span></div></div><div class="下一步卡"><span>当前下一步</span><strong>{{ 下一步(当前详情) }}</strong><p>{{ 队列说明[当前详情.stage] }}</p></div><section class="详情分区"><h3>订单与履约</h3><dl><dt>系统订单号</dt><dd><ElButton link type="primary" @click="查看全渠道(当前详情.order)">{{ 当前详情.order.systemOrderNo }}<ElIcon><Document /></ElIcon></ElButton></dd><dt>平台订单号</dt><dd class="等宽">{{ 当前详情.order.platformOrderNo }}</dd><dt>平台状态</dt><dd>{{ 当前详情.order.platformOrderStatus || '—' }}</dd><dt>当前版本</dt><dd>v{{ 当前版本(当前详情.order.systemOrderNo) }}</dd><dt v-if="当前详情.order.admissionReason">进入 / 准入证据</dt><dd v-if="当前详情.order.admissionReason">{{ 当前详情.order.admissionReason }}</dd><dt>取消时间 / 原因</dt><dd>{{ 当前详情.order.cancelledAt || '无最终取消事实' }}<br v-if="当前详情.order.cancelledReason">{{ 展示处理原因(当前详情.order.cancelledReason) }}</dd></dl></section><section class="详情分区"><h3>收件信息 <small>标准订单只读摘要</small></h3><RecipientSummary v-prototype="标注.收件" :address="当前详情.order.address" /></section><section class="详情分区"><h3>商品与数量 <small>中台既有 SKU 映射结果 · 只读</small></h3><div v-for="商品 in 当前详情.order.items" :key="商品.externalLineId" class="商品行"><div><strong>{{ 商品.systemItemName || 商品.platformItemTitle }}</strong><span>{{ 商品.systemSku || '—' }}<template v-if="!商品.systemSku?.trim()"> · 未匹配系统 SKU</template></span><span>平台 SKU：{{ 商品.platformSku }}</span></div><b>下单 {{ 商品.orderedQuantity }} 件</b></div></section><section v-prototype="标注.路由" class="详情分区"><h3>{{ 当前详情.fulfillment ? '履约执行快照' : '订单头首次 / 默认路由' }}</h3><dl><dt>仓库 / 账号</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouse || '待分配' }}<br>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouseAccount || '—' }}</dd><dt>物流渠道</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.shippingChannel || '待分配' }}</dd><dt>面单模式</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.labelMode || '待分配' }}</dd><dt v-if="当前详情.fulfillment">计划 / 有效出库</dt><dd v-if="当前详情.fulfillment">{{ 当前详情.fulfillment.plannedQuantity }} / {{ 当前详情.fulfillment.shippedQuantity }}</dd></dl><ElButton v-if="当前详情.stage === '待审核'" :icon="Setting" @click="调整路由(当前详情.order)">修改仓库物流</ElButton></section><section class="详情分区"><h3>订单标发状态</h3><p v-if="!行标发记录(当前详情).length" class="浅色字">无标发记录</p><div v-for="单 in 行标发记录(当前详情)" :key="单.no" class="详情标发记录"><span>{{ 单.no }} · {{ 单.orderNo }}</span><ElButton link type="primary" @click="详情打开 = false; 查看标发详情(单)">{{ 单.status }}{{ 单.pendingVerification ? ' · 待核查' : '' }}</ElButton></div></section><section v-prototype="标注.仓库" class="详情分区"><h3>关联仓库执行</h3><template v-if="详情执行"><article v-for="执行 in 详情执行列表" :key="JSON.stringify([执行.履约单号, 执行.出库单号])" class="关联执行卡"><strong>{{ 执行.履约单号 }}</strong><dl><dt>OMS 出库单号</dt><dd class="等宽">{{ 执行.出库单号 }}</dd><dt>三方仓出库单号</dt><dd>{{ 执行.三方仓出库单号 || '尚未认领' }}</dd><dt>物流商单号</dt><dd class="等宽">{{ 执行.externalLogisticsOrderNo || '—' }}</dd><dt>仓库状态</dt><dd>{{ 执行.状态 }}{{ 执行.待核查 ? ' · 待核查' : '' }}</dd><dt>最近更新</dt><dd>{{ 执行.更新时间 }}</dd><dt v-if="执行.原因">结果说明</dt><dd v-if="执行.原因">{{ 展示处理原因(执行.原因) }}</dd></dl></article><ElButton :icon="Van" @click="查看执行(当前详情)">查看三方仓出库单</ElButton></template><p v-else class="浅色字">当前对象没有关联仓库执行记录。</p></section><section v-prototype="标注.审核" class="详情分区"><h3>审核记录 <small>每轮一段结果摘要</small></h3><p v-if="!当前详情.order.reviews.length" class="浅色字">尚未执行审核。</p><article v-for="记录 in [...当前详情.order.reviews].reverse()" :key="记录.round" class="审核记录"><header><strong>第 {{ 记录.round }} 轮 · {{ 记录.type }}</strong><ElTag size="small" :type="记录.status === '已通过' ? 'success' : 'warning'">{{ 记录.status }}</ElTag></header><p>{{ 展示处理原因(记录.decisionNote) || '尚无最终结论' }}</p><small>{{ 记录.completedAt || '—' }}</small></article></section><section class="详情分区"><h3>系统备注</h3><OrderNotes :order-no="当前详情.order.systemOrderNo" mode="detail" /></section><section v-prototype="标注.摘要日志" class="详情分区"><h3>操作日志</h3><p v-if="!当前详情.order.operationLogs.length" class="浅色字">暂无操作日志。</p><div v-for="(日志, 索引) in [...当前详情.order.operationLogs].reverse()" :key="索引" class="日志行"><ElIcon><CircleCheck /></ElIcon><div><strong>{{ 展示处理原因(日志.operationType) }} · {{ 日志.operationResult }}</strong><p>{{ 展示处理原因(日志.content) }}</p><small>{{ 日志.operatedAt }} · {{ 展示处理原因(日志.operator) }}</small></div></div></section></template><template #footer><div v-if="当前详情" class="详情动作"><ElButton @click="查看全渠道(当前详情.order)">完整订单详情</ElButton><ElButton v-if="当前详情.stage === '待审核'" type="primary" @click="详情打开 = false; 设置操作入口('审核', 当前详情)">审核</ElButton><ElButton v-else-if="当前详情.stage === '待推单' && !资格原因(当前详情).length" type="primary" @click="详情打开 = false; 设置操作入口('推单', 当前详情)">推单</ElButton><ElButton v-else-if="详情执行" type="primary" @click="详情打开 = false; 查看执行(当前详情)">查看仓库执行</ElButton></div></template></ElDrawer>
+    <ElDrawer v-model="详情打开" size="min(800px, 94vw)" append-to-body :with-header="false"><template v-if="当前详情"><div v-prototype="标注.证据" class="详情页眉"><div><small>履约执行摘要</small><h2>{{ 当前详情.key }}</h2></div><ElButton @click="详情打开 = false">关闭</ElButton></div><div class="详情状态"><ElTag :type="当前详情.order.processingStatus === '异常' ? 'danger' : 'primary'">{{ 当前详情.order.processingStatus }}</ElTag><span>{{ 当前详情.order.platformCode }} · {{ 当前详情.order.storeName }}</span></div><OrderFlags class="详情订单标志" :flags="行标志(当前详情)" /><ElAlert v-if="当前详情.order.blockReason || 当前详情.order.noShipmentReason" v-prototype="标注.发货条件" :title="当前详情.order.blockReason || 当前详情.order.noShipmentReason" :type="当前详情.order.blockReason ? 'warning' : 'info'" :closable="false" show-icon /><div v-prototype="标注.进度" class="履约节点"><div v-for="步骤 in 详情步骤" :key="步骤.标题" :class="{ 已完成: 步骤.完成 }"><ElIcon><CircleCheck v-if="步骤.完成" /><Clock v-else /></ElIcon><strong>{{ 步骤.标题 }}</strong><span>{{ 步骤.内容 }}</span></div></div><div class="下一步卡"><span>当前下一步</span><strong>{{ 下一步(当前详情) }}</strong><p>{{ 队列说明[当前详情.stage] }}</p></div><section class="详情分区"><h3>订单与履约</h3><dl><dt>系统订单号</dt><dd><ElButton link type="primary" @click="查看全渠道(当前详情.order)">{{ 当前详情.order.systemOrderNo }}<ElIcon><Document /></ElIcon></ElButton></dd><dt>平台订单号</dt><dd class="等宽">{{ 当前详情.order.platformOrderNo }}</dd><dt>平台状态</dt><dd>{{ 当前详情.order.platformOrderStatus || '—' }}</dd><dt>当前版本</dt><dd>v{{ 当前版本(当前详情.order.systemOrderNo) }}</dd><dt v-if="当前详情.order.admissionReason">进入 / 准入证据</dt><dd v-if="当前详情.order.admissionReason">{{ 当前详情.order.admissionReason }}</dd><dt>取消时间 / 原因</dt><dd>{{ 当前详情.order.cancelledAt || '无最终取消事实' }}<br v-if="当前详情.order.cancelledReason">{{ 展示处理原因(当前详情.order.cancelledReason) }}</dd></dl></section><section class="详情分区"><h3>收件信息 <small>标准订单只读摘要</small></h3><RecipientSummary v-prototype="标注.收件" :address="当前详情.order.address" /></section><section class="详情分区 履约商品范围"><h3>商品与数量 <small>{{ 当前详情.fulfillment?.items !== undefined ? '本次履约分配 · 只读' : '来源订单商品 · 只读' }}</small></h3><div v-for="商品 in 详情商品" :key="JSON.stringify([商品.sourceOrderNo, 商品.lineId])" class="商品行"><div><strong>{{ 商品.item?.systemItemName || 商品.item?.platformItemTitle || '来源商品待核实' }}</strong><span>{{ 商品.item?.systemSku || '—' }}<template v-if="!商品.item?.systemSku?.trim()"> · 未匹配系统 SKU</template></span><span>平台 SKU：{{ 商品.item?.platformSku || '—' }}</span><small>来源订单：{{ 商品.sourceOrderNo }}</small></div><div class="本包数量"><b v-if="商品.quantity !== undefined">本包计划 {{ 商品.quantity }} 件</b><small>来源下单 {{ 商品.item?.orderedQuantity ?? '待核实' }} 件</small></div></div></section><section v-prototype="标注.路由" class="详情分区"><h3>{{ 当前详情.fulfillment ? '履约执行快照' : '订单头首次 / 默认路由' }}</h3><dl><dt>仓库 / 账号</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouse || '待分配' }}<br>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouseAccount || '—' }}</dd><dt>物流渠道</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.shippingChannel || '待分配' }}</dd><dt>面单模式</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.labelMode || '待分配' }}</dd><dt v-if="当前详情.fulfillment">计划 / 有效出库</dt><dd v-if="当前详情.fulfillment">{{ 当前详情.fulfillment.plannedQuantity }} / {{ 当前详情.fulfillment.shippedQuantity }}</dd></dl><ElButton v-if="当前详情.stage === '待审核'" :icon="Setting" @click="调整路由(当前详情.order)">修改仓库物流</ElButton></section><section class="详情分区"><h3>订单标发状态</h3><p v-if="!行标发记录(当前详情).length" class="浅色字">{{ 当前详情.order.manualOrder ? '无需平台标发' : '无标发记录' }}</p><div v-for="单 in 行标发记录(当前详情)" :key="单.no" class="详情标发记录"><span>{{ 单.no }} · {{ 单.orderNo }}</span><ElButton link type="primary" @click="详情打开 = false; 查看标发详情(单)">{{ 单.status }}{{ 单.pendingVerification ? ' · 待核查' : '' }}</ElButton></div></section><section v-prototype="标注.仓库" class="详情分区"><h3>关联仓库执行</h3><template v-if="详情执行"><article v-for="执行 in 详情执行列表" :key="JSON.stringify([执行.履约单号, 执行.出库单号])" class="关联执行卡"><strong>{{ 执行.履约单号 }}</strong><dl><dt>OMS 出库单号</dt><dd class="等宽">{{ 执行.出库单号 }}</dd><dt>三方仓出库单号</dt><dd>{{ 执行.三方仓出库单号 || '尚未认领' }}</dd><dt>物流商单号</dt><dd class="等宽">{{ 执行.externalLogisticsOrderNo || '—' }}</dd><dt>仓库状态</dt><dd>{{ 执行.状态 }}{{ 执行.待核查 ? ' · 待核查' : '' }}</dd><dt>最近更新</dt><dd>{{ 执行.更新时间 }}</dd><dt v-if="执行.原因">结果说明</dt><dd v-if="执行.原因">{{ 展示处理原因(执行.原因) }}</dd></dl></article><ElButton :icon="Van" @click="查看执行(当前详情)">查看三方仓出库单</ElButton></template><p v-else class="浅色字">当前对象没有关联仓库执行记录。</p></section><section v-prototype="标注.审核" class="详情分区"><h3>审核记录 <small>每轮一段结果摘要</small></h3><p v-if="!当前详情.order.reviews.length" class="浅色字">尚未执行审核。</p><article v-for="记录 in [...当前详情.order.reviews].reverse()" :key="记录.round" class="审核记录"><header><strong>第 {{ 记录.round }} 轮 · {{ 记录.type }}</strong><ElTag size="small" :type="记录.status === '已通过' ? 'success' : 'warning'">{{ 记录.status }}</ElTag></header><p>{{ 展示处理原因(记录.decisionNote) || '尚无最终结论' }}</p><small>{{ 记录.completedAt || '—' }}</small></article></section><section class="详情分区"><h3>系统备注</h3><OrderNotes :order-no="当前详情.order.systemOrderNo" mode="detail" /></section><section v-prototype="标注.摘要日志" class="详情分区"><h3>操作日志</h3><p v-if="!当前详情.order.operationLogs.length" class="浅色字">暂无操作日志。</p><div v-for="(日志, 索引) in [...当前详情.order.operationLogs].reverse()" :key="索引" class="日志行"><ElIcon><CircleCheck /></ElIcon><div><strong>{{ 展示处理原因(日志.operationType) }} · {{ 日志.operationResult }}</strong><p>{{ 展示处理原因(日志.content) }}</p><small>{{ 日志.operatedAt }} · {{ 展示处理原因(日志.operator) }}</small></div></div></section></template><template #footer><div v-if="当前详情" class="详情动作"><ElButton @click="查看全渠道(当前详情.order)">完整订单详情</ElButton><ElButton v-if="当前详情.stage === '待审核'" type="primary" @click="详情打开 = false; 设置操作入口('审核', 当前详情)">审核</ElButton><ElButton v-else-if="当前详情.stage === '待推单' && !资格原因(当前详情).length" type="primary" @click="详情打开 = false; 设置操作入口('推单', 当前详情)">推单</ElButton><ElButton v-else-if="详情执行" type="primary" @click="详情打开 = false; 查看执行(当前详情)">查看仓库执行</ElButton></div></template></ElDrawer>
   </section>
   </ElConfigProvider>
 </template>
@@ -629,4 +690,5 @@ function 保存路由() {
 .匹配来源订单 :deep(.el-button){height:auto;min-height:18px;margin:0;font-size:11px;white-space:normal;text-align:left;overflow-wrap:anywhere}
 .时间表头{display:flex;align-items:center;gap:5px}.时间列帮助{display:inline-flex;padding:0;border:0;background:transparent;color:#9099a7;cursor:help;font-size:13px}.时间列帮助:focus-visible{outline:2px solid var(--el-color-primary);outline-offset:3px}.状态格 .列表订单标志{padding-top:4px;align-self:flex-start}
 .单号字段搜索 :deep(.字段选择){width:150px;flex:0 0 150px}
+.履约商品范围 .商品行 small{color:#8391a4;font-size:11px;line-height:1.5;overflow-wrap:anywhere}.履约商品范围 .本包数量{align-items:flex-end;flex-shrink:0}
 </style>

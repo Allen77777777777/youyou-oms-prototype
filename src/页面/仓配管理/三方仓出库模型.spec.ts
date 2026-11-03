@@ -3,8 +3,9 @@ import { nextTick } from 'vue'
 import { 创建出库工作台样例, 创建推单出库快照, 创建历史出库快照, 默认出库筛选, 命中出库筛选, 排序出库单据, 出库账号筛选键, 出库仓库筛选键, 取得出库详情 } from './三方仓出库模型'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
 import type { 全渠道订单 } from '../全渠道订单/类型'
-import { 演示路由, 共享订单, 仓库执行记录, 当前版本, 执行演示推单, 操作核查证据, 订单版本 } from '../订单处理/演示会话'
+import { 演示路由, 共享订单, 仓库执行记录, 当前版本, 执行演示推单, 操作核查证据, 订单版本, 评价跟踪OMS样例, 取消申请OMS样例 } from '../订单处理/演示会话'
 import { 仓库会话单据, 执行仓配会话动作, 仓配会话操作拦截, 取得出库截单影响范围, 创建仓库执行投影 } from './仓配会话'
+import { 保存人工发货方案, 创建合并发货草稿, 计算可合并订单 } from '../订单处理/拆合发货模型'
 
 function 深复制<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 const 截单基线 = { orders: 深复制(共享订单.value), executions: 深复制(仓库执行记录.value), rows: 深复制(仓库会话单据.value), evidence: 深复制(操作核查证据.value), versions: 深复制(订单版本.value) }
@@ -31,10 +32,98 @@ function 来源(no = 'OMS-TEST-OUTBOUND'): 全渠道订单 {
 }
 
 describe('三方仓出库快照及同源筛选', () => {
-  it('普通工作台基线包含十四张完整CK单据及四张详情演示仓单，不混入旧操作评审投影', () => {
-    expect(截单基线.rows).toHaveLength(18)
+  it('五项一致且电话不同可保存合并，仓单快照仍拒绝默取第一单联系方式', () => {
+    const orders = [来源('OMS-DEMO-CONTACT-A'), 来源('OMS-DEMO-CONTACT-B')]
+    for (const order of orders) {
+      order.platformCode = 'eBay'; order.storeId = 'DEMO-STORE'; order.buyerExternalId = 'DEMO-BUYER'
+      order.processingStatus = '待审核'; order.fulfillmentMode = '自配送'
+      order.fulfillmentOrders = []; order.reviews = []; order.manualShippingPlan = undefined
+      order.blockReason = undefined; order.cancelledAt = undefined
+      order.address = { fullName: '虚构收件人', countryCode: 'US', addressLine1: 'DEMO-STREET', mobilePhone: 'DEMO-PHONE-A' }
+    }
+    orders[1]!.address.mobilePhone = 'DEMO-PHONE-B'
+    const context = { 订单: orders, 仓库执行: [], 当前版本: () => 1, 记录操作: () => {} }
+    expect(计算可合并订单(context, orders.map(order => order.systemOrderNo)).groups).toHaveLength(1)
+    const plan = 创建合并发货草稿(orders); plan.reason = '按五项一致保存人工合并方案'
+    expect(保存人工发货方案(context, plan, Object.fromEntries(orders.map(order => [order.systemOrderNo, 1]))).成功).toBe(true)
+    for (const order of orders) order.fulfillmentOrders = [{ fulfillmentOrderNo: 'FL-DEMO-CONTACT', status: '待执行', isActive: true, route: { ...plan.packages[0]!.route }, plannedQuantity: 4, shippedQuantity: 0, items: 深复制(plan.packages[0]!.items) }]
+    const conflict = 创建推单出库快照(orders, 'FL-DEMO-CONTACT', '')
+    expect(conflict.snapshotReliable).toBe(false)
+    expect(conflict.recipient).toBeNull()
+    expect(conflict.items).toEqual([])
+    expect(conflict.compositionReason).toContain('完整收件资料不一致')
+    orders[1]!.address.mobilePhone = orders[0]!.address.mobilePhone
+    const verified = 创建推单出库快照(orders, 'FL-DEMO-CONTACT', '')
+    expect(verified.snapshotReliable).toBe(true)
+    expect(verified.recipient).toEqual(orders[0]!.address)
+    expect(verified.recipient).not.toBe(orders[0]!.address)
+  })
+
+  it('普通工作台保留原CK、拆分及已发货详情并追加评价跟踪CK，不混入旧操作评审投影', () => {
+    const 原十四张 = 截单基线.rows.filter(row => /^CK261010\d{4}$/.test(row.no))
+    expect(原十四张).toHaveLength(14)
+    expect(原十四张).toEqual(创建出库工作台样例())
+    expect(原十四张.every(row => row.no.startsWith('CK') && row.outboundDetail!.items.length > 0)).toBe(true)
+    expect(截单基线.rows.filter(row => row.no.startsWith('CK-DEMO-SPLIT-STAGE-'))).toHaveLength(9)
+    expect(截单基线.rows.filter(row => row.no.startsWith('CK-DEMO-DETAIL-')).map(row => row.no).sort()).toEqual(['MERGE', 'NORMAL', 'SPLIT-P1', 'SPLIT-P2'].map(code => `CK-DEMO-DETAIL-${code}`))
+    expect(截单基线.rows.filter(row => row.no.startsWith('CK-DEMO-AWAIT-')).map(row => row.no).sort()).toEqual(评价跟踪OMS样例.执行.map(execution => execution.出库单号).sort())
+    expect(截单基线.rows.filter(row => row.no.startsWith('CK-DEMO-CXL-')).map(row => row.no).sort()).toEqual(取消申请OMS样例.执行.map(execution => execution.出库单号).sort())
+    expect(截单基线.rows).toHaveLength(14 + 9 + 4 + 评价跟踪OMS样例.执行.length + 取消申请OMS样例.执行.length)
     expect(截单基线.rows.every(row => row.no.startsWith('CK') && row.outboundDetail!.items.length > 0)).toBe(true)
     expect(截单基线.executions.some(item => item.出库单号.startsWith('OUT-'))).toBe(true)
+  })
+  it('评价跟踪CK逐一对应完整来源及出库快照，不将旧OUT评审执行展示为新仓单', () => {
+    const rows = 截单基线.rows.filter(row => row.no.startsWith('CK-DEMO-AWAIT-'))
+    expect(rows).toHaveLength(评价跟踪OMS样例.订单.length)
+    for (const row of rows) {
+      const executions = 截单基线.executions.filter(execution => execution.出库单号 === row.no && execution.履约单号 === row.fulfillment)
+      expect(executions).toHaveLength(1)
+      const execution = executions[0]!, detail = 取得出库详情(row)
+      const source = 截单基线.orders.find(order => order.systemOrderNo === row.order)!
+      expect(source).toBeDefined()
+      expect(execution.订单号).toEqual([source.systemOrderNo])
+      expect(row).toMatchObject({ id: `shared-${row.no}`, status: '已出库', awaitingCheck: false, tracking: execution.出库事实!.tracking, planned: execution.出库事实!.planned, shipped: execution.出库事实!.shipped })
+      expect(detail.snapshotReliable).toBe(true)
+      expect(detail.sourceOrders).toEqual([{ systemOrderNo: source.systemOrderNo, platformOrderNo: source.platformOrderNo, platform: source.platformCode, shopId: source.storeId, shop: source.storeName }])
+      expect(detail.items).toEqual(execution.出库快照!.items)
+      expect(detail.items.map(item => [item.externalLineId, item.plannedQuantity, item.shippedQuantity])).toEqual(source.items.map(item => [item.externalLineId, item.orderedQuantity, item.orderedQuantity]))
+      expect(detail.quantitySummary.plannedQuantity).toBe(source.items.reduce((sum, item) => sum + item.orderedQuantity, 0))
+      expect(detail.quantitySummary.shippedQuantity).toBe(detail.quantitySummary.plannedQuantity)
+      expect(detail.route).toEqual(source.fulfillmentOrders.find(fulfillment => fulfillment.fulfillmentOrderNo === row.fulfillment)!.route)
+    }
+    expect(截单基线.rows.some(row => row.no.startsWith('OUT-'))).toBe(false)
+  })
+  it('新增九张阶段仓单逐一对应来源订单、履约和真实包裹快照，每包只含四或六件', () => {
+    const 预期 = [
+      ['PARTIAL', 1, '待出库', 4, 0],
+      ['WAITING', 1, '待出库', 4, 0], ['WAITING', 2, '待出库', 6, 0],
+      ['SHIPPED', 1, '已出库', 4, 4], ['SHIPPED', 2, '已出库', 6, 6],
+      ['EXCEPTION', 1, '待出库', 4, 0], ['EXCEPTION', 2, '出库异常', 6, 0],
+      ['STOPPED', 1, '已取消', 4, 0], ['STOPPED', 2, '已取消', 6, 0],
+    ] as const
+    const 阶段仓单 = 截单基线.rows.filter(row => row.no.startsWith('CK-DEMO-SPLIT-STAGE-'))
+    expect(阶段仓单.map(row => row.no).sort()).toEqual(预期.map(([场景, 包]) => `CK-DEMO-SPLIT-STAGE-${场景}-P${包}`).sort())
+    for (const [场景, 包, 状态, 计划量, 实发量] of 预期) {
+      const 订单号 = `OMS-DEMO-SPLIT-STAGE-${场景}`, 履约号 = `FL-DEMO-SPLIT-STAGE-${场景}-P${包}`, 仓单号 = `CK-DEMO-SPLIT-STAGE-${场景}-P${包}`
+      const 仓单 = 阶段仓单.find(row => row.no === 仓单号)!
+      const 执行 = 截单基线.executions.find(item => item.出库单号 === 仓单号)!
+      const 来源 = 截单基线.orders.find(order => order.systemOrderNo === 订单号)!
+      const 履约 = 来源.fulfillmentOrders.find(item => item.fulfillmentOrderNo === 履约号)!
+      const 详情 = 取得出库详情(仓单)
+      expect(仓单).toMatchObject({ id: `shared-${仓单号}`, fulfillment: 履约号, order: 订单号, status: 状态, planned: 计划量, shipped: 实发量, awaitingCheck: false })
+      expect(执行).toMatchObject({ 履约单号: 履约号, 订单号: [订单号], 状态, 待核查: false, 出库事实: { planned: 计划量, shipped: 实发量 } })
+      expect(详情.snapshotReliable).toBe(true)
+      expect(详情.sourceOrders).toEqual([{ systemOrderNo: 订单号, platformOrderNo: `DEMO-SPLIT-STAGE-${场景}`, platform: 'eBay', shopId: 'demo-ebay-split-stage', shop: '拆分发货阶段演示店' }])
+      expect(详情.items).toHaveLength(1)
+      expect(详情.items[0]).toMatchObject({ sourceOrderNo: 订单号, externalLineId: `DEMO-SPLIT-STAGE-${场景}-L${包}`, systemSku: `DEMO-SKU-${包}`, plannedQuantity: 计划量, shippedQuantity: 实发量, lineStatus: 状态 === '已出库' ? '已出库' : 状态 === '已取消' ? '已终止' : '待出库' })
+      expect(详情.items).toEqual(执行.出库快照!.items)
+      expect(详情.quantitySummary).toMatchObject({ plannedQuantity: 计划量, shippedQuantity: 实发量 })
+      expect(详情.route).toEqual(履约.route)
+      expect(详情.route).toEqual(演示路由[包 - 1])
+      expect(履约.plannedQuantity).toBe(计划量)
+      expect(详情.items.reduce((sum, item) => sum + item.plannedQuantity!, 0)).toBe(计划量)
+      expect(详情.quantitySummary.plannedQuantity).not.toBe(来源.items.reduce((sum, item) => sum + item.orderedQuantity, 0))
+    }
   })
   it('新提交固化本次逐行范围，零数量行不进入出库，修改来源不改变快照', () => {
     const order = 来源()
@@ -57,6 +146,51 @@ describe('三方仓出库快照及同源筛选', () => {
     order.fulfillmentOrders[0]!.plannedQuantity = 4
     order.items.push({ ...order.items[0]! })
     expect(创建推单出库快照([order], 'FULFILLMENT-TEST', '').items).toEqual([])
+  })
+  it('人工拆分只固化本包来源行和分配数量，不把其余待发商品带入出库', () => {
+    const order = 来源()
+    order.items.push({ ...order.items[0]!, externalLineId: 'not-in-this-package', systemSku: 'SKU-OTHER-PACKAGE', orderedQuantity: 3, fulfillableQuantity: 3 })
+    const fulfillment = order.fulfillmentOrders[0]!
+    fulfillment.plannedQuantity = 1
+    fulfillment.items = [{ orderNo: order.systemOrderNo, externalLineId: order.items[0]!.externalLineId, quantity: 1 }]
+    const snapshot = 创建推单出库快照([order], 'FULFILLMENT-TEST', '2026-10-21 10:00:00 UTC+8')
+    expect(snapshot.snapshotReliable).toBe(true)
+    expect(snapshot.quantitySummary.plannedQuantity).toBe(1)
+    expect(snapshot.items).toHaveLength(1)
+    expect(snapshot.items[0]).toMatchObject({ sourceOrderNo: order.systemOrderNo, externalLineId: order.items[0]!.externalLineId, plannedQuantity: 1 })
+    fulfillment.items[0]!.quantity = 2
+    expect(snapshot.items[0]!.plannedQuantity).toBe(1)
+    expect(创建历史出库快照([order], 'FULFILLMENT-TEST').items).toEqual([])
+  })
+  it('人工合并同名平台行按来源分别保留，完整包明细不重复累计', () => {
+    const first = 来源('OMS-MERGE-A'), second = 来源('OMS-MERGE-B')
+    first.items[0]!.externalLineId = 'same-line'; second.items[0]!.externalLineId = 'same-line'
+    const allocations = [{ orderNo: first.systemOrderNo, externalLineId: 'same-line', quantity: 1 }, { orderNo: second.systemOrderNo, externalLineId: 'same-line', quantity: 2 }]
+    for (const order of [first, second]) { order.fulfillmentOrders[0]!.items = 深复制(allocations); order.fulfillmentOrders[0]!.plannedQuantity = 3 }
+    const snapshot = 创建推单出库快照([first, second], 'FULFILLMENT-TEST', '')
+    expect(snapshot.snapshotReliable).toBe(true)
+    expect(snapshot.quantitySummary.plannedQuantity).toBe(3)
+    expect(snapshot.items.map(item => [item.sourceOrderNo, item.externalLineId, item.plannedQuantity])).toEqual([['OMS-MERGE-A', 'same-line', 1], ['OMS-MERGE-B', 'same-line', 2]])
+    expect(new Set(snapshot.items.map(item => item.id)).size).toBe(2)
+    second.address.buyerMessage = '其他来源订单留言'
+    second.address.fullName = ` ${first.address.fullName} `
+    expect(创建推单出库快照([first, second], 'FULFILLMENT-TEST', '').snapshotReliable).toBe(true)
+    expect(创建推单出库快照([first], 'FULFILLMENT-TEST', '').snapshotReliable).toBe(false)
+    delete second.fulfillmentOrders[0]!.items
+    expect(创建推单出库快照([first, second], 'FULFILLMENT-TEST', '').snapshotReliable).toBe(false)
+    second.fulfillmentOrders[0]!.items = 深复制(allocations)
+    second.fulfillmentOrders[0]!.items![0]!.quantity = 2
+    expect(创建推单出库快照([first, second], 'FULFILLMENT-TEST', '').snapshotReliable).toBe(false)
+  })
+  it('人工包来源缺失、重复、超量或非正整数时不制造可靠出库明细', () => {
+    const order = 来源()
+    const fulfillment = order.fulfillmentOrders[0]!
+    const valid = { orderNo: order.systemOrderNo, externalLineId: order.items[0]!.externalLineId, quantity: 1 }
+    for (const allocations of [[{ ...valid, orderNo: 'MISSING-SOURCE' }], [valid, valid], [{ ...valid, quantity: 3 }], [{ ...valid, quantity: 0 }], [{ ...valid, quantity: 0.5 }], []]) {
+      fulfillment.items = allocations; fulfillment.plannedQuantity = allocations.reduce((sum, item) => sum + item.quantity, 0)
+      const snapshot = 创建推单出库快照([order], 'FULFILLMENT-TEST', '')
+      expect(snapshot.snapshotReliable).toBe(false); expect(snapshot.items).toEqual([]); expect(snapshot.quantitySummary.plannedQuantity).toBeNull()
+    }
   })
   it('合单逐来源各一件只记两件，筛选必须同一来源满足订单、平台、店铺及SKU', () => {
     const row = 创建出库工作台样例()[7]!, d = 取得出库详情(row), filter = 默认出库筛选()

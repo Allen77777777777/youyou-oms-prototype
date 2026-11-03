@@ -1,0 +1,68 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { ElTable, ElTableColumn, ElTag } from 'element-plus'
+import CopyNumber from '@/组件/单号复制.vue'
+import { getReturnDetail, formatReturnTime, type ReturnRecord } from './模型'
+import { moneyText, activityNames, type ReturnAddress, type ReturnAttachment } from './接口契约'
+import { feeLabels, refundStatusLabels } from './展示工具'
+import { originalAttachmentUrl } from './附件媒体'
+import { returnAnnotation as annotation } from './标注'
+import ReturnAttachments from './申请附件.vue'
+const props = defineProps<{ row: ReturnRecord; area: 'status' | 'application' | 'refund' | 'shipping' | 'aside'; orderAddress?: ReturnAddress | null }>()
+const detail = computed(() => getReturnDetail(props.row))
+const time = (value?: string | null) => formatReturnTime(value, props.row)
+const activity = (value: string) => activityNames[value] || value
+const late = (value: string | null) => !!value && Date.parse(value) < Date.now() && props.row.state !== 'CLOSED' && props.row.status !== 'CLOSED'
+const sourceLabels = { summary: '状态与操作资格', detail: '申请详情', files: '附件', tracking: '退回轨迹' }
+const readIssues = computed(() => Object.entries(detail.value.readStatus).filter(([,value]) => value.status !== 'success'))
+const initiators: Record<string,string> = { SELLER_INITIATED: '卖家发起', AUTO_REFUND: '平台自动退款' }
+const closeReasons: Record<string,string> = { FULL_REFUNDED: '已全额退款', AUTO_REFUNDED: '平台已自动退款', BUYER_CLOSED: '买家关闭申请', SELLER_DECLINED: '卖家拒绝退货' }
+const buyerCloseReasons: Record<string,string> = { BUYER_NO_LONGER_WANTS_RETURN: '买家不再需要退货' }
+const holdStatuses: Record<string,string> = { HOLD_CREATION_SUCCESS: '暂缓处理中' }
+const shipmentStatuses: Record<string,string> = { DELIVERED: '已送达', IN_TRANSIT: '运输中', UNKNOWN: '状态待核实', LABEL_CREATED: '面单已生成', SHIPPED: '已寄出' }
+const roles: Record<string,string> = { BUYER: '买家', SELLER: '卖家', EBAY: 'eBay', SYSTEM: '平台系统', OTHER: '其他来源' }
+const fileUrl = (file: ReturnAttachment): string => detail.value.contentOnHold || detail.value.readStatus.files.status !== 'success' ? '' : originalAttachmentUrl(file)
+const labelFile = (fileId?: string) => detail.value.files.find(file => file.fileId === fileId && file.filePurpose === 'LABEL_RELATED')
+const addressText = (address: ReturnAddress) => [address.addressLine1, address.addressLine2, [address.city, address.stateOrProvince, address.postalCode].filter(Boolean).join(', '), address.country].filter(Boolean).join('\n')
+const addresses = computed(() => [
+  { label: '买家默认收货地址', source: '退货申请资料', value: detail.value.buyerAddress },
+  { label: '原订单收货地址', source: '关联订单资料', value: props.orderAddress || null },
+  { label: '卖家退货地址资料', source: '退货申请资料', value: detail.value.sellerAddress },
+])
+</script>
+
+<template>
+  <div v-if="area === 'status'" class="return-source-status">
+    <div v-if="readIssues.length" class="read-warning" role="status"><strong>部分资料尚未完成刷新</strong><span v-for="[key,value] in readIssues" :key="key">{{ sourceLabels[key as keyof typeof sourceLabels] }}：{{ value.error || (value.status === 'failed' ? '读取失败，保留上次资料' : '尚未取得') }}</span></div>
+    <section v-prototype="annotation('responsibility')" class="responsibility-panel">
+      <div><small>卖家当前待办</small><strong>{{ detail.readStatus.summary.status !== 'success' ? '当前待办待核实' : detail.sellerDue ? activity(detail.sellerDue.activity) : '暂无待办' }}</strong><span :class="{ overdue: detail.sellerDue && late(detail.sellerDue.at) }">{{ detail.sellerDue?.at ? '截止 ' + time(detail.sellerDue.at) : '未提供截止时间' }}</span></div>
+      <div><small>买家当前待办</small><strong>{{ detail.readStatus.summary.status !== 'success' ? '当前待办待核实' : detail.buyerDue ? activity(detail.buyerDue.activity) : '暂无待办' }}</strong><span>{{ detail.buyerDue?.at ? '截止 ' + time(detail.buyerDue.at) : '未提供截止时间' }}</span></div>
+    </section>
+    <p v-if="detail.contentOnHold" class="read-warning">平台已隐藏本申请部分内容，隐藏资料不从历史缓存补回。</p>
+    <p v-if="detail.holdInfo" class="read-warning">平台 Hold：{{ holdStatuses[detail.holdInfo.status] || detail.holdInfo.status }}<span v-if="detail.holdInfo.until"> · 预计解除 {{ time(detail.holdInfo.until) }}</span></p>
+    <section v-if="detail.closeInfo" class="detail-panel close-panel"><h3>申请关闭结果</h3><dl><dt>关闭时间</dt><dd>{{ time(detail.closeInfo.at) }}</dd><dt>平台关闭原因</dt><dd>{{ closeReasons[detail.closeInfo.reason] || detail.closeInfo.reason || '未提供' }}</dd><dt>买家关闭原因</dt><dd>{{ buyerCloseReasons[detail.closeInfo.buyerReason] || detail.closeInfo.buyerReason || '未提供' }}</dd><dt>买家说明</dt><dd>{{ detail.contentOnHold ? '平台已隐藏内容' : detail.closeInfo.buyerComment || '未提供' }}</dd></dl></section>
+  </div>
+  <section v-else-if="area === 'application'" class="detail-panel application-panel"><h3>申请信息</h3><dl><dt>买家诉求</dt><dd>{{ row.returnType === 'MONEY_BACK' ? '退货 / 退款' : row.returnType }}</dd><dt>退货原因</dt><dd>{{ row.reason }}</dd><dt>申请时间</dt><dd>{{ time(row.createdAt) }}</dd><dt>退货授权</dt><dd>{{ detail.rmaRequired === null ? '要求待核实' : detail.rmaRequired ? '买家寄回前需提供 RMA' : '无需 RMA' }}<span v-if="detail.rmaNumber"> · {{ detail.rmaNumber }}</span></dd></dl><div class="buyer-comment"><small>买家申请说明</small><p>{{ detail.contentOnHold ? '平台已隐藏内容' : detail.buyerComment || '买家未提供文字说明' }}</p></div></section>
+  <section v-else-if="area === 'refund'" v-prototype="annotation('refund-detail')" class="detail-panel refund-detail-panel">
+    <h3>退款信息 <ElTag v-if="detail.refund.status" size="small" :type="detail.refund.status === 'FAILED' ? 'danger' : detail.refund.status === 'SUCCESS' ? 'success' : 'warning'">{{ refundStatusLabels[detail.refund.status] || detail.refund.status }}</ElTag></h3>
+    <div class="refund-totals"><div><small>卖家预计承担</small><strong>{{ moneyText(detail.refund.sellerEstimated) }}</strong></div><div><small>买家预计所得</small><strong>{{ moneyText(detail.refund.buyerEstimated) }}</strong></div><div><small>卖家实际退款</small><strong>{{ moneyText(detail.refund.sellerActual) }}</strong></div><div><small>买家实际所得</small><strong>{{ moneyText(detail.refund.buyerActual) }}</strong></div></div>
+    <ElTable v-if="detail.refund.items.length" :data="detail.refund.items" border class="refund-items"><ElTableColumn label="退款费用" min-width="140"><template #default="{ row: item }">{{ item.label }}<small v-if="item.optional" class="optional">可选</small></template></ElTableColumn><ElTableColumn label="预计金额" min-width="110"><template #default="{ row: item }">{{ item.currency }} {{ item.estimated }}</template></ElTableColumn><ElTableColumn label="允许范围" min-width="140"><template #default="{ row: item }">{{ item.min }} ～ {{ item.max }}</template></ElTableColumn></ElTable>
+    <p v-else class="muted">退款分项尚未取得，不能用预计总额代替本次退款。</p>
+    <dl class="refund-meta"><dt>资金发起来源</dt><dd>{{ initiators[detail.refund.initiator || ''] || detail.refund.initiator || '未提供' }}</dd><dt>退款时间</dt><dd>{{ time(detail.refund.issuedAt) }}</dd><dt>剩余待退</dt><dd>{{ moneyText(detail.refund.outstanding) }}</dd></dl>
+    <p v-if="detail.refund.provisional" class="read-warning">{{ detail.refund.provisional }}</p><p v-if="detail.refund.recoup" class="read-warning">{{ detail.refund.recoup }}</p>
+    <details v-if="detail.refund.actualItems.length || detail.refund.moneyMovements.length" class="money-history"><summary>查看实际退款与资金记录</summary><div v-for="(item,index) in detail.refund.actualItems" :key="'actual'+index" class="plain-row"><span>{{ feeLabels[item.refundFeeType] || item.refundFeeType }}</span><strong>{{ moneyText(item.amount) }}</strong></div><div v-for="item in detail.refund.moneyMovements" :key="item.id" class="plain-row"><span>{{ item.type }} · {{ item.status }}<small>{{ time(item.at) }}</small></span><span class="movement-money"><small v-if="item.requestedAmount">请求金额 {{ moneyText(item.requestedAmount) }}</small><strong>实际金额 {{ moneyText(item.actualAmount || item.amount) }}</strong></span></div></details>
+  </section>
+  <section v-else-if="area === 'shipping'" v-prototype="annotation('return-shipping')" class="detail-panel return-shipping-panel">
+    <h3>退货物流</h3><dl><dt>退回进度</dt><dd>{{ row.shipping }}</dd><dt>运费承担方</dt><dd>{{ detail.shippingPayer ? roles[detail.shippingPayer] || detail.shippingPayer : '待核实' }}</dd><dt>退货授权编号</dt><dd><CopyNumber :value="detail.rmaNumber" label="退货授权编号" /></dd></dl>
+    <div v-for="shipment in detail.shipments" :key="JSON.stringify([shipment.shipmentId,shipment.carrierEnum,shipment.trackingNumber])" class="shipment-card"><header><strong>{{ shipment.carrierName || shipment.carrierEnum || '承运商待核实' }}</strong><ElTag size="small">{{ shipmentStatuses[shipment.deliveryStatus] || shipment.deliveryStatus || '物流状态待核实' }}</ElTag></header><div class="shipment-number"><CopyNumber :value="shipment.trackingNumber" label="退货跟踪号" /></div><dl><dt>寄出时间</dt><dd>{{ time(shipment.actualShipDate) }}</dd><dt>送达时间</dt><dd>{{ time(shipment.actualDeliveryDate) }}</dd><dt>卖家确认收货</dt><dd>{{ shipment.markAsReceived ? '已确认' : '尚未确认' }}</dd><dt>本运单目的地</dt><dd class="address-text">{{ shipment.destinationAddress ? [shipment.destinationAddress.name,addressText(shipment.destinationAddress)].join('\n') : '未提供' }}</dd></dl><p v-if="shipment.labelFileId" class="shipment-label"><span>退货面单：</span><a v-if="labelFile(shipment.labelFileId) && fileUrl(labelFile(shipment.labelFileId)!)" :href="fileUrl(labelFile(shipment.labelFileId)!)" target="_blank" rel="noopener noreferrer">查看面单</a><span v-else class="muted">文件尚未取得或已失效</span></p><details class="tracking-details"><summary>查看退回轨迹（{{ shipment.scans.length }}）</summary><p v-if="shipment.readStatus !== 'success'" class="read-warning">{{ shipment.readStatus === 'failed' ? '轨迹读取失败，请刷新重试' : '轨迹尚未取得' }}</p><ol v-else-if="shipment.scans.length"><li v-for="(scan,index) in shipment.scans" :key="index"><time>{{ time(scan.at) }}</time><p>{{ scan.description }} <span class="muted">{{ scan.location }}</span></p></li></ol><p v-else class="muted">承运商暂无轨迹</p></details></div>
+    <p v-if="!detail.shipments.length" class="empty-inline">{{ row.keepItem ? '当前申请无需寄回商品' : '暂无退回运单资料' }}</p>
+  </section>
+  <template v-else-if="area === 'aside'">
+    <ReturnAttachments :row="row" />
+    <section v-prototype="annotation('addresses')" class="detail-panel addresses-panel"><h3>相关地址</h3><article v-for="address in addresses" :key="address.label" class="address-card"><header><strong>{{ address.label }}</strong><small>{{ address.source }}</small></header><template v-if="address.value"><p>{{ address.value.name }}</p><p class="address-text">{{ addressText(address.value) }}</p></template><p v-else class="muted">尚未取得</p></article><p class="muted">退回目的地以对应运单资料为准。</p></section>
+  </template>
+</template>
+
+<style scoped>
+.detail-panel{border:1px solid #e8ebef;border-radius:5px;padding:16px;margin-bottom:16px;min-width:0;font-size:12px;color:#303133}.detail-panel h3{margin:0 0 16px;font-size:14px;color:var(--yy-text-heading);display:flex;align-items:center;gap:8px}.detail-panel h4{font-size:12px;color:var(--yy-text-heading);margin:12px 0}.detail-panel dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:12px 10px;margin:0}.detail-panel dt,small,.muted{color:#909399}.detail-panel dd{margin:0;line-height:1.6;overflow-wrap:anywhere}.buyer-comment{border-top:1px solid #ebeef5;margin-top:16px;padding-top:12px}.buyer-comment p{white-space:pre-wrap;line-height:1.8;margin:7px 0 0}.responsibility-panel{display:grid;grid-template-columns:1fr 1fr;gap:14px;background:#f4f8ff;border:1px solid #dfeafb;border-radius:5px;margin-bottom:16px;padding:14px 16px}.responsibility-panel>div{display:flex;flex-direction:column;gap:7px;font-size:12px}.responsibility-panel strong{font-size:14px;color:#303133}.responsibility-panel>div+div{padding-left:16px;border-left:1px solid #dfeafb}.overdue{color:#c45656}.read-warning{background:#fff8e9;color:#986618;padding:10px 12px;line-height:1.8;font-size:12px;margin:0 0 12px;border-radius:4px}.read-warning span{display:block}.refund-totals{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}.refund-totals div{display:flex;flex-direction:column;gap:8px}.refund-totals strong{font-size:16px;color:#303133;font-variant-numeric:tabular-nums}.refund-items{margin-bottom:16px;font-size:12px}.optional{margin-left:6px;font-size:10px}.refund-meta{margin:16px 0!important}.money-history summary,.tracking-details summary{cursor:pointer;color:#1677ff;font-size:12px}.plain-row{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #ebeef5;padding:12px 0}.movement-money{display:flex;flex-direction:column;gap:5px;text-align:right}.plain-row small{display:block;margin-top:6px}.shipment-card{margin-top:16px;border:1px solid #e8ebef;border-radius:4px;padding:14px}.shipment-card header{display:flex;align-items:center;justify-content:space-between;gap:8px}.shipment-label a{color:#1677ff;text-decoration:none}.shipment-number{margin:10px 0 16px;color:#1677ff}.tracking-details{margin-top:14px}.tracking-details ol{padding-left:18px}.tracking-details li{padding:8px 0}.tracking-details p{margin:6px 0}.tracking-details time{color:#909399}.address-text{white-space:pre-line;line-height:1.8;overflow-wrap:anywhere}.address-card{border-bottom:1px solid #ebeef5;padding:0 0 12px;margin-bottom:14px}.address-card:last-of-type{border-bottom:0;margin-bottom:0}.address-card header{display:flex;flex-direction:column;gap:5px}.address-card header strong{font-weight:500}.address-card p{margin:8px 0 0}.empty-inline{background:#fafbfc;padding:13px;text-align:center;color:#909399;border-radius:3px}.inline-error{color:#c45656}@media(max-width:1350px){.detail-panel{padding:14px}.responsibility-panel{padding:13px 14px}}@media(max-width:650px){.responsibility-panel{grid-template-columns:1fr}.responsibility-panel>div+div{border-left:0;border-top:1px solid #dfeafb;padding:12px 0 0}}
+</style>

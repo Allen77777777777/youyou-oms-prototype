@@ -228,20 +228,20 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(wrapper.emitted('result')).toBeUndefined()
   })
 
-  it('16条待审核批量无需审核说明也可提交，普通拦截留痕且部分履约不代替人工核查', async () => {
+  it('28条待审核批量无需审核说明也可提交，普通拦截留痕且部分履约不代替人工核查', async () => {
     const orders = 共享订单.value.filter(order => order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
-    expect(orders).toHaveLength(16)
+    expect(orders).toHaveLength(28)
     const 原轮数 = new Map(orders.map(order => [order.systemOrderNo, order.reviews.length]))
     const rows: 作业行[] = orders.map(order => ({ key: order.systemOrderNo, order, stage: '待审核' }))
     const wrapper = await 打开组件('审核', rows, true)
-    expect(wrapper.get('.范围摘要').text()).toContain('共 16 个对象')
-    expect(wrapper.get('.范围摘要').text()).toContain('可处理 14 个')
+    expect(wrapper.get('.范围摘要').text()).toContain('共 28 个对象')
+    expect(wrapper.get('.范围摘要').text()).toContain('可处理 26 个')
     expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['审核说明'])
     expect(已禁用(wrapper, '确认审核')).toBe(false)
     await 按钮(wrapper, '确认审核').trigger('click')
     await flushPromises()
     const results = wrapper.emitted('result')![0]![1] as Array<{ key: string; result: { 成功: boolean } }>
-    expect(results).toHaveLength(16)
+    expect(results).toHaveLength(28)
     for (const order of orders) {
       if (order.platformOrderStatus === 'IN_PROGRESS') {
         expect(order.reviews).toHaveLength(原轮数.get(order.systemOrderNo)!)
@@ -250,15 +250,37 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
       } else expect(order.reviews).toHaveLength(原轮数.get(order.systemOrderNo)! + 1)
     }
     expect(单('02').reviews[单('02').reviews.length - 1]).toMatchObject({ status: '已拦截', decisionNote: expect.stringContaining('库存不足') })
+    const sufficient = orders.find(order => order.systemOrderNo === 'OMS-DEMO-SPLIT-STAGE-REVIEW')!
+    const insufficient = orders.find(order => order.systemOrderNo === 'OMS-DEMO-SPLIT-STAGE-LOWSTOCK')!
+    expect(sufficient.processingStatus).toBe('待推单')
+    expect(sufficient.fulfillmentOrders).toHaveLength(2)
+    expect(insufficient.processingStatus).toBe('待审核')
+    expect(insufficient.fulfillmentOrders).toHaveLength(0)
+    expect(insufficient.reviews[insufficient.reviews.length - 1]).toMatchObject({ status: '已拦截', decisionNote: expect.stringContaining('本仓可用库存 1 件') })
+    for (const suffix of ['04', '05', '06', '07']) {
+      const order = orders.find(item => item.systemOrderNo === `OMS-DEMO-MERGE-${suffix}`)!
+      expect(results.find(item => item.key === order.systemOrderNo)!.result.成功).toBe(true)
+      expect(order.processingStatus).toBe('待推单')
+      expect(order.fulfillmentOrders).toHaveLength(1)
+    }
+    const missingSku = orders.find(order => order.systemOrderNo === 'OMS-DEMO-MERGE-08')!
+    expect(results.find(item => item.key === missingSku.systemOrderNo)!.result.成功).toBe(false)
+    expect(missingSku.processingStatus).toBe('待审核')
+    expect(missingSku.fulfillmentOrders).toHaveLength(0)
+    expect(missingSku.reviews[missingSku.reviews.length - 1]).toMatchObject({ status: '已拦截', decisionNote: expect.stringContaining('SKU 映射') })
   })
 
-  it('16条待审核批量不发货只有一个必填原因，人工确认后逐单终止而不创建仓单', async () => {
+  it('28条待审核批量不发货先跳过两张已有人工方案，其余26张终止且不创建仓单', async () => {
     const orders = 共享订单.value.filter(order => order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
-    expect(orders).toHaveLength(16)
+    expect(orders).toHaveLength(28)
+    const protectedOrders = orders.filter(order => order.manualShippingPlan)
+    expect(protectedOrders.map(order => order.systemOrderNo)).toEqual(['OMS-DEMO-SPLIT-STAGE-REVIEW', 'OMS-DEMO-SPLIT-STAGE-LOWSTOCK'])
+    const protectedSnapshots = protectedOrders.map(order => JSON.stringify(order))
     const 初始执行数 = 仓库执行记录.value.length
     const rows: 作业行[] = orders.map(order => ({ key: order.systemOrderNo, order, stage: '待审核' }))
     const wrapper = await 打开组件('不发货', rows, true)
-    expect(wrapper.get('.范围摘要').text()).toContain('可处理 16 个')
+    expect(wrapper.get('.范围摘要').text()).toContain('共 28 个对象')
+    expect(wrapper.get('.范围摘要').text()).toContain('可处理 26 个')
     expect(wrapper.findAll('textarea').map(item => item.attributes('aria-label'))).toEqual(['不发货原因'])
     await wrapper.get('[aria-label="不发货原因"]').setValue('已核实无需 OMS 继续发货，全部历史零出库且无未结束执行')
     expect(已禁用(wrapper, '确认不发货')).toBe(true)
@@ -266,8 +288,52 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
     expect(已禁用(wrapper, '确认不发货')).toBe(false)
     await 按钮(wrapper, '确认不发货').trigger('click')
     await flushPromises()
-    expect(orders.every(order => order.processingStatus === '不发货')).toBe(true)
+    expect(orders.filter(order => !order.manualShippingPlan).every(order => order.processingStatus === '不发货')).toBe(true)
+    expect(protectedOrders.map(order => JSON.stringify(order))).toEqual(protectedSnapshots)
     expect(仓库执行记录.value).toHaveLength(初始执行数)
-    expect(wrapper.emitted('result')![0]![1]).toHaveLength(16)
+    const results = wrapper.emitted('result')![0]![1] as Array<{ key: string; result: { 成功: boolean; 信息: string } }>
+    expect(results).toHaveLength(28)
+    expect(results.filter(item => item.result.成功)).toHaveLength(26)
+    expect(results.filter(item => item.result.信息.startsWith('已跳过：')).map(item => item.key)).toEqual(protectedOrders.map(order => order.systemOrderNo))
+    for (const suffix of ['04', '05', '06', '07', '08']) expect(results.find(item => item.key === `OMS-DEMO-MERGE-${suffix}`)!.result.成功).toBe(true)
+  })
+
+  it('拆分P1推单只显示本包SKU1四件，P2只显示SKU2六件，未把整单方案当作本次范围', async () => {
+    const order = 共享订单.value.find(candidate => candidate.systemOrderNo === 'OMS-DEMO-SPLIT-STAGE-READY')!
+    for (const [index, fulfillment] of order.fulfillmentOrders.entries()) {
+      const row: 作业行 = { key: fulfillment.fulfillmentOrderNo, order, fulfillment, stage: '待推单' }
+      const wrapper = await 打开组件('推单', [row])
+      const expectedSku = `DEMO-SKU-${index + 1}`, excludedSku = `DEMO-SKU-${index === 0 ? 2 : 1}`, quantity = index === 0 ? 4 : 6
+      expect(wrapper.get('.本次商品范围').text()).toBe(`${expectedSku} · 本次分配 ${quantity} 件`)
+      expect(wrapper.findAll('.本次商品行')).toHaveLength(1)
+      expect(wrapper.text()).toContain(`本次计划 ${quantity} 件`)
+      expect(wrapper.text()).not.toContain(excludedSku)
+      expect(wrapper.findAll('.履约事实')).toHaveLength(1)
+      expect(wrapper.get('.履约事实').text()).toContain(fulfillment.fulfillmentOrderNo)
+      expect(wrapper.find('.人工审核方案').exists()).toBe(false)
+      expect(已禁用(wrapper, '确认推单')).toBe(false)
+    }
+  })
+
+  it('共享履约的重推范围按来源隔离，保留两张来源身份但不带入各自其他商品', async () => {
+    const sources = [单('33'), 单('34')]
+    for (const [index, order] of sources.entries()) {
+      order.items[0]!.systemSku = `SHARED-SOURCE-${index + 1}`
+      order.items.push({ ...order.items[0]!, externalLineId: `UNRELATED-LINE-${index + 1}`, systemSku: `UNRELATED-SKU-${index + 1}` })
+    }
+    const allocation = sources.map(order => ({ orderNo: order.systemOrderNo, externalLineId: order.items[0]!.externalLineId, quantity: 1 }))
+    for (const order of sources) order.fulfillmentOrders[0]!.items = allocation.map(item => ({ ...item }))
+    const wrapper = await 打开组件('重新推单', [行('33', true)])
+    expect(wrapper.findAll('.来源事实')).toHaveLength(2)
+    expect(wrapper.findAll('.对象编号')).toHaveLength(1)
+    const ranges = wrapper.findAll('.本次商品范围')
+    expect(ranges).toHaveLength(2)
+    for (const [index, order] of sources.entries()) {
+      const range = ranges.find(item => item.attributes('data-source-order') === order.systemOrderNo)!
+      expect(range.text()).toBe(`SHARED-SOURCE-${index + 1} · 本次分配 1 件`)
+      expect(range.text()).not.toContain(`SHARED-SOURCE-${index === 0 ? 2 : 1}`)
+    }
+    expect(wrapper.text()).not.toContain('UNRELATED-SKU')
+    expect(已禁用(wrapper, '确认重新推单')).toBe(true)
   })
 })

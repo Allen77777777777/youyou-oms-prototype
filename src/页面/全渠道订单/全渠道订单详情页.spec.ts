@@ -75,6 +75,21 @@ afterEach(() => {
 })
 
 describe('订单完整详情的业务事实展示', () => {
+  it('手工来源展示业务用途与原单追溯，本地行号不冒充平台行号且空金额不显示零', async () => {
+    const order = 测试订单()
+    order.platformCode = '手工'; order.storeId = ''; order.storeName = ''; order.platformOrderNo = ''
+    order.platformOrderId = undefined; order.platformOrderStatus = undefined; order.orderType = '手工订单'
+    order.manualOrder = { scenario: '寄样赠送', originalOrderNo: 'OMS-ORIGINAL-DEMO', reason: '虚构寄样评审', paidConfirmed: false, requestId: 'manual-detail-test' }
+    order.amount = { orderAmount: { value: '', currency: '' } }
+    const page = await 打开(order)
+    expect(字段值(分区(page, 'basic'), '订单来源')).toBe('手工创建')
+    expect(字段值(分区(page, 'basic'), '业务用途')).toBe('寄样赠送')
+    expect(字段值(分区(page, 'basic'), '关联原订单')).toBe('OMS-ORIGINAL-DEMO')
+    expect(分区(page, 'items').text()).toContain('订单行标识')
+    expect(分区(page, 'items').text()).not.toContain('平台订单行 ID')
+    expect(字段值(分区(page, 'amount'), '订单总金额')).toBe('—')
+    expect(分区(page, 'fulfillment').text()).toContain('手工订单无需平台标发')
+  })
   it('拆分商品并入各履约行，只展示本次分配的SKU及数量且取消独立发货安排区', async () => {
     const order = 测试订单()
     order.items[1]!.systemSku = 'DEMO-SYSTEM-SKU-B'

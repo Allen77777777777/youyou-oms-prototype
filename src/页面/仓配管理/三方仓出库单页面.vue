@@ -120,6 +120,12 @@ function 确认导出() {
 }
 watch(当前状态, () => { 当前页.value = 1; 清除选择() }); watch(每页, () => { 当前页.value = 1; 清除选择() }); watch(当前页, 清除选择)
 watch(() => [route.query.fulfillmentOrderNo, route.query.systemOrderNo], ([fulfillment, order]) => { const keyword = typeof fulfillment === 'string' ? fulfillment : typeof order === 'string' ? order : ''; if (keyword) { 重置(); 筛选.searchType = typeof fulfillment === 'string' ? 'fulfillment' : 'order'; 筛选.searchMatch = 'exact'; 筛选.keyword = keyword; 查询() } }, { immediate: true })
+watch(() => route.query.outboundId, id => {
+  if (typeof id !== 'string' || !id.trim()) return
+  const matches = 仓库会话单据.value.filter(row => row.id === id)
+  if (matches.length !== 1) { 详情打开.value = false; ElMessage.warning('未找到可唯一定位的三方仓出库单，请核对来源单据'); return }
+  查看(matches[0]!)
+}, { immediate: true })
 </script>
 
 <template>

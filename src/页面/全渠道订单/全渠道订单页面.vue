@@ -92,7 +92,7 @@ const 复制筛选条件 = (来源: 全渠道订单筛选条件): 全渠道订�
 
 const 平台选项 = computed(() => [...new Set(订单列表.value.map((订单) => 订单.platformCode))].map(值 => ({ value: 值, label: 值 })))
 const 店铺选项 = computed(() => [...new Map(订单列表.value
-  .filter((订单) => 命中多选(筛选条件.platform, 订单.platformCode))
+  .filter((订单) => 订单.storeId && 命中多选(筛选条件.platform, 订单.platformCode))
   .map((订单) => [订单.storeId, { value: 订单.storeId, label: 订单.storeName }])).values()])
 const 平台状态选项 = computed(() => [
   ...[...new Set(订单列表.value
@@ -487,7 +487,7 @@ function 获取行OMS状态(原始订单: unknown) {
               <div class="系统单号行">
                 <button type="button" @click="打开详情(row)">{{ row.systemOrderNo }}</button>
               </div>
-              <span>平台单号 {{ row.platformOrderNo }}</span>
+              <span>{{ row.manualOrder ? row.manualOrder.scenario : `平台单号 ${row.platformOrderNo || '—'}` }}</span>
               <small>买家 {{ row.buyerExternalId || '平台未返回' }}</small>
             </div>
           </template>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
-import { 查询订单关联库存, 取得最大库龄, 取得库存查询范围, 关联数量文本, 关联演示数据, type 关联库龄来源, type 关联快照, type 关联来源身份 } from './库存关联模型'
+import { 查询订单关联库存, 取得库存查询商品, 取得最大库龄, 取得库存查询范围, 关联数量文本, 关联演示数据, type 关联库龄来源, type 关联快照, type 关联来源身份 } from './库存关联模型'
 import { 数量定义 } from '../三方仓库存/库存模型'
 import type { 作业行 } from './展示工具'
 
@@ -18,6 +18,16 @@ function ageSample() {
 }
 
 describe('订单仓库库存只读关联', () => {
+  it('拆分履约库存只查本包来源商品，其他包及其他来源同名行不串入', () => {
+    const row = sampleRow()
+    const target = row.order.items[0]!
+    row.fulfillment = { fulfillmentOrderNo: 'FL-SPLIT-INVENTORY', status: '待执行', isActive: true, route: row.order.defaultRoute!, plannedQuantity: 1, shippedQuantity: 0, items: [{ orderNo: row.order.systemOrderNo, externalLineId: target.externalLineId, quantity: 1 }, { orderNo: 'OTHER-ORDER', externalLineId: row.order.items[1]!.externalLineId, quantity: 1 }] }
+    row.stage = '待推单'
+    expect(取得库存查询商品(row).map(item => item.externalLineId)).toEqual([target.externalLineId])
+    expect(new Set(查询订单关联库存(row).map(source => source.lineId))).toEqual(new Set([target.externalLineId]))
+    expect(取得库存查询范围(row).itemScopeNote).toContain('本次履约')
+    expect(取得库存查询范围(row).itemScopeNote).not.toContain('没有逐商品分配明细')
+  })
   it('同服务商账号同仓库 SKU 展示多仓，默认仓仅标记；质量分行，数量不合并，原输入不变', () => {
     const row = sampleRow(), before = JSON.stringify(row)
     const results = 查询订单关联库存(row)

@@ -1,0 +1,22 @@
+1280 {
+  overflow: 0,
+  navWidth: 196,
+  gap: 0,
+  navHeight: 773,
+  layoutHeight: 773
+}
+1440 {
+  overflow: 0,
+  navWidth: 196,
+  gap: 0,
+  navHeight: 773,
+  layoutHeight: 773
+}
+1920 {
+  overflow: 0,
+  navWidth: 196,
+  gap: 0,
+  navHeight: 773,
+  layoutHeight: 773
+}
+navigation, draft, save/cancel, annotations, menu, search OK []

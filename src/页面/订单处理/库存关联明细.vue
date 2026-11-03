@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { ElButton, ElDialog, ElEmpty, ElOption, ElSelect, ElTable, ElTableColumn, ElTag, ElTooltip } from 'element-plus'
 import { 数量定义, 时间文本, type 数量键 } from '../三方仓库存/库存模型'
 import type { 作业行 } from './展示工具'
-import { 查询订单关联库存, 取得库存查询范围, 关联数量文本, type 关联展示行 } from './库存关联模型'
+import { 查询订单关联库存, 取得库存查询商品, 取得库存查询范围, 关联数量文本, type 关联展示行 } from './库存关联模型'
 import { 关联原型标注 } from './关联原型标注'
 
 const props = defineProps<{ modelValue: boolean; row?: 作业行 }>()
@@ -13,7 +13,7 @@ const opened = computed({ get: () => props.modelValue, set: value => emit('updat
 const range = computed(() => props.row ? 取得库存查询范围(props.row) : undefined)
 const rows = computed(() => props.row ? 查询订单关联库存(props.row) : [])
 const selectedLine = ref('')
-const 商品选项 = computed(() => props.row?.order.items.map(item => ({ value: item.externalLineId, label: item.systemSku || item.platformSku || '未匹配系统 SKU' })) ?? [])
+const 商品选项 = computed(() => props.row ? 取得库存查询商品(props.row).map(item => ({ value: item.externalLineId, label: item.systemSku || item.platformSku || '未匹配系统 SKU' })) : [])
 watch(() => [props.modelValue, props.row?.key], () => { selectedLine.value = 商品选项.value[0]?.value ?? '' }, { immediate: true })
 const 展示行 = computed(() => rows.value.filter(row => row.lineId === selectedLine.value))
 const 账号范围 = computed(() => [...new Set(range.value?.scopes.map(scope => scope.account))].join('；'))

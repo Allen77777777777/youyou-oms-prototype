@@ -109,19 +109,20 @@ function 读取条件来源(字段: 条件字段, 订单: 全渠道订单, 类�
   return { kind: 'text', value: value.trim() }
 }
 
-function 计算规则命中(规则: 订单规则, 订单: 全渠道订单, 渠道: readonly 渠道配置[]): { matched: boolean; unknownFields: string[] } {
-  if (!规则.enabled || 规则.mode !== '全部满足' || !规则.conditions.length || 重复条件字段(规则.conditions)) return { matched: false, unknownFields: [] }
-  if (规则.type === '分仓规则' && 规则.conditions.some(条件 => 条件.field === 'shippingWarehouse')) return { matched: false, unknownFields: [] }
-  if (校验动作附加配置(规则)) return { matched: false, unknownFields: [] }
+export function 计算规则命中(规则: 订单规则, 订单: 全渠道订单, 渠道: readonly 渠道配置[]): { matched: boolean; pending: boolean; unknownFields: string[] } {
+  const 不命中 = { matched: false, pending: false, unknownFields: [] }
+  if (!规则.enabled || 规则.mode !== '全部满足' || !规则.conditions.length || 重复条件字段(规则.conditions)) return 不命中
+  if (规则.type === '分仓规则' && 规则.conditions.some(条件 => 条件.field === 'shippingWarehouse')) return 不命中
+  if (校验动作附加配置(规则)) return 不命中
   const 未知字段 = new Set<string>()
   const 结果 = 规则.conditions.map((条件) => {
     if (校验条件配置(条件)) return false
-    if (条件.field === 'shippingWarehouse' && !发货仓库选值有效(条件, 渠道)) { 未知字段.add(条件字段名[条件.field]); return false }
+    if (条件.field === 'shippingWarehouse' && !发货仓库选值有效(条件, 渠道)) { 未知字段.add(条件字段名[条件.field]); return undefined }
     const 原值 = 读取条件来源(条件.field, 订单, 规则.type, 渠道, 规则.action)
     const 留言存在判断 = 条件.field === 'buyerMessage' && (条件.operator === '存在' || 条件.operator === '不存在')
     if (!原值 || (原值.kind === 'text' && !原值.value && !留言存在判断) || ((原值.kind === 'textLines' || 原值.kind === 'warehouses') && !原值.values.length)) {
       未知字段.add(条件字段名[条件.field])
-      return false
+      return undefined
     }
     if (留言存在判断) return 原值.kind === 'text' && (条件.operator === '存在' ? !!原值.value : !原值.value)
     if (原值.kind === 'money') {
@@ -168,7 +169,7 @@ function 计算规则命中(规则: 订单规则, 订单: 全渠道订单, 渠�
     }
   })
   const 平台状态范围有效 = !规则.conditions.some(条件 => 条件.field === 'platformOrderStatus') || (有eBay平台限制(规则) && 订单.platformCode === 'eBay')
-  return { matched: 平台状态范围有效 && 结果.every(Boolean), unknownFields: [...未知字段] }
+  return { matched: 平台状态范围有效 && 结果.every(Boolean), pending: 平台状态范围有效 && 未知字段.size > 0 && !结果.includes(false), unknownFields: [...未知字段] }
 }
 export function 命中规则(规则: 订单规则, 订单: 全渠道订单, 渠道: readonly 渠道配置[] = 创建规则渠道样例()): boolean {
   return 计算规则命中(规则, 订单, 渠道).matched

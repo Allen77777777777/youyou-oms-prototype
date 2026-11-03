@@ -1,5 +1,6 @@
 import type { 全渠道订单, 订单处理状态, 履约单摘要 } from '../全渠道订单/类型'
 import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 当前版本, 演示时间, 记录操作, type 仓库执行, type 命令结果 } from './演示会话'
+import { 手工发货条件阻断 } from '../手工订单/来源规则'
 
 /** 只处理本地虚构核查证据；真实 API、权限与持久审计未接入。 */
 export function 订单关联仓库执行(订单: 全渠道订单): 仓库执行[] {
@@ -22,6 +23,7 @@ export function 有共享发货路径(订单: 全渠道订单): boolean {
 }
 
 export function 平台发货条件已允许(订单: 全渠道订单, 必须明确 = false): boolean {
+  if (订单.manualOrder || 订单.platformCode === '手工') return !订单.blockReason && !订单.cancelledAt && !手工发货条件阻断(订单, 共享订单.value, 仓库执行记录.value).length
   const 证据 = 操作核查证据.value[订单.systemOrderNo]
   if (订单.cancelledAt || 证据?.平台允许 === false) return false
   // 旧样例已准入正常六态；异常和终态纠错必须有独立的明确核查证据，付款时间不作为证据。
@@ -126,6 +128,7 @@ export function 截单阻断原因(执行: 仓库执行, 批量 = false): string
 }
 
 export function 退回待审核阻断原因(订单: 全渠道订单): string[] {
+  if (订单.manualShippingPlan) return ['人工拆合方案已审核，调整须核对全部来源及包裹；本轮暂不支持执行后退回重规划']
   const 原因: string[] = []
   if (!['待推单', '待发货'].includes(订单.processingStatus ?? '') || 订单.fulfillmentMode !== '自配送') 原因.push('当前状态不支持退回待审核；异常订单请先复核恢复')
   if (!平台发货条件已允许(订单)) 原因.push('平台状态已变化，需要先进行异常复核')
@@ -147,6 +150,7 @@ export function 恢复发货目标(订单: 全渠道订单): Extract<订单处�
 }
 
 export function 恢复发货阻断原因(订单: 全渠道订单): string[] {
+  if (订单.manualShippingPlan) return ['人工拆合方案须核对全部来源及包裹，本轮暂不支持执行后恢复重规划']
   const 原因: string[] = []
   if (订单.fulfillmentMode !== '自配送' || 订单.processingStatus !== '异常') 原因.push('仅异常订单可以使用恢复发货')
   if (!平台发货条件已允许(订单, true)) 原因.push('当前平台状态仍不允许恢复，请先完成异常复核')
@@ -284,7 +288,9 @@ export function 同步演示仓库状态(出库单号: string): 命令结果 {
     查找.状态 = '已出库'
   } else if (原状态 === '取消中') 查找.状态 = 结果 === '拒绝截单' ? '待出库' : '已取消'
   else if (原状态 === '下单中') 查找.状态 = '待出库'
-  查找.待核查 = false; 查找.更新时间 = 演示时间(); 查找.原因 = 结果 === '拒绝截单' ? '仓库拒绝截单：当前作业阶段无法撤销' : 查找.状态 === '下单失败' ? 查找.原因 : ''
+  查找.待核查 = false; 查找.更新时间 = 演示时间()
+  // 查询成功不表示出库异常已解除；仍停留该状态时保留最后可信原因。
+  查找.原因 = 查找.状态 === '出库异常' ? 查找.原因 : 结果 === '拒绝截单' ? '仓库拒绝截单：当前作业阶段无法撤销' : 查找.状态 === '下单失败' ? 查找.原因 : ''
   if (['待出库', '出库异常', '已出库'].includes(查找.状态)) 查找.三方仓出库单号 ??= `WH-DEMO-${查找.履约单号}`
   for (const 订单 of 来源) {
     const 履约 = 订单.fulfillmentOrders.find(项 => 项.fulfillmentOrderNo === 查找.履约单号)!
@@ -292,7 +298,7 @@ export function 同步演示仓库状态(出库单号: string): 命令结果 {
     else if (履约.isActive && 查找.状态 === '待出库') 履约.status = '执行中'
     const 有效 = 订单.fulfillmentOrders.filter(项 => 项.isActive)
     const 正常主链 = ['待推单', '待发货'].includes(订单.processingStatus ?? '') && 平台发货条件已允许(订单)
-    if (正常主链 && 有效.length && 有效.every(项 => 项.shippedQuantity === 项.plannedQuantity && 项.plannedQuantity > 0 && 项.status === '已发货') && 有效.reduce((总, 项) => 总 + 项.plannedQuantity, 0) === 订单.items.reduce((总, 行) => 总 + (行.fulfillableQuantity ?? 0), 0)) 订单.processingStatus = '已发货'
+    if (正常主链 && 有效.length && 有效.every(项 => 项.shippedQuantity === 项.plannedQuantity && 项.plannedQuantity > 0 && 项.status === '已发货') && 有效.reduce((总, 项) => 总 + (项.items ? 项.items.filter(行 => 行.orderNo === 订单.systemOrderNo).reduce((小计, 行) => 小计 + 行.quantity, 0) : 项.plannedQuantity), 0) === 订单.items.reduce((总, 行) => 总 + (行.fulfillableQuantity ?? 0), 0)) 订单.processingStatus = '已发货'
     else if (正常主链 && 订单.processingStatus === '待推单' && 有效.length && 有效.every(项 => 仓库执行记录.value.some(仓单 => 仓单.履约单号 === 项.fulfillmentOrderNo && !仓单.待核查 && ['待出库', '出库异常', '已出库'].includes(仓单.状态)))) 订单.processingStatus = '待发货'
     记录操作(订单, '同步仓库状态', `${出库单号}：${原状态} → ${查找.状态}；订单当前${订单.processingStatus}；取得明确仓库事实，不自动解除异常或回退终态。仅本地演示查询。`)
   }

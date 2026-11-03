@@ -10,6 +10,8 @@ import { 标注状态 } from '@/原型标注/标注状态'
 import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本 } from './演示会话'
 import { 共享标发单 } from '../订单标发/演示会话'
+import ManualShippingActions from './拆合发货操作.vue'
+import { 创建拆分发货草稿 } from './拆合发货模型'
 
 const 页面路径 = '/oms/self-fulfillment/processing'
 const 初始 = JSON.stringify({ orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value, confirmations: 共享标发单.value })
@@ -35,6 +37,18 @@ function 恢复数据() {
   const data = JSON.parse(初始)
   共享订单.value = data.orders; 仓库执行记录.value = data.executions; 操作核查证据.value = data.evidence
   演示库存.value = data.inventory; 订单版本.value = data.versions; 共享标发单.value = data.confirmations
+}
+// 固定此套索引集成的业务夹具：保留重复列表锚点、审核与库存入口、完整共享来源。
+// 新业务样例由各自的小夹具覆盖，避免无关样例增加后每次布局都重复渲染整张表。
+function 限定订单夹具(订单号: string[]) {
+  恢复数据()
+  const 范围 = new Set(订单号)
+  共享订单.value = 共享订单.value.filter(order => 范围.has(order.systemOrderNo))
+  仓库执行记录.value = 仓库执行记录.value.filter(execution => execution.订单号.some(no => 范围.has(no)))
+  操作核查证据.value = Object.fromEntries(Object.entries(操作核查证据.value).filter(([no]) => 范围.has(no)))
+  演示库存.value = Object.fromEntries(Object.entries(演示库存.value).filter(([no]) => 范围.has(no)))
+  订单版本.value = Object.fromEntries(Object.entries(订单版本.value).filter(([no]) => 范围.has(no)))
+  共享标发单.value = 共享标发单.value.filter(confirmation => 范围.has(confirmation.orderNo))
 }
 function 快照() { return JSON.stringify({ orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value, confirmations: 共享标发单.value }) }
 async function 稳定() { await nextTick(); await flushPromises(); await nextTick() }
@@ -79,7 +93,7 @@ async function 搜索单号(no: string) {
 function 主行() { return page.get('.作业表格').findAll('tbody tr.el-table__row') }
 
 beforeEach(async () => {
-  恢复数据(); 标注状态.退出(); await 稳定()
+  限定订单夹具(['OMS-DEMO-ACTION-01', 'OMS-DEMO-ACTION-02', 'OMS-DEMO-ACTION-33', 'OMS-DEMO-ACTION-34']); 标注状态.退出(); await 稳定()
   帧时刻 = 0; 帧编号 = 0; 动画帧.clear()
   vi.stubGlobal('innerWidth', 1600); vi.stubGlobal('innerHeight', 1000)
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { const id = ++帧编号; 动画帧.set(id, callback); return id })
@@ -105,7 +119,7 @@ afterEach(async () => {
   document.body.innerHTML = ''; 动画帧.clear(); 恢复数据(); await 稳定(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
-// 真实表格与索引集成会挂载多来源及重复锚点，保留断言并允许全量并发时的DOM开销。
+// 保留真实表格、共享来源、重复锚点及原有断言；固定业务夹具控制 jsdom 布局开销。
 describe('订单处理业务与原型标注索引集成', { timeout: 20_000 }, () => {
   it('模式开关不改业务事实或查询，重复行同 ID 只索引一张卡片', async () => {
     await 打开(); const before = 快照()
@@ -189,5 +203,106 @@ describe('订单处理业务与原型标注索引集成', { timeout: 20_000 }, (
     expect(注册IDs()).not.toContain('oms.processing.source-selection')
     expect(await 索引IDs()).toContain('oms.processing.filters')
     expect(快照()).toBe(before); expect(router.currentRoute.value.path).toBe(页面路径)
+  })
+
+  it('合并计算与预览的稳定标注只索引当前前景步骤，取消不写入来源', async () => {
+    限定订单夹具(['OMS-DEMO-MERGE-01', 'OMS-DEMO-MERGE-02'])
+    共享订单.value[1]!.defaultRoute = JSON.parse(JSON.stringify(共享订单.value[0]!.defaultRoute))
+    await 打开(); 标注状态.切换模式(); await 布局()
+    const before = 快照()
+    page.getComponent(ManualShippingActions).vm.open('合并发货', [...共享订单.value]); await 布局()
+    expect(await 索引IDs()).toEqual(expect.arrayContaining(['oms.processing.manual-shipping.merge-calculation', 'oms.processing.manual-shipping.route', 'oms.processing.manual-shipping.reason']))
+    expect(await 索引IDs()).not.toContain('oms.processing.filters')
+    await 弹窗('合并发货').get('[aria-label="操作原因"]').setValue('同买家共同发货')
+    await 按钮(弹窗('合并发货'), '预览').trigger('click'); await 布局()
+    expect(await 索引IDs()).toEqual(['oms.processing.manual-shipping.merge-preview', 'oms.processing.manual-shipping.merge-save-review'])
+    expect(索引().text()).toContain('五项条件')
+    await 按钮(弹窗('合并发货'), '取消').trigger('click'); await 布局()
+    expect(注册IDs()).not.toContain('oms.processing.manual-shipping.merge-preview')
+    expect(快照()).toBe(before)
+  })
+
+  it('人工方案八个稳定锚点分别随分包、库存、双按钮预览及撤销前台出现，不索引后台或修改来源', async () => {
+    限定订单夹具(['OMS-DEMO-SPLIT-01'])
+    const order = 共享订单.value[0]!
+    const plan = 创建拆分发货草稿(order)
+    const allocation = order.items.map(item => ({ orderNo: order.systemOrderNo, externalLineId: item.externalLineId, quantity: item.fulfillableQuantity! }))
+    plan.packages[0]!.items = allocation.slice(1)
+    plan.packages[1]!.items = allocation.slice(0, 1)
+    plan.reason = '人工方案索引专项夹具'
+    order.manualShippingPlan = plan
+    await 打开(); 标注状态.切换模式(); await 布局()
+    const before = 快照(), seen = new Set<string>()
+    const operation = page.getComponent(ManualShippingActions)
+    operation.vm.open('编辑发货方案', [order]); await 布局()
+    const editIds = await 索引IDs()
+    editIds.forEach(id => seen.add(id))
+    expect(editIds).toEqual(expect.arrayContaining(['oms.processing.manual-shipping.scope', 'oms.processing.manual-shipping.allocation']))
+    expect(editIds).not.toContain('oms.processing.manual-shipping.route')
+    expect(editIds).not.toContain('oms.processing.manual-shipping.reason')
+    expect(editIds).not.toContain('oms.processing.manual-shipping.inventory')
+    expect(editIds).not.toContain('oms.processing.manual-shipping.save-review')
+    expect(editIds).not.toContain('oms.processing.filters')
+    await 按钮(弹窗('编辑发货方案'), '下一步').trigger('click'); await 布局()
+    const routeIds = await 索引IDs()
+    routeIds.forEach(id => seen.add(id))
+    expect(routeIds).toEqual(expect.arrayContaining(['oms.processing.manual-shipping.scope', 'oms.processing.manual-shipping.route', 'oms.processing.manual-shipping.reason', 'oms.processing.manual-shipping.inventory']))
+    expect(routeIds.filter(id => id === 'oms.processing.manual-shipping.inventory')).toHaveLength(1)
+    expect(routeIds).not.toContain('oms.processing.manual-shipping.allocation')
+    expect(routeIds).not.toContain('oms.processing.manual-shipping.save-review')
+    expect(routeIds).not.toContain('oms.processing.filters')
+    expect(索引().text()).toContain('未知数量显示“—”')
+    await 按钮(弹窗('编辑发货方案'), '预览发货方案').trigger('click'); await 布局()
+    const previewIds = await 索引IDs()
+    previewIds.forEach(id => seen.add(id))
+    expect(previewIds).toEqual(expect.arrayContaining(['oms.processing.manual-shipping.preview', 'oms.processing.manual-shipping.inventory', 'oms.processing.manual-shipping.save-review']))
+    expect(previewIds.filter(id => id === 'oms.processing.manual-shipping.inventory')).toHaveLength(1)
+    expect(previewIds).not.toContain('oms.processing.manual-shipping.allocation')
+    expect(previewIds).not.toContain('oms.processing.filters')
+    expect(索引().text()).toContain('普通确认保存仍留在待审核')
+    expect(索引().text()).toContain('不会立即向仓库推单')
+    await 按钮(弹窗('编辑发货方案'), '取消').trigger('click'); await 布局()
+    operation.vm.open('撤销方案', [order]); await 布局()
+    const withdrawIds = await 索引IDs()
+    withdrawIds.forEach(id => seen.add(id))
+    expect(withdrawIds).toEqual(expect.arrayContaining(['oms.processing.manual-shipping.scope', 'oms.processing.manual-shipping.withdraw', 'oms.processing.manual-shipping.reason']))
+    expect(withdrawIds).not.toContain('oms.processing.filters')
+    expect(withdrawIds).not.toContain('oms.processing.manual-shipping.inventory')
+    expect(withdrawIds).not.toContain('oms.processing.manual-shipping.save-review')
+    expect([...seen].filter(id => id.startsWith('oms.processing.manual-shipping.')).sort()).toEqual(['allocation', 'inventory', 'preview', 'reason', 'route', 'save-review', 'scope', 'withdraw'].map(key => `oms.processing.manual-shipping.${key}`).sort())
+    expect(new Set(withdrawIds).size).toBe(withdrawIds.length)
+    await 按钮(弹窗('撤销拆分发货'), '取消').trigger('click'); await 布局()
+    expect(注册IDs()).not.toContain('oms.processing.manual-shipping.withdraw')
+    expect(注册IDs()).not.toContain('oms.processing.manual-shipping.inventory')
+    expect(注册IDs()).not.toContain('oms.processing.manual-shipping.save-review')
+    expect(快照()).toBe(before)
+  })
+
+  it('READY真实页面两张履约分别查看本包商品，P1仅SKU1四件、P2仅SKU2六件', async () => {
+    限定订单夹具(['OMS-DEMO-SPLIT-STAGE-READY'])
+    const order = 共享订单.value[0]!
+    expect(order.fulfillmentOrders).toHaveLength(2)
+    await 打开()
+    await router.replace({ path: 页面路径, query: { systemOrderNo: order.systemOrderNo } }); await 布局()
+    expect(主行()).toHaveLength(2)
+    const before = 快照()
+    for (const [index, fulfillment] of order.fulfillmentOrders.entries()) {
+      const row = 主行().find(item => item.get('button.编号').text() === fulfillment.fulfillmentOrderNo)
+      expect(row, fulfillment.fulfillmentOrderNo).toBeDefined()
+      await row!.get('button.编号').trigger('click'); await 布局()
+      const detail = page.get('.el-drawer')
+      const goods = detail.get('.履约商品范围')
+      expect(goods.findAll('.商品行')).toHaveLength(1)
+      expect(goods.text()).toContain(`DEMO-SKU-${index + 1}`)
+      expect(goods.text()).not.toContain(`DEMO-SKU-${index === 0 ? 2 : 1}`)
+      expect(goods.text()).toContain(`本包计划 ${index === 0 ? 4 : 6} 件`)
+      expect(goods.text()).not.toContain(`本包计划 ${index === 0 ? 6 : 4} 件`)
+      expect(goods.text()).toContain(`来源订单：${order.systemOrderNo}`)
+      await 按钮(detail, '关闭').trigger('click'); await 布局()
+      expect(page.find('.el-drawer').exists()).toBe(false)
+      expect(主行()).toHaveLength(2)
+    }
+    expect(快照()).toBe(before)
+    expect(router.currentRoute.value.query.systemOrderNo).toBe(order.systemOrderNo)
   })
 })

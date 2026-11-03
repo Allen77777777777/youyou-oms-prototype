@@ -6,6 +6,8 @@ export type 平台代码 =
   | 'OZON'
   | 'TikTok Shop'
   | 'Rakuten'
+  /** 仅为本地原型的人工来源值，不属于平台接入字典。 */
+  | '手工'
 
 export type 履约模式 = '自配送' | '平台履约'
 export type 订单处理状态 = '待审核' | '待推单' | '待发货' | '已发货' | '异常' | '不发货'
@@ -152,6 +154,13 @@ export interface 全渠道订单 {
   platformOrderType?: string
   platformOrderStatus?: string
   orderType: string
+  manualOrder?: {
+    scenario: '线下销售' | '寄样赠送' | '售后补寄' | '其他'
+    originalOrderNo?: string
+    reason: string
+    paidConfirmed: boolean
+    requestId: string
+  }
   fulfillmentMode: 履约模式
   processingStatus?: 订单处理状态
   admissionReason?: string

@@ -38,7 +38,7 @@ describe('订单处理受控演示命令', () => {
     expect(执行演示审核(订单.systemOrderNo, 版本).成功).toBe(true)
     expect(订单.processingStatus).toBe('待推单')
     expect(订单.reviews).toHaveLength(1)
-    expect(订单.reviews[0]!.decisionNote).toContain('演示审核通过')
+    expect(订单.reviews[0]!.decisionNote).toContain('审核已通过')
     expect(订单.fulfillmentOrders).toHaveLength(1)
     expect(订单.fulfillmentOrders[0]!.route).not.toBe(订单.defaultRoute)
     expect(执行演示审核(订单.systemOrderNo, 版本).成功).toBe(false)
@@ -51,7 +51,7 @@ describe('订单处理受控演示命令', () => {
     expect(订单.processingStatus).toBe('待审核')
     expect(订单.fulfillmentOrders).toHaveLength(0)
     expect(订单.reviews[0]!.status).toBe('已拦截')
-    expect(订单.reviews[0]!.decisionNote).toContain('原型未实现人工解除')
+    expect(订单.reviews[0]!.decisionNote).toContain('订单保留待审核')
   })
   it('推仓受理不会提前进入待发货；明确核查成功后才推进', () => {
     const 订单 = 首个待审()

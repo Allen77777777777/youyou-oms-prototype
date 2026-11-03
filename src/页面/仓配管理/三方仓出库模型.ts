@@ -1,6 +1,7 @@
 import { 命中多选, 命中字段搜索, 校验字段搜索, 命中时间范围, 校验时间范围, 排序列表, 读取排序时刻, type 列表排序条件 } from '@/组件/筛选/筛选工具'
-import type { 全渠道订单, 脱敏收件信息, 订单路由 } from '../全渠道订单/类型'
+import type { 全渠道订单, 脱敏收件信息, 订单路由, 订单商品行 } from '../全渠道订单/类型'
 import { 关联演示数据 } from '../订单处理/库存关联模型'
+import { 人工发货完整收件身份 } from '../订单处理/拆合发货模型'
 import { 创建仓配样例, type 仓配单据, type 历史记录, type 调用记录, type 作业动作 } from './仓配模型'
 
 export type 出库作业动作 = 作业动作 | '截单'
@@ -46,13 +47,38 @@ export function 出库渠道筛选键(row: 仓配单据): string { return JSON.s
 export function 创建推单出库快照(orders: 全渠道订单[], fulfillmentNo: string, submittedAt: string): 出库快照 {
   const fulfillment = orders[0]?.fulfillmentOrders.find(f => f.fulfillmentOrderNo === fulfillmentNo)
   const sourceOrders = orders.map(order => ({ systemOrderNo: order.systemOrderNo, platformOrderNo: order.platformOrderNo, platform: order.platformCode, shopId: order.storeId, shop: order.storeName }))
-  const planned = orders.reduce((sum, order) => sum + order.items.reduce((sub, item) => sub + (item.fulfillableQuantity ?? 0), 0), 0)
+  // 人工拆合方案每个来源保存完整的包裹分配；有明细时绝不能再按整单剩余量推仓。
+  // 无明细的既有样例继续沿用其已核实整单提交范围，不反推历史出库组成。
+  const explicit = orders.some(order => order.fulfillmentOrders.find(f => f.fulfillmentOrderNo === fulfillmentNo)?.items !== undefined)
+  const allocations = fulfillment?.items ?? []
+  const allocationKey = (items: typeof allocations) => JSON.stringify(items.map(item => [item.orderNo, item.externalLineId, item.quantity]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))))
+  const allocationScope = allocationKey(allocations)
+  const allocatedRows: Array<{ order: 全渠道订单; item: 订单商品行; quantity: number }> = []
+  const allocationIdentities = new Set<string>()
+  let allocationValid = allocations.length > 0 && new Set(orders.map(order => order.systemOrderNo)).size === orders.length
+  if (explicit) for (const allocation of allocations) {
+    const order = orders.find(candidate => candidate.systemOrderNo === allocation.orderNo)
+    const candidates = order?.items.filter(item => item.externalLineId === allocation.externalLineId) ?? []
+    const item = candidates[0]
+    const identity = JSON.stringify([allocation.orderNo, allocation.externalLineId])
+    if (!order || !item || candidates.length !== 1 || !allocation.externalLineId || allocationIdentities.has(identity)
+      || !Number.isInteger(allocation.quantity) || allocation.quantity <= 0
+      || !Number.isInteger(item.fulfillableQuantity) || allocation.quantity > item.fulfillableQuantity!
+      || item.fulfillableQuantity! > item.orderedQuantity || !item.systemSku || item.skuResolutionStatus !== '成功') allocationValid = false
+    else allocatedRows.push({ order, item, quantity: allocation.quantity })
+    allocationIdentities.add(identity)
+  }
+  const planned = explicit ? allocations.reduce((sum, allocation) => sum + allocation.quantity, 0) : orders.reduce((sum, order) => sum + order.items.reduce((sub, item) => sub + (item.fulfillableQuantity ?? 0), 0), 0)
   const routes = orders.map(order => order.fulfillmentOrders.find(f => f.fulfillmentOrderNo === fulfillmentNo)?.route)
-  const reliable = !!fulfillment && orders.length > 0 && planned > 0 && new Set(routes.map(route => JSON.stringify(route))).size === 1 && new Set(orders.map(order => JSON.stringify(order.address))).size === 1 && orders.every(order => {
+  const sameRecipient = new Set(orders.map(order => explicit ? 人工发货完整收件身份(order) : JSON.stringify(order.address))).size === 1
+  const reliable = !!fulfillment && orders.length > 0 && planned > 0 && new Set(routes.map(route => JSON.stringify(route))).size === 1 && sameRecipient && orders.every(order => {
     const f = order.fulfillmentOrders.find(candidate => candidate.fulfillmentOrderNo === fulfillmentNo)
-    return !!f && f.plannedQuantity === planned && f.shippedQuantity === 0 && order.items.length > 0 && new Set(order.items.map(item => item.externalLineId)).size === order.items.length && order.items.every(item => !!item.externalLineId && Number.isInteger(item.fulfillableQuantity) && item.fulfillableQuantity! >= 0 && item.fulfillableQuantity! <= item.orderedQuantity && !!item.systemSku && item.skuResolutionStatus === '成功')
+    if (!f || f.plannedQuantity !== planned || f.shippedQuantity !== 0) return false
+    if (explicit) return allocationValid && f.items !== undefined && allocationKey(f.items) === allocationScope && allocations.some(item => item.orderNo === order.systemOrderNo)
+    return order.items.length > 0 && new Set(order.items.map(item => item.externalLineId)).size === order.items.length && order.items.every(item => !!item.externalLineId && Number.isInteger(item.fulfillableQuantity) && item.fulfillableQuantity! >= 0 && item.fulfillableQuantity! <= item.orderedQuantity && !!item.systemSku && item.skuResolutionStatus === '成功')
   })
-  const items: 出库商品明细[] = reliable ? orders.flatMap(order => order.items.filter(item => item.fulfillableQuantity! > 0).map(item => {
+  const scopeRows = explicit ? allocatedRows : orders.flatMap(order => order.items.filter(item => item.fulfillableQuantity! > 0).map(item => ({ order, item, quantity: item.fulfillableQuantity! })))
+  const items: 出库商品明细[] = reliable ? scopeRows.map(({ order, item, quantity }) => {
     const scope = 关联演示数据.scopes.filter(candidate => candidate.provider === fulfillment!.route.warehouseProvider && candidate.account === fulfillment!.route.warehouseAccount && candidate.warehouse === fulfillment!.route.warehouse)
     const mappings = scope.length === 1 ? [...new Set(关联演示数据.mappings.filter(mapping => {
       const anchor = 关联演示数据.scopes.find(candidate => candidate.id === mapping.scopeId)
@@ -60,11 +86,11 @@ export function 创建推单出库快照(orders: 全渠道订单[], fulfillmentN
     }).map(mapping => mapping.warehouseSku).filter(Boolean))] : []
     const warehouseSku = mappings.length === 1 ? mappings[0]! : null
     const units = scope.length === 1 && warehouseSku ? [...new Set(关联演示数据.inventory.filter(source => source.organization === scope[0]!.organization && source.provider === scope[0]!.provider && source.accountId === scope[0]!.accountId && source.warehouseId === scope[0]!.warehouseId && source.warehouseSku === warehouseSku).map(source => source.unit).filter(Boolean))] : []
-    return { id: JSON.stringify([order.systemOrderNo, item.externalLineId]), fulfillmentItemId: null, externalLineId: item.externalLineId || null, sourceOrderNo: order.systemOrderNo, platformSku: item.platformSku ?? null, systemSku: item.systemSku ?? null, warehouseSku, goods: item.systemItemName || item.platformItemTitle || '', plannedQuantity: item.fulfillableQuantity!, shippedQuantity: 0, unit: units.length === 1 ? units[0]! : null, lineStatus: '待出库' }
-  })) : []
+    return { id: JSON.stringify([order.systemOrderNo, item.externalLineId]), fulfillmentItemId: null, externalLineId: item.externalLineId || null, sourceOrderNo: order.systemOrderNo, platformSku: item.platformSku ?? null, systemSku: item.systemSku ?? null, warehouseSku, goods: item.systemItemName || item.platformItemTitle || '', plannedQuantity: quantity, shippedQuantity: 0, unit: units.length === 1 ? units[0]! : null, lineStatus: '待出库' }
+  }) : []
   const { history: _history, attempts: _attempts, ...base } = 空详情()
   const unit = items.length && items.every(item => !!item.unit && item.unit === items[0]!.unit) ? items[0]!.unit : null
-  return { ...base, sourceOrders, items, recipient: orders[0] && new Set(orders.map(order => JSON.stringify(order.address))).size === 1 ? JSON.parse(JSON.stringify(orders[0].address)) as 脱敏收件信息 : null, route: fulfillment ? { ...fulfillment.route } : null, submittedAt, snapshotReliable: reliable, compositionReason: reliable ? '' : '本次出库的逐商品分配尚未核实', quantitySummary: { plannedQuantity: reliable ? planned : null, shippedQuantity: reliable ? 0 : null, unit } }
+  return { ...base, sourceOrders, items, recipient: orders[0] && sameRecipient ? JSON.parse(JSON.stringify(orders[0].address)) as 脱敏收件信息 : null, route: fulfillment ? { ...fulfillment.route } : null, submittedAt, snapshotReliable: reliable, compositionReason: reliable ? '' : !sameRecipient ? '来源订单完整收件资料不一致，请先核实共同收件人与联系方式' : '本次出库的逐商品分配尚未核实', quantitySummary: { plannedQuantity: reliable ? planned : null, shippedQuantity: reliable ? 0 : null, unit } }
 }
 export function 创建历史出库快照(orders: 全渠道订单[], fulfillmentNo: string): 出库快照 {
   const base = 创建推单出库快照(orders, fulfillmentNo, '')

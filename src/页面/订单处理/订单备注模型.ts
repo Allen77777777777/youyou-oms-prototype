@@ -6,6 +6,8 @@ export interface 订单备注 {
   note_content: string
   author_id: string
   noted_at: string
+  /** 仅规则执行追加时保存，避免同一订单重复收到同一规则备注。 */
+  rule_id?: string
 }
 
 /** 输入长度为本轮合理假设，生产接口与权限、加密及持久审计尚未实现。 */
@@ -28,13 +30,14 @@ export function 获取备注作者名称(作者: string): string {
   return 作者 === 原型备注作者 ? '原型用户' : 作者
 }
 
-export function 追加订单备注(订单号: string, 内容: string): { 成功: boolean; 信息: string; 备注?: 订单备注 } {
+export function 追加订单备注(订单号: string, 内容: string, 规则ID?: string): { 成功: boolean; 信息: string; 备注?: 订单备注 } {
   if (!订单号.trim()) return { 成功: false, 信息: '缺少关联订单，无法增加备注' }
   const 备注内容 = 内容.trim()
   if (!备注内容) return { 成功: false, 信息: '请输入备注内容' }
   if (备注内容.length > 订单备注字数上限) return { 成功: false, 信息: `备注最多 ${订单备注字数上限} 字` }
 
-  const 备注: 订单备注 = { order_id: 订单号, note_content: 备注内容, author_id: 原型备注作者, noted_at: new Date().toISOString() }
+  if (规则ID && 获取订单备注(订单号).some(项 => 项.rule_id === 规则ID && 项.note_content === 备注内容)) return { 成功: true, 信息: '同一规则备注已追加' }
+  const 备注: 订单备注 = { order_id: 订单号, note_content: 备注内容, author_id: 规则ID ? '规则执行器' : 原型备注作者, noted_at: new Date().toISOString(), ...(规则ID && { rule_id: 规则ID }) }
   // 追加历史；不调用普通操作日志，也不改订单版本、状态、路由或执行资格。
   共享订单备注.value.push(备注)
   return { 成功: true, 信息: '已增加本地备注', 备注 }

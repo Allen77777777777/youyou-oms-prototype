@@ -1,0 +1,13 @@
+$ vitest run "src/页面/业务配置/业务配置页面.spec.ts" "src/页面/业务配置/循环审单.spec.ts" "--maxWorkers=1"
+
+ RUN  v3.2.7 D:/优优电商/原型
+
+ ✓ src/页面/业务配置/业务配置页面.spec.ts (4 tests) 583ms
+   ✓ 业务配置与规则执行设置 > 默认关闭并使用两小时间隔，取消编辑保留生效值  335ms
+ ✓ src/页面/业务配置/循环审单.spec.ts (2 tests) 142ms
+
+ Test Files  2 passed (2)
+      Tests  6 passed (6)
+   Start at  11:29:15
+   Duration  19.97s (transform 5.01s, setup 0ms, collect 15.74s, tests 725ms, environment 2.28s, prepare 381ms)
+

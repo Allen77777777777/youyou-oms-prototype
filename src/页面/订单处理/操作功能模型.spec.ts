@@ -22,6 +22,7 @@ describe('重新推单仅处理明确失败且实际修复的原范围', () => {
     expect(原单.operationLogs[原单.operationLogs.length - 1]!.content).toContain('所选渠道尚未开通')
     expect(同步演示仓库状态(执行.出库单号).成功).toBe(true)
     expect(原单.processingStatus).toBe('待发货')
+    expect(执行.原因).toBe('')
   })
   it.each(['09', '11', '31'])('%s 的未修复、未明或方案变化不因填写说明放行', 编号 => {
     const 原快照 = JSON.stringify(单(编号)); const 执行 = 仓(编号)
@@ -39,6 +40,34 @@ describe('重新推单仅处理明确失败且实际修复的原范围', () => {
 })
 
 describe('唯一同步入口取得仓库事实并保护订单六态', () => {
+  it('拆分异常包查询成功但状态未解除时保留具体原因及原分配事实', () => {
+    const order = 共享订单.value.find(item => item.systemOrderNo === 'OMS-DEMO-SPLIT-STAGE-EXCEPTION')!
+    const execution = 仓库执行记录.value.find(item => item.出库单号 === 'CK-DEMO-SPLIT-STAGE-EXCEPTION-P2')!
+    const reason = execution.原因, allocation = JSON.stringify(order.fulfillmentOrders), snapshot = JSON.stringify(execution.出库快照)
+    expect(reason).toContain('拣货异常')
+    expect(操作核查证据.value[order.systemOrderNo]!.同步结果).toBe('正常')
+    for (let query = 0; query < 2; query++) {
+      expect(同步演示仓库状态(execution.出库单号).成功).toBe(true)
+      expect(execution.状态).toBe('出库异常')
+      expect(execution.原因).toBe(reason)
+      expect(execution.待核查).toBe(false)
+      expect(order.processingStatus).toBe('异常')
+      expect(JSON.stringify(order.fulfillmentOrders)).toBe(allocation)
+      expect(JSON.stringify(execution.出库快照)).toBe(snapshot)
+    }
+  })
+  it('拆分异常包取得明确出库事实后清理仓单旧原因，订单异常仍等待人工复核', () => {
+    const order = 共享订单.value.find(item => item.systemOrderNo === 'OMS-DEMO-SPLIT-STAGE-EXCEPTION')!
+    const execution = 仓库执行记录.value.find(item => item.出库单号 === 'CK-DEMO-SPLIT-STAGE-EXCEPTION-P2')!
+    操作核查证据.value[order.systemOrderNo]!.同步结果 = '已出库'
+    expect(同步演示仓库状态(execution.出库单号).成功).toBe(true)
+    expect(execution.状态).toBe('已出库')
+    expect(execution.原因).toBe('')
+    expect(execution.出库事实).toMatchObject({ planned: 6, shipped: 6 })
+    expect(order.fulfillmentOrders.map(item => item.shippedQuantity)).toEqual([0, 6])
+    expect(order.processingStatus).toBe('异常')
+    expect(order.blockReason).toContain('第二包')
+  })
   it.each(['11', '16', '30'])('%s 的未查到、查询失败或未知保留仓库及订单原值', 编号 => {
     const 旧状态 = JSON.stringify({ 单: 单(编号), 仓: 仓(编号) })
     expect(同步演示仓库状态(仓(编号).出库单号).成功).toBe(false)

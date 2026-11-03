@@ -5,6 +5,7 @@ import 中台布局 from '@/布局/中台布局.vue'
 import eBay订单页面 from '@/页面/eBay订单/eBay订单页面.vue'
 import 全渠道订单详情路由页 from '@/页面/全渠道订单/全渠道订单详情路由页.vue'
 import 全渠道订单页面 from '@/页面/全渠道订单/全渠道订单页面.vue'
+import { returnDetailRoute } from '@/页面/eBay退换货申请/详情路由'
 import 占位页面 from '@/页面/占位页面.vue'
 
 const 已实现页面: Record<string, RouteRecordRaw['component']> = {
@@ -12,12 +13,21 @@ const 已实现页面: Record<string, RouteRecordRaw['component']> = {
   'oms-ebay-orders': eBay订单页面,
   'oms-shipping-confirmation': () => import('@/页面/订单标发/订单标发页面.vue'),
   'oms-order-processing': () => import('@/页面/订单处理/订单处理页面.vue'),
+  'oms-manual-orders': () => import('@/页面/手工订单/手工订单页面.vue'),
   'oms-outbound-orders': () => import('@/页面/仓配管理/三方仓出库单页面.vue'),
   'oms-logistics-orders': () => import('@/页面/仓配管理/物流下单页面.vue'),
   'oms-order-rules': () => import('@/页面/订单规则/订单规则页面.vue'),
+  'oms-business-settings': () => import('@/页面/业务配置/业务配置页面.vue'),
   'oms-logistics-channels': () => import('@/页面/仓配管理/物流渠道管理页面.vue'),
   'oms-warehouse-inventory': () => import('@/页面/三方仓库存/三方仓库存页面.vue'),
   'oms-inventory-aging': () => import('@/页面/三方仓库龄/三方仓库龄页面.vue'),
+  'oms-ebay-messages': () => import('@/页面/eBay站内信/eBay站内信页面.vue'),
+  'oms-message-templates': () => import('@/页面/消息模板管理/消息模板管理页面.vue'),
+  'oms-ebay-reviews': () => import('@/页面/eBay评价/eBay评价页面.vue'),
+  'oms-ebay-review-statistics': () => import('@/页面/eBay评价统计/eBay评价统计页面.vue'),
+  'oms-ebay-cancellations': () => import('@/页面/eBay取消订单申请/eBay取消订单申请页面.vue'),
+  'oms-ebay-returns': () => import('@/页面/eBay退换货申请/eBay退换货申请页面.vue'),
+  'oms-auto-service-rules': () => import('@/页面/自动客服规则/自动客服规则页面.vue'),
 }
 
 const 页面路由: RouteRecordRaw[] = 获取全部页面菜单().map((菜单) => ({
@@ -63,12 +73,23 @@ export const router = createRouter({
       path: '/',
       component: 中台布局,
       redirect: '/index',
-      children: [...页面路由, 全渠道订单详情路由, eBay订单详情路由, ...(['new', 'edit', 'copy'] as const).map(mode => ({
+      children: [...页面路由, 全渠道订单详情路由, eBay订单详情路由,
+        returnDetailRoute,
+        { path: '/oms/ebay-service/negative-reviews', redirect: to => ({ path: '/oms/ebay-service/review-statistics', query: to.query }) },
+        { path: '/oms/ebay-service/after-sales', redirect: '/oms/ebay-service/cancellations' },
+        ...(['new', 'edit', 'copy'] as const).map(mode => ({
         path: `/oms/self-fulfillment/order-rules/${mode}/:sessionId`,
         name: `oms-order-rule-${mode}`,
         component: () => import('@/页面/订单规则/规则编辑页面.vue'),
         meta: { title: mode === 'new' ? '新增规则' : mode === 'edit' ? '编辑规则' : '复制规则', source: '用户规划', activeMenu: '/oms/self-fulfillment/order-rules', ruleEditorMode: mode },
-      }))],
+      })),
+        ...(['new', 'edit', 'copy'] as const).map(mode => ({
+          path: `/oms/ebay-service/automation-rules/${mode}/:sessionId`,
+          name: `oms-auto-service-rule-${mode}`,
+          component: () => import('@/页面/自动客服规则/规则编辑页面.vue'),
+          meta: { title: mode === 'new' ? '新增客服规则' : mode === 'edit' ? '编辑客服规则' : '复制客服规则', source: '用户规划', activeMenu: '/oms/ebay-service/automation-rules', serviceRuleEditorMode: mode },
+        })),
+      ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/index' },
   ],

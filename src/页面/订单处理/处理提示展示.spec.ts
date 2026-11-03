@@ -62,7 +62,7 @@ describe('处理提示保留阻断及源证据', () => {
       expect(结果.成功).toBe(false)
       expect(订单.processingStatus).toBe('待审核')
       expect(订单.fulfillmentOrders).toHaveLength(0)
-      expect(订单.reviews[订单.reviews.length - 1]!.decisionNote).toContain('演示审核拦截')
+      expect(订单.reviews[订单.reviews.length - 1]!.decisionNote).toBe('审核未通过：仓配分离的一期交付范围待确认。订单保留待审核。')
     } finally { 共享订单.value = JSON.parse(备份); 订单版本.value = 版本备份 }
   })
 })

@@ -24,6 +24,7 @@ function 有共享履约(订单: 全渠道订单, 执行记录: 仓库执行[]):
 
 export function 修改仓库物流阻断原因(订单: 全渠道订单): string[] {
   const 原因: string[] = []
+  if (订单.manualShippingPlan) 原因.push('已有发货安排，请通过编辑发货方案修改各包裹仓库物流，或先撤销方案')
   if (订单.fulfillmentMode !== '自配送' || 订单.processingStatus !== '待审核') 原因.push('仅待审核的自配送订单可以修改仓库物流')
   if (订单.blockReason || 订单.cancelledAt) 原因.push(订单.blockReason || '已确认最终取消，不能修改发货路由')
   if (订单.fulfillmentOrders.some(履约 => 履约.isActive)) 原因.push('已有有效履约单；本操作不能改写履约执行快照')
@@ -36,6 +37,7 @@ export function 修改仓库物流阻断原因(订单: 全渠道订单): string[
 
 export function 不发货阻断原因(订单: 全渠道订单): string[] {
   const 原因: string[] = []
+  if (订单.processingStatus === '待审核' && 订单.manualShippingPlan) 原因.push('请先撤销发货安排，再对来源订单操作不发货')
   if (订单.fulfillmentMode !== '自配送' || !['待审核', '待推单', '待发货', '异常'].includes(订单.processingStatus ?? '')) 原因.push('仅待审核、待推单、待发货或异常的自配送订单可以操作不发货')
   if (订单.fulfillmentOrders.some(履约 => !Number.isFinite(履约.shippedQuantity) || !Number.isInteger(履约.shippedQuantity) || 履约.shippedQuantity < 0)) 原因.push('履约出库数量缺失或不可信，请先核实实际发货事实')
   if (订单.fulfillmentOrders.some(履约 => 履约.shippedQuantity > 0 || 履约.status === '已发货' || Boolean(履约.shippedAt))) 原因.push('已有有效出库事实，不能将整单设为不发货')

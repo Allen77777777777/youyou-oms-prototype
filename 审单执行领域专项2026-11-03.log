@@ -1,0 +1,13 @@
+$ vitest run "src/页面/订单处理/审单规则执行.spec.ts" "src/页面/订单处理/订单处理.spec.ts" "src/页面/手工订单/模型.spec.ts" "--maxWorkers=2"
+
+ RUN  v3.2.7 D:/优优电商/原型
+
+ ✓ src/页面/订单处理/订单处理.spec.ts (24 tests) 126ms
+ ✓ src/页面/手工订单/模型.spec.ts (9 tests) 128ms
+ ✓ src/页面/订单处理/审单规则执行.spec.ts (5 tests) 27ms
+
+ Test Files  3 passed (3)
+      Tests  38 passed (38)
+   Start at  11:14:07
+   Duration  4.97s (transform 1.01s, setup 0ms, collect 2.79s, tests 281ms, environment 2.69s, prepare 500ms)
+
