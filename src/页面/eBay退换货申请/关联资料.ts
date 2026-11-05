@@ -1,6 +1,6 @@
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
 import type { 全渠道订单, 订单路由, 履约单摘要 } from '../全渠道订单/类型'
-import { 共享订单, 仓库执行记录, type 仓库执行 } from '../订单处理/演示会话'
+import { 共享订单, 仓库执行记录, 演示路由, type 仓库执行 } from '../订单处理/演示会话'
 import { 仓库会话单据, 创建仓库执行投影 } from '../仓配管理/仓配会话'
 import { 创建推单出库快照 } from '../仓配管理/三方仓出库模型'
 import { createReturnData } from './数据'
@@ -23,24 +23,30 @@ function createDemoOrder(source: ReturnRecord): { order: 全渠道订单; execut
   const unitPrices = orderProducts.map((_, index) => index === 0 ? requestedItemCents : 1000)
   const orderAmountCents = orderProducts.reduce((sum, item, index) => sum + unitPrices[index]! * item.quantity, 0)
   const firstOutbound = outbounds[0]!
-  const orderRoute: 订单路由 = { warehouse: firstOutbound.warehouse, warehouseProvider: firstOutbound.warehouse.split(' · ')[0]!, warehouseAccount: firstOutbound.account, shippingChannel: firstOutbound.channel!, shippingChannelCode: firstOutbound.channelCode!, labelMode: '仓配一体' }
+  function routeFor(outbound: typeof firstOutbound): 订单路由 {
+    const match = 演示路由.filter(r => r.warehouse === outbound.warehouse && r.warehouseAccount === outbound.account && r.shippingChannel === outbound.channel && r.shippingChannelCode === outbound.channelCode)
+    return match.length === 1 ? { ...match[0]! } : { warehouse: outbound.warehouse, warehouseProvider: outbound.warehouse.split(' · ')[0]!, warehouseAccount: outbound.account, shippingChannel: outbound.channel!, shippingChannelCode: outbound.channelCode!, labelMode: '仓配一体' }
+  }
+  const orderRoute = routeFor(firstOutbound)
   const order: 全渠道订单 = {
     ...structuredClone(全渠道订单模拟数据[0]!),
     systemOrderNo: source.systemOrderNo!, platformCode: 'eBay', platformOrderId: source.orderNo, platformOrderNo: source.orderNo, platformOrderStatus: source.platformOrderStatus!,
     storeId: source.shopId, storeName: source.shopName, buyerExternalId: source.buyerId, professionalOrder: undefined,
     orderType: '线上订单', fulfillmentMode: '自配送', processingStatus: '已发货', defaultRoute: orderRoute, manualShippingPlan: undefined,
-    address: { fullName: 'DEMO***', countryCode: source.marketplaceId === 'EBAY_GB' ? 'GB' : 'US', city: 'DEMO CITY', addressLine1: 'DEMO *** STREET', postalCode: 'DEMO***' },
+    address: source.id === 'DEMO-RT-001'
+      ? { fullName: 'Demo Recipient', countryCode: 'US', stateProvince: 'CA', city: 'Example City', addressLine1: '42 Demo Grove', postalCode: '90000', telephone: '+1 202-555-0142' }
+      : { fullName: 'DEMO***', countryCode: source.marketplaceId === 'EBAY_GB' ? 'GB' : 'US', city: 'DEMO CITY', addressLine1: 'DEMO *** STREET', postalCode: 'DEMO***' },
     items: orderProducts.map((item, index) => ({ externalLineId: `DEMO-RET-ORDER-LINE-${source.id}-${index + 1}`, platformItemTitle: item.title, platformSku: `PLATFORM-${item.sku}`, systemSku: item.sku, systemItemName: item.title, orderedQuantity: item.quantity, fulfillableQuantity: item.quantity, skuResolutionStatus: '成功', currencyCode: source.currency, unitPrice: money(unitPrices[index]!, source.currency), itemTotal: money(unitPrices[index]! * item.quantity, source.currency) })),
     amount: { orderAmount: money(orderAmountCents, source.currency) },
     orderedAt: '2026-10-08T02:00:00Z', paidAt: '2026-10-08T02:05:00Z', createdAt: '2026-10-08T02:10:00Z',
     lastSyncedAt: source.lastSyncedAt, platformUpdatedAt: undefined, shipByAt: undefined, shipByLabel: '—', urgency: '正常',
     fulfillmentCompletedAt: '2026-10-10T05:00:00Z', fulfillmentOrders: [], reviews: [], operationLogs: [], tags: [],
     blockReason: undefined, noShipmentReason: undefined, admissionReason: undefined, cancelledAt: undefined, cancelledReason: undefined,
-    sync: { status: '已同步', normalizationStatus: '已标准化', latestAttempt: source.lastSyncedAt, lastSuccess: source.lastSyncedAt, message: '退货详情固定虚构整单资料；真实API未接入。' },
+    sync: { status: '已同步', normalizationStatus: '已标准化', latestAttempt: source.lastSyncedAt, lastSuccess: source.lastSyncedAt, message: '' },
   }
   const executions: 仓库执行[] = []
   for (const [index, outbound] of outbounds.entries()) {
-    const route: 订单路由 = { ...orderRoute, warehouse: outbound.warehouse, warehouseProvider: outbound.warehouse.split(' · ')[0]!, warehouseAccount: outbound.account, shippingChannel: outbound.channel!, shippingChannelCode: outbound.channelCode! }
+    const route = routeFor(outbound)
     const items = outbounds.length === 1 ? order.items : [order.items[index]!]
     const planned = items.reduce((sum, item) => sum + item.orderedQuantity, 0)
     const fulfillment: 履约单摘要 = { fulfillmentOrderNo: `FL-DEMO-RET-${source.id}-${index + 1}`, status: '待执行', isActive: true, route, plannedQuantity: planned, shippedQuantity: 0, items: items.map(item => ({ orderNo: order.systemOrderNo, externalLineId: item.externalLineId, quantity: item.orderedQuantity })) }

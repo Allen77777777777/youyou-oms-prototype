@@ -27,6 +27,18 @@ function 准备() {
 }
 
 describe('物流下单后标发以有效履约真实跟踪号触发', () => {
+  it.each(['物流下单后标发', '仓库发货完成后标发', '无需标发'])('手工类型即使符合%s的触发事实也不生成或调度平台标发', action => {
+    const { rule, order, channels } = 准备()
+    order.orderType = '手工订单'
+    order.processingStatus = '已发货'
+    Object.assign(order.fulfillmentOrders[0]!, { status: '已发货', shippedQuantity: 1, shippedAt: '2026-11-03T01:00:00Z' })
+    rule.action = action
+    const before = JSON.stringify({ rule, order, channels })
+    const result = 试算规则([rule], order, '订单标发规则', channels)
+    expect(result.hit?.id).toBe(rule.id)
+    expect(result.gates).toContain('手工订单无需标发，不生成或调度平台标发')
+    expect(JSON.stringify({ rule, order, channels })).toBe(before)
+  })
   it.each(['待推单', '待发货', '已发货'] as const)('%s阶段取得跟踪号即可立即试算，不附加出库或OMS已发货前提且保持只读', processingStatus => {
     const { rule, order, channels } = 准备()
     order.processingStatus = processingStatus

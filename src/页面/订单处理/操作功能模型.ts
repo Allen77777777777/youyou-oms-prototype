@@ -1,6 +1,7 @@
+import { 是未匹配审单异常 } from '../全渠道订单/类型'
 import type { 全渠道订单, 订单处理状态, 履约单摘要 } from '../全渠道订单/类型'
 import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 当前版本, 演示时间, 记录操作, type 仓库执行, type 命令结果 } from './演示会话'
-import { 手工发货条件阻断 } from '../手工订单/来源规则'
+import { 是手工订单, 手工发货条件阻断 } from '../手工订单/来源规则'
 
 /** 只处理本地虚构核查证据；真实 API、权限与持久审计未接入。 */
 export function 订单关联仓库执行(订单: 全渠道订单): 仓库执行[] {
@@ -23,7 +24,7 @@ export function 有共享发货路径(订单: 全渠道订单): boolean {
 }
 
 export function 平台发货条件已允许(订单: 全渠道订单, 必须明确 = false): boolean {
-  if (订单.manualOrder || 订单.platformCode === '手工') return !订单.blockReason && !订单.cancelledAt && !手工发货条件阻断(订单, 共享订单.value, 仓库执行记录.value).length
+  if (是手工订单(订单)) return !订单.blockReason && !订单.cancelledAt && !手工发货条件阻断(订单, 共享订单.value, 仓库执行记录.value).length
   const 证据 = 操作核查证据.value[订单.systemOrderNo]
   if (订单.cancelledAt || 证据?.平台允许 === false) return false
   // 旧样例已准入正常六态；异常和终态纠错必须有独立的明确核查证据，付款时间不作为证据。
@@ -150,6 +151,7 @@ export function 恢复发货目标(订单: 全渠道订单): Extract<订单处�
 }
 
 export function 恢复发货阻断原因(订单: 全渠道订单): string[] {
+  if (是未匹配审单异常(订单)) return ['未匹配到审单规则，请在发货审核失败分类中办理人工审核']
   if (订单.manualShippingPlan) return ['人工拆合方案须核对全部来源及包裹，本轮暂不支持执行后恢复重规划']
   const 原因: string[] = []
   if (订单.fulfillmentMode !== '自配送' || 订单.processingStatus !== '异常') 原因.push('仅异常订单可以使用恢复发货')

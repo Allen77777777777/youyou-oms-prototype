@@ -8,6 +8,7 @@ import { 计算比价分仓, type 运费试算报价 } from './比价分仓'
 import type { 比价汇率快照 } from './比价汇率'
 import { 是否多选条件字段, 是否多行文本字段, 读取条件多选值, 读取条件多行值, 读取范围边界, 条件字段名, 校验条件配置, 解析条件定点值, type 条件字段, type 规则条件 } from './规则条件定义'
 import { 创建发货仓库选项, 读取发货仓库来源 } from './规则仓库条件'
+import { 是手工订单 } from '../手工订单/来源规则'
 
 export type { 分仓路由动作 } from './规则路由'
 export type { 条件字段, 规则条件 } from './规则条件定义'
@@ -15,12 +16,31 @@ export { 条件字段名 } from './规则条件定义'
 
 export type 规则类型 = '审单规则' | '分仓规则' | '订单标发规则'
 export interface 订单规则 { id: string; name: string; type: 规则类型; enabled: boolean; priority: number; mode: '全部满足' | '任一满足'; conditions: 规则条件[]; action: string; routeAction?: 分仓路由动作; warehouseAction?: 分仓策略配置; shippingAction?: 标发时机配置; orderNote?: string; version: number; updatedAt: string; note: string }
+export const 规则优先级上限 = 999999
+export function 有效规则优先级(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 规则优先级上限
+}
+
+/** 同值保留会话已保存的相对顺序，列表、试算和正式执行共用此顺序。 */
+export function 按规则优先级排序(规则: readonly 订单规则[], 方向: 'asc' | 'desc' = 'asc'): 订单规则[] {
+  return [...规则].sort((a, b) => {
+    if (!Number.isFinite(a.priority)) return Number.isFinite(b.priority) ? 1 : 0
+    if (!Number.isFinite(b.priority)) return -1
+    return 方向 === 'asc' ? a.priority - b.priority : b.priority - a.priority
+  })
+}
+
 export const eBay平台订单状态选项 = [
   { value: 'NOT_STARTED', label: '未履约（NOT_STARTED）' },
   { value: 'IN_PROGRESS', label: '部分履约（IN_PROGRESS）' },
   { value: 'FULFILLED', label: '全部履约（FULFILLED）' },
 ] as const
-export const 规则动作: Record<规则类型, string[]> = { 审单规则: ['留在待审核'], 分仓规则: ['万邑通美西仓', '谷仓美东仓', '西邮波兰仓', '出口易德国仓', '4PX 巴西圣保罗仓'], 订单标发规则: 标发基础动作 }
+export type 审单动作 = '人工审核' | '自动审核'
+export function 读取审单动作(action: string): 审单动作 | undefined {
+  if (action === '留在待审核') return '人工审核'
+  if (action === '人工审核' || action === '自动审核') return action
+}
+export const 规则动作: Record<规则类型, string[]> = { 审单规则: ['人工审核', '自动审核'], 分仓规则: ['万邑通美西仓', '谷仓美东仓', '西邮波兰仓', '出口易德国仓', '4PX 巴西圣保罗仓'], 订单标发规则: 标发基础动作 }
 
 function 有eBay平台限制(规则: 订单规则): boolean {
   return 规则.mode === '全部满足' && 规则.conditions.some(条件 => {
@@ -47,7 +67,7 @@ function 校验动作附加配置(规则: 订单规则): string {
   if (分仓错误) return 分仓错误
   const 标发错误 = 校验标发动作(规则)
   if (标发错误) return 标发错误
-  if (规则.type === '审单规则' && !规则动作.审单规则.includes(规则.action)) return '请选择有效执行动作'
+  if (规则.type === '审单规则' && !读取审单动作(规则.action)) return '请选择有效执行动作'
   if (规则.orderNote === undefined) return ''
   if (typeof 规则.orderNote !== 'string') return '订单备注格式无效'
   const 内容 = 规则.orderNote.trim()
@@ -59,6 +79,7 @@ function 校验动作附加配置(规则: 订单规则): string {
 export function 校验规则配置(规则: 订单规则, 全部规则: 订单规则[], 渠道: readonly 渠道配置[] = 创建规则渠道样例()): string {
   if (typeof 规则.name !== 'string' || !规则.name.trim()) return '请输入规则名称'
   if (!Object.prototype.hasOwnProperty.call(规则动作, 规则.type)) return '请选择有效规则类型'
+  if (!有效规则优先级(规则.priority)) return '优先级须为1～999999的正整数'
   if (全部规则.some(项 => 项.id !== 规则.id && 项.type === 规则.type && 项.name.trim() === 规则.name.trim())) return '同一类型中已存在同名规则'
   if (规则.mode !== '全部满足') return '当前规则仅支持全部条件同时满足，请重新编辑并确认条件'
   if (!Array.isArray(规则.conditions) || !规则.conditions.length) return '至少填写一条完整条件'
@@ -75,7 +96,7 @@ export function 校验规则配置(规则: 订单规则, 全部规则: 订单规
   const 动作配置错误 = 校验动作附加配置(规则)
   if (动作配置错误) return 动作配置错误
   if (规则.type === '分仓规则') return 校验分仓路由(规则, 渠道)
-  if (!规则动作[规则.type].includes(规则.action)) return '请选择有效执行动作'
+  if (规则.type !== '审单规则' && !规则动作[规则.type].includes(规则.action)) return '请选择有效执行动作'
   return ''
 }
 
@@ -111,7 +132,7 @@ function 读取条件来源(字段: 条件字段, 订单: 全渠道订单, 类�
 
 export function 计算规则命中(规则: 订单规则, 订单: 全渠道订单, 渠道: readonly 渠道配置[]): { matched: boolean; pending: boolean; unknownFields: string[] } {
   const 不命中 = { matched: false, pending: false, unknownFields: [] }
-  if (!规则.enabled || 规则.mode !== '全部满足' || !规则.conditions.length || 重复条件字段(规则.conditions)) return 不命中
+  if (!规则.enabled || 规则.mode !== '全部满足' || !Array.isArray(规则.conditions) || !规则.conditions.length || 重复条件字段(规则.conditions)) return 不命中
   if (规则.type === '分仓规则' && 规则.conditions.some(条件 => 条件.field === 'shippingWarehouse')) return 不命中
   if (校验动作附加配置(规则)) return 不命中
   const 未知字段 = new Set<string>()
@@ -174,17 +195,34 @@ export function 计算规则命中(规则: 订单规则, 订单: 全渠道订单
 export function 命中规则(规则: 订单规则, 订单: 全渠道订单, 渠道: readonly 渠道配置[] = 创建规则渠道样例()): boolean {
   return 计算规则命中(规则, 订单, 渠道).matched
 }
+export function 评估审单候选(规则: 订单规则, 全部规则: 订单规则[], 订单: 全渠道订单, 渠道: readonly 渠道配置[]) {
+  const 判定 = 计算规则命中(规则, 订单, 渠道)
+  const configError = 规则.enabled ? 校验规则配置(规则, 全部规则, 渠道) : ''
+  // 即使动作损坏，已知不满足的 AND 条件也能排除此单。eBay 履约状态依赖平台条件，不可拆开取值。
+  const 明确范围外 = !!configError && 规则.mode === '全部满足' && Array.isArray(规则.conditions) && 规则.conditions.some(条件 => {
+    if (条件.field === 'platformOrderStatus' || 校验条件配置(条件)) return false
+    const 单项 = 计算规则命中({ ...规则, action: '人工审核', orderNote: undefined, conditions: [条件] }, 订单, 渠道)
+    return !单项.matched && !单项.pending
+  })
+  return { ...判定, matched: !configError && 判定.matched, configError, configBlocks: !!configError && !明确范围外 }
+}
 export function 试算规则(规则: 订单规则[], 订单: 全渠道订单, 类型: 规则类型, 渠道: readonly 渠道配置[] = 创建规则渠道样例(), 库龄资料: readonly 候选库龄资料[] = [], 运费报价: readonly 运费试算报价[] = [], 汇率快照?: 比价汇率快照) {
-  const 候选 = (JSON.parse(JSON.stringify(规则)) as 订单规则[]).filter((项) => 项.type === 类型).sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id))
-  const 轨迹 = 候选.map((项) => ({ rule: 项, ...计算规则命中(项, 订单, 渠道) }))
-  const 首个命中 = 轨迹.find((项) => 项.matched)?.rule
+  const 候选 = 按规则优先级排序((JSON.parse(JSON.stringify(规则)) as 订单规则[]).filter(项 => 项.type === 类型))
+  const 轨迹 = 候选.map(项 => ({
+    rule: 项,
+    ...(类型 === '审单规则' ? 评估审单候选(项, 候选, 订单, 渠道) : { ...计算规则命中(项, 订单, 渠道), configError: '', configBlocks: false }),
+  }))
+  const 生效项 = 轨迹.find(项 => 项.matched || 项.configBlocks)
+  const 首个命中 = 生效项?.matched ? 生效项.rule : undefined
+  const 配置阻断 = 生效项?.configBlocks ? 生效项 : undefined
   const 门禁: string[] = []
   if (订单.fulfillmentMode !== '自配送') 门禁.push('平台履约订单不进入自配送作业')
   if (!订单.processingStatus) 门禁.push('订单尚未进入 OMS 处理')
   // 标准订单的 paidAt 只用于展示，不能代替 eBay 当前订单级 orderPaymentStatus。
   // 未通过 PAID 准入的订单没有处理状态；准入后的非 PAID 更新应先由平台适配链路转为异常。
   if (订单.processingStatus === '不发货' || 订单.processingStatus === '异常' || 订单.cancelledAt || 订单.blockReason) 门禁.push('订单存在终止或异常门禁')
-  if (订单.platformCode !== 'eBay') 门禁.push('该平台接入与动作门禁尚未验证')
+  if (类型 === '订单标发规则' && 是手工订单(订单)) 门禁.push('手工订单无需标发，不生成或调度平台标发')
+  else if (订单.platformCode !== 'eBay') 门禁.push('该平台接入与动作门禁尚未验证')
   if (类型 === '审单规则' || 类型 === '分仓规则') {
     if (订单.processingStatus !== '待审核') 门禁.push('审单与首次路由分配只在待审核阶段执行')
   }
@@ -210,7 +248,7 @@ export function 试算规则(规则: 订单规则[], 订单: 全渠道订单, �
     if (路由错误) 门禁.push(`分仓路由：${路由错误}`)
     if (!库龄比较 && !比价比较 && 检查分仓剩余库存(首个命中) === 'unknown') 门禁.push('未取得分仓后剩余可用库存，无法判断是否跳过该仓库')
   }
-  return { trace: 轨迹, hit: 首个命中, route: 路由, aging: 库龄比较, pricing: 比价比较, gates: 门禁, unknownFields: [...new Set(轨迹.flatMap(项 => 项.unknownFields))] }
+  return { trace: 轨迹, hit: 首个命中, blockedRule: 配置阻断, route: 路由, aging: 库龄比较, pricing: 比价比较, gates: 门禁, unknownFields: [...new Set(轨迹.flatMap(项 => 项.unknownFields))] }
 }
 
 export function 创建规则样例(): 订单规则[] {

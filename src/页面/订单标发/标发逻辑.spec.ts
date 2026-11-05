@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
-import { 标发阻断原因, type 标发单 } from './标发逻辑'
+import { 创建标发演示单, 标发阻断原因, type 标发单 } from './标发逻辑'
 
 function 场景() {
   const 订单 = structuredClone(全渠道订单模拟数据[0]!)
@@ -13,6 +13,17 @@ function 场景() {
 }
 
 describe('标发门禁', () => {
+  it('仅订单类型为手工也不能因保留平台展示数据或已有出库而获得标发资格', () => {
+    const { 单, 订单 } = 场景()
+    订单.orderType = '手工订单'
+    订单.systemOrderNo = 'OMS-DEMO-CF-01'
+    expect(订单.manualOrder).toBeUndefined()
+    expect(订单.platformCode).toBe('eBay')
+    const before = JSON.stringify({ 单, 订单 })
+    expect(标发阻断原因(单, 订单)).toEqual(['手工订单没有平台标发责任，不提交平台标发'])
+    expect(创建标发演示单([订单])).toEqual([])
+    expect(JSON.stringify({ 单, 订单 })).toBe(before)
+  })
   it('订单已发货且有效出库事实完整时可提交', () => { const { 单, 订单 } = 场景(); expect(标发阻断原因(单, 订单)).toEqual([]) })
   it('拆单中已出库的履约不能在订单仍待发货时提前标发', () => {
     const { 单, 订单, 履约 } = 场景()

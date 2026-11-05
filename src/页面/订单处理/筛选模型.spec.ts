@@ -3,6 +3,7 @@ import type { 全渠道订单, 订单路由 } from '../全渠道订单/类型'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
 import type { 作业行 } from './展示工具'
 import type { 订单标志 } from './订单标志模型'
+import { 计算订单标志 } from './订单标志模型'
 import { 默认订单处理筛选, 订单处理剩余发货时间选项, 解析批量编号, 解析精确搜索值, 校验订单处理筛选, 获取作业来源订单, 命中订单处理筛选, 排序订单处理作业, type 订单处理筛选条件, type 订单处理筛选上下文, type 订单处理日期类型 } from './筛选模型'
 
 function 路由(覆盖: Partial<订单路由> = {}): 订单路由 {
@@ -80,6 +81,13 @@ describe('统一查询输入与 1000 条上限', () => {
 })
 
 describe('多选分类与共享来源隔离', () => {
+  it('手工订单标志筛选读取本单来源，排除普通单和无标志选项', () => {
+    const 手工 = 订单({ orderType: '手工订单', platformCode: '手工', platformOrderId: undefined, platformOrderNo: '' })
+    const 行 = 订单行(手工), 环境 = 上下文([手工], { flags: 计算订单标志 })
+    expect(命中(行, { flag: ['MANUAL_ORDER'] }, 环境)).toBe(true)
+    expect(命中(行, { flag: ['NONE'] }, 环境)).toBe(false)
+    expect(命中(订单行(), { flag: ['MANUAL_ORDER'] }, 上下文([订单()], { flags: 计算订单标志 }))).toBe(false)
+  })
   it('同字段选项 OR、不同字段 AND，空选项不设限制', () => {
     const 行 = 订单行(), 环境 = 上下文([行.order], { flags: () => [买家留言标志] })
     const 组合: Partial<订单处理筛选条件> = { platform: ['Temu', 'eBay'], store: ['store-b', 'store-a'], warehouse: ['演示仓 B', '演示仓 A'], channel: ['CHANNEL-B', 'CHANNEL-A'], country: ['CA', 'US'], flag: ['REFUND', 'BUYER_NOTE'], inventory: ['不足', '充足'], remainingShippingTime: ['已超时', '不足36小时'] }

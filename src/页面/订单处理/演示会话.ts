@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
-import type { 全渠道订单, 订单路由, 人工发货方案 } from '../全渠道订单/类型'
+import { 是未匹配审单异常 } from '../全渠道订单/类型'
+import type { 全渠道订单, 订单路由, 人工发货方案, 审核记录 } from '../全渠道订单/类型'
 import { 创建订单标志演示, 订单标志演示证据 } from './订单标志演示'
 import { 计算订单标志 } from './订单标志模型'
 import { 创建操作演示 } from './操作演示数据'
@@ -11,9 +12,10 @@ import { 创建已发货详情演示 } from './已发货详情演示'
 import { 创建拆单重拆详情演示 } from './拆单重拆详情演示'
 import { 创建评价跟踪OMS演示 } from '../eBay评价/未收到评价OMS演示'
 import { 创建取消申请OMS演示 } from '../eBay取消订单申请/关联OMS演示'
-import { 关联人工发货订单号, 校验人工发货方案, 保存人工发货方案, 校验多组合并发货方案, 保存多组合并发货方案, type 拆合发货上下文 } from './拆合发货模型'
+import { 关联人工发货订单号, 人工发货组完整阻断原因, 校验人工发货方案, 保存人工发货方案, 校验多组合并发货方案, 保存多组合并发货方案, type 拆合发货上下文 } from './拆合发货模型'
 import { 核查发货仓库SKU, 查询人工方案库存 } from './拆合发货库存'
-import { 手工发货条件阻断 } from '../手工订单/来源规则'
+import { 是手工订单, 手工发货条件阻断 } from '../手工订单/来源规则'
+import { 创建手工订单演示 } from '../手工订单/演示数据'
 
 // 所有写操作只在本次浏览器会话内演示；订单详情与作业工作台引用同一主事实。
 export const 演示路由: 订单路由[] = [
@@ -21,7 +23,7 @@ export const 演示路由: 订单路由[] = [
   { warehouse: '谷仓美东仓', warehouseProvider: '谷仓', warehouseAccount: '谷仓 · 北美主体', shippingChannel: 'FedEx Home Delivery', shippingChannelCode: 'GC-FEDEX-HD', shippingChannelId: 'DEMO-CF-CHANNEL-GC', labelMode: '仓配一体' },
 ]
 
-function 创建作业样例(序号: number, 覆盖: Partial<全渠道订单> = {}): 全渠道订单 {
+export function 创建作业样例(序号: number, 覆盖: Partial<全渠道订单> = {}): 全渠道订单 {
   const 原单 = structuredClone(全渠道订单模拟数据[0]!)
   return {
     ...原单,
@@ -96,6 +98,7 @@ export const 共享订单 = ref<全渠道订单[]>([
   ...评价跟踪OMS样例.订单,
   ...取消申请OMS样例.订单,
   创建拆单重拆详情演示(创建作业样例, 演示路由),
+  ...创建手工订单演示(演示路由[0]!),
 ])
 
 export interface 仓库执行 {
@@ -154,9 +157,10 @@ function 可发数量有效(订单: 全渠道订单): boolean {
 }
 
 export function 审核资格原因(订单: 全渠道订单): string {
+  if (订单.initialReviewPending) return '平台新单尚未完成首轮审单规则，请先完成首轮处理'
   if (订单.fulfillmentMode !== '自配送' || 订单.processingStatus !== '待审核') return '当前对象不在待审核自配送队列'
   if (订单.reviews.some(记录 => 记录.status === '审核中')) return '本轮审核尚未结束，请查看当前结果'
-  if (订单.platformCode === 'eBay' && 订单.platformOrderStatus === 'IN_PROGRESS' &&
+  if (!是手工订单(订单) && 订单.platformCode === 'eBay' && 订单.platformOrderStatus === 'IN_PROGRESS' &&
     (操作核查证据.value[订单.systemOrderNo]?.剩余已核实 !== true || !可发数量有效(订单))) return '请先人工核实已履约范围和剩余数量，不能按整单重复发货'
   return ''
 }
@@ -167,7 +171,7 @@ function 审核单项阻断原因(订单: 全渠道订单, 库存: string = '充
   if (资格) 原因.push(资格)
   if (订单.blockReason || 订单.cancelledAt) 原因.push(订单.blockReason || '已确认最终取消，禁止继续履约')
   const 核查 = 操作核查证据.value[订单.systemOrderNo]
-  if (核查?.平台允许 === false) 原因.push('当前平台付款或取消状态不满足发货条件，请先核实订单')
+  if (!是手工订单(订单) && 核查?.平台允许 === false) 原因.push('当前平台付款或取消状态不满足发货条件，请先核实订单')
   if (核查?.剩余已核实 === false || 核查?.范围已核清 === false || 核查?.范围无重叠 === false) 原因.push('该订单需逐单人工核实剩余范围及其他发货路径')
   if (核查?.发货资料有效 === false || 核查?.路由适用 === false) 原因.push('当前商品、收件或仓库物流资料不满足发货要求')
   // paidAt 仅用于展示，不能代替当前 Order.orderPaymentStatus。
@@ -211,55 +215,94 @@ export function 审核阻断原因(订单: 全渠道订单, 库存: string = '�
   return [...new Set([...校验人工发货方案(人工发货上下文(), 方案), ...来源.flatMap(单 => 审核单项阻断原因(单, 单.systemOrderNo === 订单.systemOrderNo ? 库存 : 演示库存.value[单.systemOrderNo] ?? '充足').map(原因 => `${单.systemOrderNo}：${原因}`))])]
 }
 
+export { 是未匹配审单异常 }
+export const 专项人工审核权限 = ref(true)
+
+export function 是售后重发订单(单: 全渠道订单): boolean {
+  return 单.orderType === '手工订单' && 单.manualOrder?.scenario === '售后补寄' && Boolean(单.manualOrder.afterSaleNo)
+}
+
+export function 专项人工审核阻断原因(订单: 全渠道订单): string[] {
+  if (!专项人工审核权限.value) return ['当前操作人无人工审核权限']
+  if (!是未匹配审单异常(订单)) return ['仅未匹配到审单规则的异常订单可办理专项人工审核']
+  if (是售后重发订单(订单)) return ['售后重发须在待审核队列人工审核']
+  const 上下文 = 人工发货上下文()
+  if (关联人工发货订单号(上下文, [订单.systemOrderNo]).length !== 1) return ['该单属于合并发货安排，请先撤销原方案，再逐单审核']
+  // 仅在预检副本中进入现有审核校验。原单一直保留在异常，直至审核和履约都成功。
+  const 预检单: 全渠道订单 = { ...订单, processingStatus: '待审核' }
+  const 原因 = 审核单项阻断原因(预检单, 演示库存.value[订单.systemOrderNo] ?? '充足')
+  if (操作核查证据.value[订单.systemOrderNo]?.零出库已核实 === false) 原因.push('历史实际出库未核清，请先核实')
+  if (订单.manualShippingPlan) {
+    const 预检上下文 = { ...上下文, 订单: 上下文.订单.map(单 => 单.systemOrderNo === 订单.systemOrderNo ? 预检单 : 单) }
+    原因.push(...校验人工发货方案(预检上下文, 订单.manualShippingPlan))
+  }
+  return [...new Set(原因)]
+}
+
 export interface 命令结果 { 成功: boolean; 信息: string; 对象号?: string; 待核查?: boolean }
-export type 规则轮次来源 = '立即执行' | '定时执行'
+export type 规则轮次来源 = '立即执行' | '定时执行' | '新单首轮'
+export type 规则分流结果 = NonNullable<审核记录['ruleOutcome']>
+
+export function 记录审核结论(单: 全渠道订单, 类型: 审核记录['type'], 来源: string, 通过: boolean, 摘要: string, 分类?: 规则分流结果) {
+  单.reviews.push({ round: Math.max(0, ...单.reviews.map(项 => 项.round)) + 1, type: 类型, triggerSource: 来源, status: 通过 ? '已通过' : '已拦截', decisionNote: 摘要, completedAt: 演示时间(), ...(分类 && { ruleOutcome: 分类 }) })
+  记录操作(单, 来源 === '手动审核' ? '审核' : 来源, 摘要, 通过, 类型 === '自动审核' ? '规则执行器' : '演示操作员')
+}
 
 export function 执行演示审核(订单号: string, 期望版本: number, 审核说明 = '', 来源版本?: Record<string, number>): 命令结果 {
   return 提交审核轮次(订单号, 期望版本, 审核说明, 来源版本)
 }
 
-export function 提交审核轮次(订单号: string, 期望版本: number, 审核说明: string, 来源版本?: Record<string, number>, 规则轮次?: { 来源: 规则轮次来源; 拦截: string[] }): 命令结果 {
+export function 执行异常人工审核(订单号: string, 期望版本: number, 审核说明 = ''): 命令结果 {
+  return 提交审核轮次(订单号, 期望版本, 审核说明, undefined, undefined, true)
+}
+
+export function 提交审核轮次(订单号: string, 期望版本: number, 审核说明: string, 来源版本?: Record<string, number>, 规则轮次?: { 来源: 规则轮次来源; 命中说明: string }, 专项 = false): 命令结果 {
   const 审核类型 = 规则轮次 ? '自动审核' : '人工审核'
-  const 触发来源 = 规则轮次 ? `${规则轮次.来源}审单规则` : '手动审核'
-  const 操作人 = 规则轮次 ? '规则执行器' : '演示操作员'
-  const 订单 = 共享订单.value.find((项) => 项.systemOrderNo === 订单号)
+  const 触发来源 = 规则轮次 ? `${规则轮次.来源}审单规则` : 专项 ? '发货审核失败人工审核' : '手动审核'
+  const 订单 = 共享订单.value.find(项 => 项.systemOrderNo === 订单号)
   if (!订单) return { 成功: false, 信息: '订单不存在，请刷新列表' }
-  if (当前版本(订单号) !== 期望版本) return { 成功: false, 信息: '订单已变化，请重新打开预检后提交' }
+  if (专项 && (!专项人工审核权限.value || !是未匹配审单异常(订单))) return { 成功: false, 信息: 专项人工审核阻断原因(订单).join('；') }
+  if (当前版本(订单号) !== 期望版本) {
+    const 原因 = 专项 ? 专项人工审核阻断原因(订单) : []
+    return { 成功: false, 信息: ['订单已变化，请重新打开预检后提交', ...原因].join('；') }
+  }
   if (审核说明.trim().length > 2000) return { 成功: false, 信息: '审核说明最多 2000 字符' }
-  const 资格 = 审核资格原因(订单)
-  if (资格) return { 成功: false, 信息: [资格, 订单.blockReason].filter(Boolean).join('；') }
-  if (订单.manualShippingPlan) {
-    const 方案 = 订单.manualShippingPlan
-    const 来源号 = 关联人工发货订单号(人工发货上下文(), [订单号])
-    const 来源 = 共享订单.value.filter(单 => 来源号.includes(单.systemOrderNo))
+  const 方案 = 订单.manualShippingPlan
+  const 来源号 = 关联人工发货订单号(人工发货上下文(), [订单号])
+  const 来源 = 共享订单.value.filter(单 => 来源号.includes(单.systemOrderNo))
+  if (规则轮次 && 来源.some(是售后重发订单)) return { 成功: false, 信息: '售后重发订单须人工审核，请在订单处理中核对后审核' }
+  if (!专项) {
+    const 关联错误 = 人工发货组完整阻断原因(人工发货上下文(), 来源号)
+    if (关联错误.length) return { 成功: false, 信息: 关联错误.join('；') }
+    if (来源.length !== 来源号.length || 来源.some(单 => 单.processingStatus !== '待审核' || 单.fulfillmentMode !== '自配送')) return { 成功: false, 信息: ['全部来源必须处于待审核自配送队列，不能重复审核或部分通过', ...来源.map(单 => 单.blockReason)].filter(Boolean).join('；') }
+    if (来源.some(单 => 单.reviews.some(项 => 项.status === '审核中'))) return { 成功: false, 信息: '本轮审核尚未结束，请查看当前结果' }
     if (来源.some(单 => (来源版本?.[单.systemOrderNo] ?? (来源.length === 1 ? 期望版本 : undefined)) !== 当前版本(单.systemOrderNo))) return { 成功: false, 信息: '全部来源订单版本尚未确认或已变化，请重新打开审核窗口' }
-    if (来源.some(单 => 单.processingStatus !== '待审核')) return { 成功: false, 信息: '方案全部来源订单必须处于待审核，不能重复审核或部分通过' }
-    const 来源资格 = 来源.map(审核资格原因).find(Boolean)
-    if (来源资格) return { 成功: false, 信息: 来源资格 }
-    const 原因 = [...审核阻断原因(订单, 演示库存.value[订单号] ?? '充足'), ...(规则轮次?.拦截 ?? [])]
-    const 摘要 = `${方案.kind}方案 ${方案.id}；全部来源：${来源号.join('、')}。${原因.length ? `审核拦截：${原因.join('；')}；全部来源保留待审核。` : `审核通过，固化 ${方案.packages.length} 张履约单；全部来源进入待推单，本次不推仓。`}${审核说明.trim() ? `审核说明：${审核说明.trim()}` : ''}`
-    for (const 单 of 来源) {
-      单.reviews.push({ round: Math.max(0, ...单.reviews.map(项 => 项.round)) + 1, type: 审核类型, triggerSource: 触发来源, status: 原因.length ? '已拦截' : '已通过', decisionNote: 摘要, completedAt: 演示时间() })
-      if (!原因.length) {
-        for (const [索引, 包裹] of 方案.packages.entries()) {
-          if (!包裹.items.some(行 => 行.orderNo === 单.systemOrderNo)) continue
-          单.fulfillmentOrders.push({ fulfillmentOrderNo: `FL-${方案.id}-${索引 + 1}`, status: '待执行', isActive: true, route: { ...包裹.route }, plannedQuantity: 包裹.items.reduce((总, 行) => 总 + 行.quantity, 0), shippedQuantity: 0, items: 包裹.items.map(行 => ({ ...行 })), manualPlanId: 方案.id })
-        }
-        单.processingStatus = '待推单'
-      }
-      记录操作(单, 规则轮次 ? 触发来源 : '审核', 摘要, !原因.length, 操作人)
+    if (!规则轮次) {
+      const 资格 = 来源.map(审核资格原因).find(Boolean)
+      if (资格) return { 成功: false, 信息: 资格 }
     }
-    return { 成功: !原因.length, 信息: 摘要, 对象号: 原因.length ? undefined : `FL-${方案.id}-1` }
   }
-  const 原因 = [...审核阻断原因(订单, 演示库存.value[订单号] ?? '充足'), ...(规则轮次?.拦截 ?? [])]
-  const 摘要 = (原因.length ? `审核未通过：${原因.join('；')}。订单保留待审核。` : '审核已通过：已按本次发货数量生成履约单，并固化当前仓库和物流渠道。') + (审核说明.trim() ? `审核说明：${审核说明.trim()}` : '')
-  订单.reviews.push({ round: Math.max(0, ...订单.reviews.map((项) => 项.round)) + 1, type: 审核类型, triggerSource: 触发来源, status: 原因.length ? '已拦截' : '已通过', decisionNote: 摘要, completedAt: 演示时间() })
-  if (!原因.length) {
-    订单.fulfillmentOrders.push({ fulfillmentOrderNo: `FL-${订单号}-R${订单.reviews.length}`, status: '待执行', isActive: true, route: { ...订单.defaultRoute! }, plannedQuantity: 订单.items.reduce((总, 行) => 总 + 行.fulfillableQuantity!, 0), shippedQuantity: 0 })
-    订单.processingStatus = '待推单'
+  const 原因 = 专项 ? 专项人工审核阻断原因(订单) : 审核阻断原因(订单, 演示库存.value[订单号] ?? '充足')
+  const 通过 = !原因.length
+  const 摘要 = [规则轮次?.命中说明, 方案 && `${方案.kind}方案 ${方案.id}；全部来源：${来源号.join('、')}。`, 通过
+    ? `审核已通过，已生成${方案 ? 方案.packages.length : 1}张履约单并固化仓库及物流渠道，进入待推单。`
+    : `审核未通过：${原因.join('；')}。订单保留${专项 ? '异常' : '待审核'}。`, 审核说明.trim() && `审核说明：${审核说明.trim()}`].filter(Boolean).join('')
+  // 专项入口始终只提交当前单；共享方案须先撤销，失败不会给其他来源写入审核或履约。
+  for (const 单 of 专项 ? [订单] : 来源) {
+    记录审核结论(单, 审核类型, 触发来源, 通过, 摘要, 规则轮次 ? (通过 ? '审核通过' : '发货条件拦截') : undefined)
+    if (!通过) continue
+    if (方案) {
+      for (const [索引, 包裹] of 方案.packages.entries()) {
+        if (!包裹.items.some(行 => 行.orderNo === 单.systemOrderNo)) continue
+        单.fulfillmentOrders.push({ fulfillmentOrderNo: `FL-${方案.id}-${索引 + 1}`, status: '待执行', isActive: true, route: { ...包裹.route }, plannedQuantity: 包裹.items.reduce((总, 行) => 总 + 行.quantity, 0), shippedQuantity: 0, items: 包裹.items.map(行 => ({ ...行 })), manualPlanId: 方案.id })
+      }
+    } else {
+      单.fulfillmentOrders.push({ fulfillmentOrderNo: `FL-${单.systemOrderNo}-R${单.reviews.length}`, status: '待执行', isActive: true, route: { ...单.defaultRoute! }, plannedQuantity: 单.items.reduce((总, 行) => 总 + 行.fulfillableQuantity!, 0), shippedQuantity: 0 })
+    }
+    delete 单.reviewExceptionCode
+    单.processingStatus = '待推单'
   }
-  记录操作(订单, 规则轮次 ? 触发来源 : '审核', 摘要, !原因.length, 操作人)
-  return { 成功: !原因.length, 信息: 摘要, 对象号: 订单.fulfillmentOrders[订单.fulfillmentOrders.length - 1]?.fulfillmentOrderNo }
+  return { 成功: 通过, 信息: 摘要, 对象号: 通过 ? 订单.fulfillmentOrders[订单.fulfillmentOrders.length - 1]?.fulfillmentOrderNo : undefined }
 }
 
 /** 同步预检后保存并审核；任何前置失败均保留旧方案，不推仓。 */
@@ -339,7 +382,7 @@ export function 推单阻断原因(订单: 全渠道订单, 履约单号: string
     原因.push(...手工发货条件阻断(单, 共享订单.value, 仓库执行记录.value))
     const 证据 = 操作核查证据.value[单.systemOrderNo]
     const 计划 = 单.fulfillmentOrders.find(项 => 项.fulfillmentOrderNo === 履约单号)!
-    if (单.processingStatus !== '待推单' || 单.blockReason || 单.cancelledAt || 证据?.平台允许 === false) 原因.push(`来源订单 ${单.systemOrderNo} 当前状态不允许推单`)
+    if (单.processingStatus !== '待推单' || 单.blockReason || 单.cancelledAt || (!是手工订单(单) && 证据?.平台允许 === false)) 原因.push(`来源订单 ${单.systemOrderNo} 当前状态不允许推单`)
     if (单.reviews[单.reviews.length - 1]?.status !== '已通过' || 证据?.原方案有效 === false) 原因.push(`来源订单 ${单.systemOrderNo} 没有当前有效的审核通过方案`)
     if (!计划.isActive || !Number.isInteger(计划.plannedQuantity) || 计划.plannedQuantity <= 0 || 单.items.some(行 => !Number.isInteger(行.fulfillableQuantity) || 行.fulfillableQuantity! < 0 || 行.fulfillableQuantity! > 行.orderedQuantity) || 计划.plannedQuantity !== 来源待发总量) 原因.push(`来源订单 ${单.systemOrderNo} 计划商品或数量尚未核实`)
     if (单.items.some(行 => !行.systemSku || 行.skuResolutionStatus !== '成功') || 证据?.发货资料有效 === false || 证据?.路由适用 === false || !单.address.fullName?.trim() || !单.address.countryCode?.trim() || !单.address.addressLine1?.trim()) 原因.push(`来源订单 ${单.systemOrderNo} 本次发货资料或渠道不满足要求`)

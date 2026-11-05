@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
-import { ElIcon, ElMessage, ElSelect, ElTooltip } from 'element-plus'
+import { ElIcon, ElMessage, ElRadioGroup, ElSelect, ElTooltip } from 'element-plus'
 import MultiFilter from '@/组件/筛选/多选筛选.vue'
 import Page from './eBay退换货申请页面.vue'
 import PageTabs from '@/布局/页面页签.vue'
@@ -13,6 +13,7 @@ import { createReturnData, returnSession as session } from './数据'
 import { initializeReturnDemoContext } from './关联资料'
 import { formatReturnTime, getReturnDetail, returnKey, stateNames, type ReturnRecord } from './模型'
 import { resetMailSession } from '../eBay站内信/会话'
+import { activeAfterSaleActor, afterSaleActors, afterSaleRecords, recordsForReturn } from '../售后单管理/会话'
 import { 共享订单 } from '../订单处理/演示会话'
 import BuyerMail from '../eBay取消订单申请/买家站内信.vue'
 
@@ -55,6 +56,8 @@ async function select(label: string, value: string) {
 
 beforeEach(async () => {
   resetReturnViews()
+  activeAfterSaleActor.value = afterSaleActors[0]!
+  afterSaleRecords.value = []
   业务页签关闭请求.value = undefined
   session.records = createReturnData()
   resetMailSession()
@@ -65,6 +68,7 @@ beforeEach(async () => {
     { path: '/oms/orders/all/:systemOrderNo', name: 'oms-all-order-detail', component: { template: '<div>OMS订单详情</div>' } },
     { path: '/oms/warehouse-delivery/outbound-orders', component: { template: '<div>三方仓出库单详情</div>' } },
     { path: '/oms/ebay-service/messages', component: { template: '<div>站内信</div>' } },
+    { path: '/oms/ebay-service/after-sale-orders', component: { template: '<div>售后单管理</div>' } },
   ] })
   await router.push('/oms/ebay-service/returns')
   await router.isReady()
@@ -74,6 +78,142 @@ beforeEach(async () => {
 afterEach(() => { wrapper?.unmount(); ElMessage.closeAll() })
 
 describe('退货退款申请连续详情与处理', () => {
+  it('重发紧随拒绝退货，原申请只需确认商品、数量、原因，提交待审不建手工单', async () => {
+    const row = session.records[0]!, before = JSON.stringify([row.state, row.status, row.history, row.pendingRequest])
+    const orderCount = 共享订单.value.length
+    await open(row)
+    const labels = wrapper.get('.operation-header').findAll('button').map(item => item.text())
+    expect(labels[labels.indexOf('拒绝退货') + 1]).toBe('重发')
+    await click('重发', '.operation-header')
+    expect(wrapper.get('.reship-form').text()).toContain(row.systemOrderNo)
+    expect(wrapper.find('.linked-sales .reship-form').exists()).toBe(false)
+    expect(wrapper.get('.reship-form').text()).not.toMatch(/仓储服务商|联系电话|发货店铺/)
+    await click('提交售后单', '.reship-form')
+    expect(wrapper.get('.reship-form [role="alert"]').text()).toContain('系统售后原因')
+    await click('取消', '.reship-form')
+    expect(recordsForReturn(row.shopId, row.id)).toHaveLength(0)
+    await click('重发', '.operation-header')
+    await select('系统售后原因', '质量问题')
+    await click('提交售后单', '.reship-form')
+    expect(recordsForReturn(row.shopId, row.id)).toMatchObject([{ kind: '重发', approval: '待审核', items: [{ reason: '质量问题', quantity: row.quantity }] }])
+    expect(recordsForReturn(row.shopId, row.id)[0]?.manualOrderNo).toBeUndefined()
+    expect(共享订单.value.length).toBe(orderCount)
+    expect(JSON.stringify([row.state, row.status, row.history, row.pendingRequest])).toBe(before)
+  })
+  it('申请内联填后可点击单号进入对应售后单，内部字段与对客说明分开', async () => {
+    const row = session.records[0]!
+    await open(row)
+    await click('提出部分退款', '.operation-header')
+    await wrapper.get('input[aria-label="部分退款金额"]').setValue('5.00')
+    await click('确认内容')
+    expect(wrapper.get('.action-form .inline-error').text()).toContain('请选择系统售后原因')
+    expect(row.pendingRequest).toBeUndefined()
+    expect(recordsForReturn(row.shopId, row.id)).toHaveLength(0)
+    await select('系统售后原因', '质量问题')
+    await wrapper.get('textarea[aria-label="售后单备注"]').setValue('仅售后单存档')
+    await click('确认内容')
+    expect(wrapper.get('.sale-summary').text()).toContain('仅售后单存档')
+    await click('确认提交')
+    const doc = recordsForReturn(row.shopId, row.id)[0]!
+    expect(doc.items[0]?.reason).toBe('质量问题')
+    expect(row.pendingRequest?.body).not.toHaveProperty('comments')
+    await click(doc.no, '.linked-sales')
+    expect(router.currentRoute.value.path).toBe('/oms/ebay-service/after-sale-orders')
+    expect(router.currentRoute.value.query.documentNo).toBe(doc.no)
+  })
+  it.each([
+    [['SELLER_APPROVE_REQUEST', 'SELLER_OFFER_RETURNS'], 'APPROVE'],
+    [['SELLER_OFFER_RETURNS'], 'OFFER_RETURN'],
+  ] as const)('接受退货统一入口按当前能力构造%s，保留商品作为独立选项', async (options, decision) => {
+    const row = session.records[0]!, state = row.state
+    row.options = [...options]
+    getReturnDetail(row).availableActions = row.options.map(actionType => ({ actionType }))
+    await open(row)
+    expect(wrapper.get('.operation-header').findAll('button').filter(button => button.text() === '接受退货')).toHaveLength(1)
+    expect(wrapper.get('.operation-header').text()).not.toContain('提议退回商品')
+    await click('接受退货', '.operation-header')
+    expect(button('接受退货', '.operation-header').attributes('aria-pressed')).toBe('true')
+    const group = wrapper.findComponent(ElRadioGroup)
+    expect(group.props('modelValue')).toBe(false)
+    expect(wrapper.get('.return-arrangement').text()).toContain('买家退回商品')
+    expect(wrapper.get('.return-arrangement').text()).toContain('买家保留商品，无需寄回')
+    expect(wrapper.get('.sale-fixed-qty').text()).toBe(row.quantity + ' 件')
+    group.vm.$emit('update:modelValue', true)
+    await flushPromises()
+    expect(row.state).toBe(state)
+    expect(wrapper.find('.sale-fields').exists()).toBe(false)
+    group.vm.$emit('update:modelValue', false)
+    await flushPromises()
+    await click('确认内容', '.action-form')
+    expect(wrapper.get('.action-form .inline-error').text()).toContain('系统售后原因')
+    group.vm.$emit('update:modelValue', true)
+    await flushPromises()
+    await wrapper.get('textarea[aria-label="退货退款处理说明"]').setValue('Please keep the item.')
+    await click('确认内容', '.action-form')
+    expect(wrapper.get('[data-title="确认接受退货"]').text()).toContain('允许买家保留，无需寄回')
+    expect(wrapper.get('[data-title="确认接受退货"]').text()).not.toContain('售后单')
+    await click('确认提交', '[data-title="确认接受退货"]')
+    expect(row.pendingRequest?.body).toEqual({ decision, keepOriginalItem: true, comments: { content: 'Please keep the item.' } })
+    expect(row.state).toBe(state)
+    await refreshCurrent()
+    expect(row.state).toBe('ITEM_KEPT')
+    expect(recordsForReturn(row.shopId, row.id)).toHaveLength(0)
+    await click('发起退款', '.operation-header')
+    await select('系统售后原因', '质量问题')
+    await click('确认内容', '.action-form')
+    await click('确认提交', '[data-title="确认发起退款"]')
+    await refreshCurrent()
+    await refreshCurrent()
+    expect(recordsForReturn(row.shopId, row.id)).toMatchObject([{ kind: '全额退款', amount: { value: '49.90', currency: 'USD' } }])
+  })
+  it('免寄回确认后失去该店铺权限，无平台提交和售后记录', async () => {
+    const row = session.records[0]!
+    await open(row)
+    await click('接受退货', '.operation-header')
+    wrapper.findComponent(ElRadioGroup).vm.$emit('update:modelValue', true)
+    await flushPromises()
+    await click('确认内容', '.action-form')
+    activeAfterSaleActor.value = { ...afterSaleActors[0]!, shopIds: [] }
+    await click('确认提交', '[data-title="确认接受退货"]')
+    expect(wrapper.get('.action-form .inline-error').text()).toContain('权限')
+    expect(row.outcome).toBe('idle')
+    expect(row.pendingRequest).toBeUndefined()
+    expect(afterSaleRecords.value.filter(doc => doc.shopId === row.shopId && doc.returnId === row.id)).toHaveLength(0)
+  })
+
+  it('列表、详情与关联来信统一北京时间，业务界面不附时区说明', async () => {
+    expect(wrapper.get('.returns-table').text()).toContain('2026-10-28 11:20:00')
+    expect(wrapper.get('.returns-page').text()).not.toMatch(/UTC|GMT|站点时间|时区/)
+    expect(wrapper.get('.公共时间范围').find('[title]').exists()).toBe(false)
+    await open(session.records[0]!)
+    expect(wrapper.get('.return-history-panel').text()).toContain('2026-10-28 11:20:00')
+    expect(wrapper.get('.attachments-panel').text()).toContain('2026-10-28 11:21:00')
+    const mail = wrapper.findComponent(BuyerMail)
+    expect(mail.props('formatTime')!('2026-10-28T03:20:00Z')).toBe('2026-10-28 11:20:00')
+    expect(mail.find('time[title]').exists()).toBe(false)
+    expect(wrapper.get('.return-workbench').text()).not.toMatch(/UTC|GMT|站点时间|时区/)
+  })
+
+  it('默认不选处理动作，切换与取消仅高亮当前选择', async () => {
+    expect(wrapper.find('.returns-toolbar .sync-help').exists()).toBe(false)
+    const refreshHelp = wrapper.findAllComponents(ElTooltip).find(item => String(item.props('content')).includes('按已应用店铺范围刷新'))!
+    expect(refreshHelp.props('trigger')).toEqual(['hover', 'focus'])
+    await open(session.records[0]!)
+    const actions = () => wrapper.get('.operation-header .action-buttons')
+    expect(actions().findAll('button.el-button--primary')).toHaveLength(0)
+    expect(actions().findAll('button[aria-pressed="true"]')).toHaveLength(0)
+    await click('接受退货', '.operation-header')
+    expect(actions().get('button[aria-pressed="true"]').text()).toBe('接受退货')
+    await click('拒绝退货', '.operation-header')
+    expect(actions().findAll('button.el-button--primary')).toHaveLength(1)
+    expect(actions().get('button[aria-pressed="true"]').text()).toBe('拒绝退货')
+    expect(button('接受退货', '.operation-header').classes()).not.toContain('el-button--primary')
+    expect(wrapper.find('[aria-label="上传申请材料"]').exists()).toBe(true)
+    await click('取消', '.action-form')
+    expect(actions().findAll('button.el-button--primary')).toHaveLength(0)
+    expect(actions().findAll('button[aria-pressed="true"]')).toHaveLength(0)
+  })
+
   it('处理中合并协商退货与退款记录，数量及平台状态筛选保持一致', async () => {
     expect(wrapper.findAll('[role="tab"]').map(tab => tab.element.firstChild?.textContent?.trim())).toEqual(['全部', '待处理', '处理中', '已升级纠纷', '已关闭'])
     const processingIds = [2, 3, 4, 5, 8, 10, 11, 12, 13, 15, 19, 20].map(number => `DEMO-RT-${String(number).padStart(3, '0')}`)
@@ -148,12 +288,16 @@ describe('退货退款申请连续详情与处理', () => {
     expect(wrapper.get('.return-workbench-header').text()).not.toContain('返回申请列表')
     expect(wrapper.get('.return-workbench-header').text()).not.toContain('关闭详情')
     const refreshHelpSnapshot = JSON.stringify({ lastSyncedAt: record.lastSyncedAt, version: getReturnDetail(record).eligibilityVersion, logs: record.logs })
-    await wrapper.get('.detail-refresh [aria-label="刷新当前退货申请说明"]').trigger('click')
+    expect(wrapper.find('.detail-refresh .sync-help').exists()).toBe(false)
+    await button('刷新数据', '.detail-refresh').trigger('mouseenter')
+    await button('刷新数据', '.detail-refresh').trigger('focus')
     await flushPromises()
     expect(JSON.stringify({ lastSyncedAt: record.lastSyncedAt, version: getReturnDetail(record).eligibilityVersion, logs: record.logs })).toBe(refreshHelpSnapshot)
     const footer = wrapper.get('.return-operation .operation-header')
     expect(footer.find('.action-buttons').exists()).toBe(true)
-    expect(footer.findAll('button').map(item => item.text().trim())).toEqual(['接受退货', '提出部分退款', '发起退款', '发送消息', '请求 eBay 介入'])
+    expect(footer.findAll('button').map(item => item.text().trim())).toEqual(['接受退货', '提出部分退款', '发起退款', '发送消息', '拒绝退货', '重发', '请求 eBay 介入'])
+    expect(button('拒绝退货', footer).attributes('disabled')).toBeDefined()
+    expect(button('重发', footer).attributes('disabled')).toBeUndefined()
     expect(footer.text()).not.toContain('确认提交')
     expect(footer.text()).not.toContain('刷新数据')
     expect(wrapper.find('.action-section .action-buttons').exists()).toBe(false)
@@ -169,6 +313,9 @@ describe('退货退款申请连续详情与处理', () => {
     expect(item.text()).toContain('申请数量')
     expect(item.text()).not.toContain('DEMO-RET-ACCESSORY-2')
     const order = wrapper.get('.order-context')
+    expect(application.find('.order-context').exists()).toBe(true)
+    expect(wrapper.findAll('.order-context')).toHaveLength(1)
+    expect(wrapper.get('.detail-main > .order-products').find('.order-context').exists()).toBe(false)
     expect(order.text()).toContain(record.systemOrderNo!)
     expect(order.text()).toContain(record.orderNo)
     expect(order.text()).toContain('GBP 83.60')
@@ -194,7 +341,7 @@ describe('退货退款申请连续详情与处理', () => {
     expect(record.logs).toHaveLength(originalLogs)
   })
 
-  it('处理过程提前展示来源事件，保留来源顺序并与站内信及内部记录隔离', async () => {
+  it('申请信息与右侧处理过程优先展示，来源顺序及站内信和内部记录隔离不变', async () => {
     const record = session.records[0]!
     record.history = [
       { at: '2026-10-29T03:00:00Z', author: 'SELLER', activity: 'SELLER_SEND_MESSAGE', text: 'Return来源卖家沟通独立证据' },
@@ -204,12 +351,14 @@ describe('退货退款申请连续详情与处理', () => {
     const sourceHistory = JSON.stringify(record.history)
     record.logs.push({ at: '2026-10-29T02:00:00Z', text: '仅内部执行记录证据' })
     await open(record)
-    const history = wrapper.get('.return-reading > .return-history-panel')
+    const history = wrapper.get('.detail-aside > .return-history-panel')
     expect(history.get('h3').text()).toBe('处理过程')
     const responsibility = wrapper.get('.return-reading .responsibility-panel').element
     const businessData = wrapper.get('.return-reading .detail-workspace').element
     expect(responsibility.compareDocumentPosition(history.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(history.element.compareDocumentPosition(businessData) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(responsibility.compareDocumentPosition(businessData) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.get('.detail-main').element.firstElementChild).toBe(wrapper.get('.application-panel').element)
+    expect(wrapper.get('.detail-aside').element.firstElementChild).toBe(history.element)
     expect(history.findAll('.history-entry > header > strong').map(entry => entry.text())).toEqual(['卖家', '买家', 'eBay'])
     expect(history.findAll('.history-entry > p:not(.activity-kind)').map(entry => entry.text())).toEqual(record.history.map(entry => entry.text))
     expect(JSON.stringify(record.history)).toBe(sourceHistory)
@@ -275,16 +424,21 @@ describe('退货退款申请连续详情与处理', () => {
     const originalHistory = JSON.parse(JSON.stringify(record.history))
     await open(record)
     await click('提出部分退款')
+    expect(wrapper.get('.action-form').text()).not.toContain('允许买家保留商品')
+    expect(wrapper.get('.action-form').find('[aria-label="允许买家保留商品"]').exists()).toBe(false)
     await wrapper.get('input[aria-label="部分退款金额"]').setValue('10.00')
     await wrapper.get('textarea[aria-label="退货退款处理说明"]').setValue('We can offer USD 10.00.')
+    await select('系统售后原因', '退差价')
     await click('确认内容')
     expect(wrapper.get('[data-title="确认提出部分退款"]').text()).toContain('USD 10.00')
+    expect(wrapper.get('[data-title="确认提出部分退款"]').text()).not.toContain('商品安排')
     await click('确认提交')
     expect(record.outcome).toBe('pending')
     expect(record.state).toBe('RETURN_REQUESTED')
     expect(record.actualRefund).toBeNull()
     expect(record.history).toEqual(originalHistory)
     expect(record.pendingRequest?.body).toMatchObject({ decision: 'OFFER_PARTIAL_REFUND', partialRefundAmount: { currency: 'USD', value: 10 }, comments: { content: 'We can offer USD 10.00.' } })
+    expect(record.pendingRequest?.body).not.toHaveProperty('keepOriginalItem')
     expect(button('提出部分退款').attributes('disabled')).toBeDefined()
     await refreshCurrent()
     expect(record.state).toBe('PARTIAL_REFUND_REQUESTED')
@@ -308,6 +462,7 @@ describe('退货退款申请连续详情与处理', () => {
     expect(wrapper.get('.return-detail .detail-heading').text()).toContain(second.shopName)
     expect(wrapper.get('.return-detail .detail-heading').text()).not.toContain(first.shopName)
     await click('接受退货')
+    await select('系统售后原因', '无理由退货')
     await click('确认内容')
     expect(wrapper.get('[data-title="确认接受退货"]').text()).toContain(second.shopName)
     await click('确认提交')
@@ -342,6 +497,7 @@ describe('退货退款申请连续详情与处理', () => {
     await open(record)
     await click('发起退款', '.return-operation')
     expect(wrapper.get('.refund-edit-table').text()).toContain('商品价款')
+    await select('系统售后原因', '质量问题')
     await click('确认内容')
     const confirmation = wrapper.get('[data-title="确认发起退款"]')
     expect(confirmation.text()).toContain('USD 29.50')
@@ -358,6 +514,7 @@ describe('退货退款申请连续详情与处理', () => {
     const record = session.records[17]!
     await open(record)
     await click('接受退货', '.return-operation')
+    await select('系统售后原因', '描述不符')
     await click('确认内容')
     expect(record.state).toBe('ITEM_READY_TO_SHIP')
     expect(record.outcome).toBe('idle')

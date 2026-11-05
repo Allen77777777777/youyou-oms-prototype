@@ -90,7 +90,7 @@ describe('订单规则工作台的草稿与只读边界', () => {
     expect(page.findAll('.el-table__row .规则副文').map(项 => 项.text())).not.toContain('北京时间')
     expect(page.findAll('.规则工具栏 .左工具 button').map(项 => 项.text())).toEqual(['新增规则', '规则试算', '批量启用', '批量停用'])
     expect(page.find('.排序触发').exists()).toBe(false)
-    expect(page.findAll('.优先级数字')).toHaveLength(0)
+    expect(规则行(page, 空说明.name).get('.优先级数字').text()).toBe(String(空说明.priority))
     expect(page.findAll('.顶栏操作 button').map(项 => 项.text())).toEqual(['系统默认审定规则'])
     const 操作 = 规则行(page, 空说明.name).get('.规则行操作')
     expect(操作.findAll('button').map(项 => 项.text())).toEqual(['编辑', '更多'])
@@ -208,16 +208,32 @@ describe('订单规则工作台的草稿与只读边界', () => {
     expect(订单事实快照()).toBe(前订单)
   })
 
-  it('从页面试算展示命中轨迹，不写操作日志、不改变订单事实或规则配置', async () => {
+  it('试算区分首条和模拟命中，交换顺序及全部停用可预览三种去向，多次试算不改订单', async () => {
+    const 旧规则 = 共享规则.value.find(项 => 项.id === 'RULE-REVIEW-01')!
+    const 固定订单 = 共享订单.value.find(项 => 项.processingStatus === '待审核')!
+    旧规则.conditions = [{ field: 'platformCode', operator: '等于', value: 固定订单.platformCode }]
+    旧规则.orderNote = '核对收件资料'
+    const 自动 = { ...旧规则, id: 'REVIEW-AUTO', name: '同范围自动审核', action: '自动审核', priority: 20 }
+    共享规则.value = [旧规则, 自动]
     const 前规则 = JSON.stringify(共享规则.value), 前订单 = 订单事实快照(), 前日志 = JSON.stringify(共享规则日志.value)
     const page = await 打开()
     await 按钮(page, '规则试算').trigger('click'); await 稳定()
     const 试算 = 浮层(page, '规则试算')
-    await 按钮(试算, '开始试算').trigger('click'); await 稳定()
-    expect(试算.find('.试算结论').exists()).toBe(true)
-    expect(试算.findAll('.轨迹标题行').length).toBeGreaterThan(0)
-    expect(JSON.stringify(共享规则日志.value)).toBe(前日志)
+    const 执行 = async () => { await 按钮(试算, '开始试算').trigger('click'); await 稳定() }
+    await 执行()
+    expect(试算.get('.试算结论').text()).toContain('待审核 · 交人工复核')
+    expect(试算.get('.订单备注正文').text()).toContain('核对收件资料')
+    expect(试算.findAll('.轨迹标题行 .el-tag').map(项 => 项.text())).toEqual(['预计生效 · 首条命中', '模拟命中'])
     expect(JSON.stringify(共享规则.value)).toBe(前规则)
+    共享规则.value[1]!.priority = 1
+    await 执行()
+    expect(试算.get('.试算结论').text()).toContain('发货条件通过后进入待推单')
+    expect(试算.find('.订单备注正文').exists()).toBe(false)
+    expect(试算.findAll('.轨迹标题行 strong').map(项 => 项.text())).toEqual([自动.name, 旧规则.name])
+    共享规则.value.forEach(项 => { 项.enabled = false })
+    await 执行()
+    expect(试算.get('.试算结论').text()).toContain('异常 → 发货审核失败（未匹配到审单规则）')
+    expect(JSON.stringify(共享规则日志.value)).toBe(前日志)
     expect(订单事实快照()).toBe(前订单)
   })
 

@@ -10,6 +10,52 @@ function evidence(changes: Partial<订单标志证据> = {}): 订单标志证据
 const codes = (flags: ReturnType<typeof 计算订单标志>) => flags.map(flag => flag.code)
 
 describe('订单标志的同源只读投影', () => {
+  it('手按本单类型跨全部处理阶段显示，不要求平台身份，也不继承关联原单标志', () => {
+    const original = order()
+    const source = order()
+    source.systemOrderNo = 'OMS-DEMO-MANUAL-FLAG'
+    source.orderType = '手工订单'
+    source.platformCode = '手工'
+    source.platformOrderId = undefined
+    source.platformOrderNo = ''
+    source.manualOrder = { scenario: '售后补寄', originalOrderNo: original.systemOrderNo, reason: '手工发货', paidConfirmed: false, requestId: 'manual-flag-request' }
+    const originalFacts = evidence({ paymentStatus: 'FULLY_REFUNDED', cancelState: 'CANCELED', messages: [{ messageId: 'original-message', valid: true, direction: 'BUYER_INBOUND', linkedOrder: evidence() }] })
+    for (const status of ['待审核', '待推单', '待发货', '已发货', '异常', '不发货'] as const) {
+      source.processingStatus = status
+      const before = JSON.stringify(source)
+      const flags = 计算订单标志(source, [originalFacts])
+      expect(codes(flags)).toEqual(['MANUAL_ORDER'])
+      expect(flags[0]).toMatchObject({ text: '手', name: '手工订单', sourceOrderNos: [source.systemOrderNo] })
+      expect(JSON.stringify(source)).toBe(before)
+    }
+  })
+  it('手工类型本身即显示手，不因遗留平台身份或同源平台证据出现退消信言；元数据和展示来源兼容', () => {
+    const source = order()
+    source.orderType = '手工订单'
+    expect(codes(计算订单标志(source, [evidence({ paymentStatus: 'FULLY_REFUNDED', cancelState: 'CANCELED' })]))).toEqual(['MANUAL_ORDER'])
+    source.orderType = '其他'
+    source.manualOrder = { scenario: '其他', reason: '来源兼容', paidConfirmed: false, requestId: 'legacy-request' }
+    expect(codes(计算订单标志(source))).toEqual(['MANUAL_ORDER'])
+    source.manualOrder = undefined
+    source.platformCode = '手工'
+    expect(codes(计算订单标志(source))).toEqual(['MANUAL_ORDER'])
+    source.platformCode = 'eBay'
+    source.tags = ['手', 'MANUAL_ORDER', '手工订单']
+    expect(codes(计算订单标志(source))).toEqual(['BUYER_NOTE'])
+  })
+  it('共享履约只聚合手标志命中来源，手工本单有效拆分标志可并存', () => {
+    const a = order(), b = order()
+    a.systemOrderNo = 'OMS-DEMO-MANUAL-A'
+    a.orderType = '手工订单'
+    const route = a.fulfillmentOrders[0]!.route
+    a.manualShippingPlan = { id: 'manual-split', kind: '拆分发货', orderNos: [a.systemOrderNo], packages: [{ key: 'package-a', route, items: [] }, { key: 'package-b', route, items: [] }], reason: '', updatedAt: '' }
+    const aFlags = 计算订单标志(a)
+    expect(codes(aFlags)).toEqual(['MANUAL_ORDER', 'SPLIT'])
+    const merged = 合并来源订单标志([aFlags, 计算订单标志(b), aFlags])
+    expect(codes(merged)).toEqual(['BUYER_NOTE', 'MANUAL_ORDER', 'SPLIT'])
+    expect(merged.find(flag => flag.code === 'MANUAL_ORDER')?.sourceOrderNos).toEqual([a.systemOrderNo])
+    expect(计算订单标志(b).some(flag => flag.code === 'MANUAL_ORDER')).toBe(false)
+  })
   it('买家留言仅判断非空、不改正文、不读取系统备注或原因；未接入平台不套用', () => {
     const source = order(), before = JSON.stringify(source)
     expect(codes(计算订单标志(source))).toEqual(['BUYER_NOTE'])

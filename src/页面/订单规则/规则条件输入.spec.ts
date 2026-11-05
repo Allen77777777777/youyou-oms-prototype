@@ -681,15 +681,19 @@ describe('规则条件输入与表单联动', () => {
     expect(page.findAll('.编辑条件行')).toHaveLength(4)
   })
 
-  it('审单仅提供留在待审核动作，订单备注位于执行动作内且留空可保存，不扩为匹配条件', async () => {
+  it('审单动作单选，旧截留规则回显人工审核，备注可选；可改选自动审核', async () => {
     const { 草稿, 来源 } = 准备规则(), 来源快照 = JSON.stringify(来源), 备注快照 = JSON.stringify(共享订单备注.value), page = await 打开(草稿, 来源)
-    expect(page.findAll('.动作选项 .el-radio').map(项 => 项.text())).toEqual(['留在待审核'])
+    expect(page.findAll('.动作选项 .el-radio').map(项 => 项.text())).toEqual(['人工审核', '自动审核'])
     const 执行动作区 = page.findAll('.编辑分区').find(项 => 项.find('h3').text() === '执行动作')!
     expect(执行动作区.find('textarea[aria-label="订单备注"]').exists()).toBe(true)
     expect(page.findAll('.可选分组 .el-checkbox').map(项 => 项.text())).not.toContain('订单备注')
     await 按钮(page, '保存规则').trigger('click'); await 稳定()
     expect(page.find('[role="alert"]').exists()).toBe(false)
-    expect(已保存(page)?.action).toBe('留在待审核')
+    expect(已保存(page)?.action).toBe('人工审核')
+    await page.get('.动作选项 input[value="自动审核"]').setValue(true)
+    expect(page.find('textarea[aria-label="订单备注"]').exists()).toBe(false)
+    await 按钮(page, '保存规则').trigger('click'); await 稳定()
+    expect(已保存(page)?.action).toBe('自动审核')
     expect(已保存(page)?.orderNote ?? '').toBe('')
     expect(JSON.stringify(来源)).toBe(来源快照)
     expect(JSON.stringify(共享订单备注.value)).toBe(备注快照)
@@ -707,7 +711,7 @@ describe('规则条件输入与表单联动', () => {
     expect(条件行(page, '买家留言').get<HTMLTextAreaElement>('textarea[aria-label="第2项买家留言"]').element.value).toBe('请核对车型')
     await 按钮(page, '保存规则').trigger('click'); await 稳定()
     const saved = 已保存(page)!
-    expect(saved).toMatchObject({ action: '留在待审核', orderNote: '需要人工核对\n核对后补充结果', note: '供团队维护的规则说明' })
+    expect(saved).toMatchObject({ action: '人工审核', orderNote: '需要人工核对\n核对后补充结果', note: '供团队维护的规则说明' })
     expect(saved.conditions.find(项 => 项.field === 'buyerMessage')).toEqual({ field: 'buyerMessage', operator: '包含', value: '请核对车型' })
     expect(JSON.stringify(来源)).toBe(来源快照)
     expect(JSON.stringify(共享订单备注.value)).toBe(备注快照)

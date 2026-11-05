@@ -1,4 +1,5 @@
 import type { 全渠道订单 } from '../全渠道订单/类型'
+import { 是手工订单 } from '../手工订单/来源规则'
 
 export type 标发状态 = '待标发' | '标发中' | '标发成功' | '标发失败' | '无需标发'
 export interface 标发单 {
@@ -16,7 +17,7 @@ export const 标发状态列表: 标发状态[] = ['待标发', '标发中', '�
 export function 标发阻断原因(单: 标发单, 订单?: 全渠道订单): string[] {
   const 原因: string[] = []
   if (!订单) return ['来源订单不存在，需核查关联关系']
-  if (订单.manualOrder || 订单.platformCode === '手工') 原因.push('手工订单没有平台标发责任，不提交平台标发')
+  if (是手工订单(订单)) return ['手工订单没有平台标发责任，不提交平台标发']
   if (单.status !== '待标发' && 单.status !== '标发失败') 原因.push('当前状态不可提交')
   if (单.pendingVerification) 原因.push('平台结果待核查，确认前禁止重提')
   if (订单.platformCode !== 'eBay') 原因.push('该平台标发规则与接口待接入')
@@ -38,7 +39,7 @@ export function 创建标发演示单(订单列表: 全渠道订单[]): 标发�
   // 仅初始化六条既有虚构样例；真实有效出库且订单已发货后的生成及调度尚未接入。
   // 不从生产渠道名称推断平台承运商，也不以本函数模拟正常／拆单／合单生成规则。
   const 演示历史承运商: Record<string, string> = { 'DEMO-CF-CHANNEL-GC': 'FedEx', 'DEMO-CF-CHANNEL-WYT': 'USPS' }
-  return 订单列表.filter((订单) => !订单.manualOrder && 订单.platformCode !== '手工' && /^OMS-DEMO-CF-0[1-6]$/.test(订单.systemOrderNo)).map((订单, 序号) => {
+  return 订单列表.filter((订单) => !是手工订单(订单) && /^OMS-DEMO-CF-0[1-6]$/.test(订单.systemOrderNo)).map((订单, 序号) => {
     const 履约 = 订单.fulfillmentOrders[0]!
     const 状态: 标发状态[] = ['待标发', '标发中', '标发成功', '标发失败', '无需标发', '标发失败']
     const 单: 标发单 = {

@@ -9,6 +9,7 @@ import type {
   同步状态,
 } from './类型'
 import { 命中多选, 命中字段搜索, 命中时间范围, 校验字段搜索, 校验时间范围, 排序列表, 读取排序时刻, type 列表排序条件 } from '@/组件/筛选/筛选工具'
+import { 是手工订单 } from '../手工订单/来源规则'
 
 export const 全渠道搜索字段: { value: string; label: string; kind?: 'identifier' | 'text' }[] = [
   { value: 'platformOrderNo', label: '平台订单号' },
@@ -157,7 +158,7 @@ export function 获取OMS状态说明(订单: 全渠道订单): 状态说明 {
 }
 
 export function 获取平台状态说明(订单: 全渠道订单): 状态说明 {
-  if (订单.manualOrder || 订单.platformCode === '手工') return { text: '不适用', tone: 'neutral', helper: '手工创建，无平台订单状态' }
+  if (是手工订单(订单)) return { text: '不适用', tone: 'neutral', helper: '手工创建，无平台订单状态' }
   if (订单.platformCode !== 'eBay') return {
     text: '状态映射待接入',
     tone: 'neutral',
@@ -247,7 +248,7 @@ export function 筛选全渠道订单(
     if (Array.isArray(条件.store) ? !命中多选(条件.store, 订单.storeId) : !命中多选(条件.store, 订单.storeName)) return false
     if (!命中多选(条件.processingStatus, 订单.processingStatus || '__EMPTY__')) return false
     if (!命中时间范围(订单[条件.dateType], 条件.dateRange)) return false
-    if (!命中多选(条件.platformStatus, 订单.manualOrder || 订单.platformCode === '手工' ? undefined : 订单.platformCode === 'eBay' ? 订单.platformOrderStatus : '__NOT_INTEGRATED__')) return false
+    if (!命中多选(条件.platformStatus, 是手工订单(订单) ? undefined : 订单.platformCode === 'eBay' ? 订单.platformOrderStatus : '__NOT_INTEGRATED__')) return false
     if (!命中多选(条件.syncStatus, 订单.sync.status)) return false
     if (!命中多选(条件.countryCode, 订单.address.countryCode)) return false
     if ((条件.skuStatus.length || (商品字段 && 条件.keyword.trim())) && !订单.items.some(商品 => 命中多选(条件.skuStatus, 商品.skuResolutionStatus)

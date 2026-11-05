@@ -61,7 +61,7 @@ describe('退换货申请操作边界', () => {
     const row = createReturnData()[0]!
     row.state = 'FUTURE_STATE'; expect(getReturnBlockedReason(row, 'approve', now)).not.toBe('')
     row.state = 'RETURN_REQUESTED'; row.options = []; expect(getReturnBlockedReason(row, 'approve', now)).not.toBe('')
-    row.options = ['SELLER_APPROVE_REQUEST']; row.returnType = 'REPLACEMENT'; expect(getReturnBlockedReason(row, 'approve', now)).toContain('不支持')
+    row.options = ['SELLER_APPROVE_REQUEST']; row.returnType = 'REPLACEMENT'; row.detail!.currentType = 'REPLACEMENT'; expect(getReturnBlockedReason(row, 'approve', now)).toContain('不支持')
   })
   it('未来未知state或status进入待处理队列', () => {
     const row = createReturnData()[1]!
@@ -79,7 +79,7 @@ describe('退换货申请操作边界', () => {
   })
   it('字段多行精确搜索与店铺、日期取交集；内部备注不改平台状态', () => {
     const records = createReturnData(), filters = createReturnFilters()
-    filters.mode = 'exact'; filters.query = 'DEMO-RT-001\nDEMO-RT-002'; filters.shops = ['shop-us']; filters.dates = ['2026-10-27', '2026-10-27']
+    filters.mode = 'exact'; filters.query = 'DEMO-RT-001\nDEMO-RT-002'; filters.shops = ['shop-us']; filters.dates = ['2026-10-28', '2026-10-28']
     expect(filterReturns(records, filters).map(row => row.id)).toEqual(['DEMO-RT-001'])
     const row = records[0]!, previous = row.state
     expect(addReturnNote(row, '  已联系买家  ', now)).toBe(''); expect(row.notes[0]?.text).toBe('已联系买家'); expect(row.state).toBe(previous)

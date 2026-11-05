@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Refresh, QuestionFilled } from '@element-plus/icons-vue'
-import { ElButton, ElEmpty, ElIcon, ElMessage, ElPagination, ElTable, ElTableColumn, ElTag, ElTooltip, type TableInstance } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
+import { ElButton, ElEmpty, ElMessage, ElPagination, ElTable, ElTableColumn, ElTooltip, type TableInstance } from 'element-plus'
 import MultiFilter from '@/组件/筛选/多选筛选.vue'
 import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import DateRange from '@/组件/筛选/时间范围.vue'
 import { 校验字段搜索, 校验时间范围, type 搜索字段 } from '@/组件/筛选/筛选工具'
 import { returnSession, returnShops, syncReturnList } from './数据'
-import { initializeReturnDemoContext } from './关联资料'
-import { createReturnFilters, filterReturns, formatReturnTime, getReturnDetail, inReturnQueue, isEscalated, returnKey, returnTimeZone, stateNames, statusNames, type ReturnQueue, type ReturnRecord } from './模型'
+import { initializeAfterSaleDemo } from '../售后单管理/演示数据'
+import { createReturnFilters, filterReturns, formatReturnTime, getReturnDetail, inReturnQueue, isEscalated, returnKey, stateNames, type ReturnQueue, type ReturnRecord } from './模型'
+import PlatformStatus from './平台状态资料.vue'
 import { activityNames, moneyText } from './接口契约'
+import { returnTypeText } from './展示工具'
 import { returnListView } from './视图会话'
 import { returnAnnotation as annotation } from './标注'
 
-initializeReturnDemoContext()
+initializeAfterSaleDemo()
 const router = useRouter(), session = returnSession
 const { draft, applied, queue, page, pageSize, searchError } = toRefs(returnListView)
 const queues: Array<{ id: ReturnQueue; label: string }> = [{ id: 'all', label: '全部' }, { id: 'response', label: '待处理' }, { id: 'processing', label: '处理中' }, { id: 'case', label: '已升级纠纷' }, { id: 'closed', label: '已关闭' }]
@@ -34,12 +36,8 @@ const now = ref(new Date().toISOString()), clock = setInterval(() => { now.value
 onBeforeUnmount(() => clearInterval(clock))
 const time = (value: string | null | undefined, row: ReturnRecord) => formatReturnTime(value, row)
 const closed = (row: ReturnRecord) => row.state === 'CLOSED' || row.status === 'CLOSED'
-const tone = (row: ReturnRecord) => closed(row) ? 'info' : isEscalated(row) ? 'danger' : ['ITEM_DELIVERED', 'ITEM_KEPT', 'UNKNOWN'].includes(row.state) ? 'warning' : 'primary'
-const stateText = (row: ReturnRecord) => stateNames[row.state] || '状态待核实'
-const statusText = (row: ReturnRecord) => statusNames[row.status] || '总体状态待核实'
 const due = (row: ReturnRecord) => { const detail = getReturnDetail(row); return detail.sellerDue ? { ...detail.sellerDue, who: '卖家' } : detail.buyerDue ? { ...detail.buyerDue, who: '买家' } : null }
 const overdue = (row: ReturnRecord) => !!getReturnDetail(row).sellerDue?.at && Date.parse(getReturnDetail(row).sellerDue!.at!) < Date.parse(now.value) && !closed(row) && !isEscalated(row)
-const zoneHint = (row: ReturnRecord) => returnTimeZone(row) ? row.site + ' · ' + returnTimeZone(row) : '站点时区待核实'
 const refreshFeedback = ref(''), tableWrap = ref<HTMLElement>(), table = ref<TableInstance>()
 function saveScroll() { returnListView.scrollTop = tableWrap.value?.scrollTop || 0; returnListView.tableScrollTop = tableWrap.value?.querySelector('.el-table__body-wrapper .el-scrollbar__wrap')?.scrollTop || 0 }
 onMounted(() => nextTick(() => { if (tableWrap.value) tableWrap.value.scrollTop = returnListView.scrollTop; table.value?.setScrollTop(returnListView.tableScrollTop) }))
@@ -54,7 +52,7 @@ function syncAll() { const result = syncReturnList(session.records, applied.valu
       <MultiFilter v-model="draft.shops" :options="shops" placeholder="店铺" :width="154" />
       <MultiFilter v-model="draft.states" :options="states" placeholder="平台处理状态" :width="155" />
       <MultiFilter v-model="draft.reasons" :options="reasons" placeholder="退货原因" :width="145" />
-      <span class="field-label">申请时间</span><DateRange v-model="draft.dates" aria-prefix="退货退款申请" precision="date" :width="248" :shortcuts-enabled="false" hint="按每条申请所属站点的本地日期筛选，包含起止日" />
+      <span class="field-label">申请时间</span><DateRange v-model="draft.dates" aria-prefix="退货退款申请" precision="date" :width="248" :shortcuts-enabled="false" :show-hint="false" />
       <FieldSearch v-model="draft.query" v-model:field="draft.field" v-model:mode="draft.mode" :fields="fields" aria-prefix="退货退款申请" :width="374" @search="query" />
       <ElButton type="primary" @click="query">查询</ElButton><ElButton @click="reset">重置</ElButton>
       <p v-if="searchError" class="inline-error" role="alert">{{ searchError }}</p>
@@ -62,16 +60,16 @@ function syncAll() { const result = syncReturnList(session.records, applied.valu
     <div v-prototype="annotation('queues')" class="queue-tabs" role="tablist" aria-label="退货退款处理队列">
       <button v-for="item in queues" :key="item.id" role="tab" :aria-selected="queue === item.id" :class="{ active: queue === item.id }" @click="changeQueue(item.id)">{{ item.label }}<span>{{ filtered.filter(row => inReturnQueue(row, item.id)).length }}</span></button>
     </div>
-    <div class="returns-toolbar"><span v-if="refreshFeedback" class="refresh-result" role="status">{{ refreshFeedback }}</span><div v-prototype="annotation('sync')" class="sync-actions"><ElButton :icon="Refresh" @click="syncAll">刷新数据</ElButton><ElTooltip content="获取退货退款申请的最新处理进度、退款信息及申请沟通。按已应用店铺范围刷新，不受关键词、日期、队列或分页限制。" placement="top" :trigger="['hover','focus','click']"><button type="button" class="sync-help" aria-label="刷新退货申请说明"><ElIcon><QuestionFilled /></ElIcon></button></ElTooltip></div></div>
+    <div class="returns-toolbar"><span v-if="refreshFeedback" class="refresh-result" role="status">{{ refreshFeedback }}</span><div v-prototype="annotation('sync')" class="sync-actions"><ElTooltip content="获取退货退款申请的最新处理进度、退款信息及申请沟通。按已应用店铺范围刷新，不受关键词、日期、队列或分页限制。" placement="top" :trigger="['hover','focus']"><ElButton :icon="Refresh" @click="syncAll">刷新数据</ElButton></ElTooltip></div></div>
     <div v-prototype="annotation('table')" ref="tableWrap" class="returns-table-wrap">
       <ElTable ref="table" :data="rows" class="returns-table" :row-key="returnKey" border height="calc(100vh - 290px)" :header-cell-style="{ color: 'var(--yy-text-heading)', background: '#f7f9fb' }">
         <ElTableColumn label="ReturnID" min-width="195"><template #default="{ row }"><button class="link-button" @click="openDetail(row as ReturnRecord)">{{ row.id }}</button><div class="muted">{{ row.orderNo }}</div><div class="muted">{{ row.shopName }} · {{ row.site }}</div></template></ElTableColumn>
-        <ElTableColumn label="申请商品 / 买家" min-width="215"><template #default="{ row }"><div class="product-title">{{ getReturnDetail(row as ReturnRecord).contentOnHold ? '平台已隐藏商品内容' : row.title }}</div><div class="muted">{{ row.sku }} × {{ row.quantity }}</div><div class="muted">买家：{{ row.buyerId }}</div></template></ElTableColumn>
-        <ElTableColumn label="买家诉求 / 原因" min-width="145"><template #default="{ row }"><div>{{ row.returnType === 'MONEY_BACK' ? '退款' : '诉求待核实' }}</div><div class="muted">{{ row.reason }}</div></template></ElTableColumn>
-        <ElTableColumn label="平台处理状态" min-width="180"><template #default="{ row }"><ElTooltip :content="row.state"><ElTag :type="tone(row as ReturnRecord)" size="small">{{ stateText(row as ReturnRecord) }}</ElTag></ElTooltip><ElTooltip :content="row.status"><div class="muted">{{ statusText(row as ReturnRecord) }}</div></ElTooltip></template></ElTableColumn>
+        <ElTableColumn label="申请商品 / 买家" min-width="215"><template #default="{ row }"><div class="product-title">{{ getReturnDetail(row as ReturnRecord).contentOnHold || getReturnDetail(row as ReturnRecord).itemOnHold ? '平台已隐藏商品内容' : row.title || '未提供商品标题' }}</div><div class="muted">{{ row.sku }} × {{ getReturnDetail(row as ReturnRecord).quantityConflict ? '待核实' : row.quantity ?? '—' }}</div><div class="muted">买家：{{ row.buyerId }}</div></template></ElTableColumn>
+        <ElTableColumn label="买家诉求 / 原因" min-width="145"><template #default="{ row }"><div>当前 {{ returnTypeText(getReturnDetail(row as ReturnRecord).currentType) }}</div><div class="muted">初始 {{ returnTypeText(row.returnType) }}</div><div class="muted">{{ row.reason }}</div></template></ElTableColumn>
+        <ElTableColumn label="平台处理状态" min-width="180"><template #default="{ row }"><PlatformStatus :row="row as ReturnRecord" small /></template></ElTableColumn>
         <ElTableColumn label="退货物流" min-width="160"><template #default="{ row }"><div>{{ row.shipping }}</div><div v-if="row.caseId" class="case-id">纠纷：{{ row.caseId }}</div></template></ElTableColumn>
         <ElTableColumn label="卖家预计 / 实际退款" min-width="160" align="right"><template #default="{ row }"><strong>{{ moneyText(getReturnDetail(row as ReturnRecord).refund.sellerEstimated) }}</strong><div class="muted">实际 {{ moneyText(getReturnDetail(row as ReturnRecord).refund.sellerActual) }}</div></template></ElTableColumn>
-        <ElTableColumn min-width="205"><template #header><span class="time-header">申请时间 / 当前待办<ElTooltip content="按每条申请所属站点的时区显示；未知时区或无效时间保留待核实，不猜测。" placement="top"><ElIcon><QuestionFilled /></ElIcon></ElTooltip></span></template><template #default="{ row }"><ElTooltip :content="zoneHint(row as ReturnRecord)"><div><div>{{ time(row.createdAt, row as ReturnRecord) }}</div><div v-if="due(row as ReturnRecord)" :class="overdue(row as ReturnRecord) ? 'overdue' : 'muted'">{{ due(row as ReturnRecord)!.who }} · {{ activityNames[due(row as ReturnRecord)!.activity] || due(row as ReturnRecord)!.activity }}<br />{{ time(due(row as ReturnRecord)!.at, row as ReturnRecord) }}</div><div v-else class="muted">暂无待办</div></div></ElTooltip></template></ElTableColumn>
+        <ElTableColumn label="申请时间 / 当前待办" min-width="205"><template #default="{ row }"><div>{{ time(row.createdAt, row as ReturnRecord) }}</div><div v-if="due(row as ReturnRecord)" :class="overdue(row as ReturnRecord) ? 'overdue' : 'muted'">{{ due(row as ReturnRecord)!.who }} · {{ activityNames[due(row as ReturnRecord)!.activity] || due(row as ReturnRecord)!.activity }}<br />{{ time(due(row as ReturnRecord)!.at, row as ReturnRecord) }}</div><div v-else class="muted">暂无待办</div></template></ElTableColumn>
         <ElTableColumn label="操作" fixed="right" width="85"><template #default="{ row }"><ElButton link type="primary" @click="openDetail(row as ReturnRecord)">{{ row.state === 'CLOSED' || isEscalated(row as ReturnRecord) ? '查看' : '处理' }}</ElButton></template></ElTableColumn>
         <template #empty><ElEmpty description="没有匹配的退货退款申请" :image-size="70" /></template>
       </ElTable>

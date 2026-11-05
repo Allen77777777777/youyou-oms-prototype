@@ -119,6 +119,8 @@ export interface 审核记录 {
   type: '自动审核' | '人工审核' | '平台变更复核'
   triggerSource: string
   status: '待审核' | '审核中' | '已通过' | '已拦截' | '已拒绝'
+  /** 本地轮次结果分类，检查与命中说明仍只记录在 decisionNote。 */
+  ruleOutcome?: '人工截留' | '审核通过' | '未匹配转异常' | '发货条件拦截'
   decisionNote?: string
   completedAt?: string
 }
@@ -162,9 +164,13 @@ export interface 全渠道订单 {
     reason: string
     paidConfirmed: boolean
     requestId: string
+    /** 由已审核的商家重发决定创建；普通手工订单不设置。 */
+    afterSaleNo?: string
   }
   fulfillmentMode: 履约模式
   processingStatus?: 订单处理状态
+  initialReviewPending?: true
+  reviewExceptionCode?: 'NO_REVIEW_RULE_MATCH'
   admissionReason?: string
   blockReason?: string
   noShipmentReason?: string
@@ -206,4 +212,9 @@ export interface 全渠道订单筛选条件 {
   syncStatus: string | string[]
   skuStatus: string | string[]
   countryCode: string | string[]
+}
+
+/** 当前未匹配异常的稳定分类。其他发货阻断仍单独校验。 */
+export function 是未匹配审单异常(订单: 全渠道订单): boolean {
+  return 订单.fulfillmentMode === '自配送' && 订单.processingStatus === '异常' && 订单.reviewExceptionCode === 'NO_REVIEW_RULE_MATCH'
 }

@@ -5,7 +5,8 @@ import { ElCheckboxGroup, ElInputNumber, ElSwitch } from 'element-plus'
 import Page from './业务配置页面.vue'
 import { 保存自动推单设置, 共享自动推单设置, 是推单执行日 } from './自动推单设置'
 import { 运行自动推单轮次, 自动同步推单结果, 最近自动推单轮次 } from './自动推单执行'
-import { 共享订单, 仓库执行记录, 订单版本, 操作核查证据, 演示库存, 当前版本, 执行演示推单 } from '../订单处理/演示会话'
+import { 共享订单, 仓库执行记录, 订单版本, 操作核查证据, 演示库存, 当前版本, 执行演示推单, 执行异常人工审核 } from '../订单处理/演示会话'
+import { 初始化新单首轮样例 } from '../订单处理/审单规则执行'
 import { 执行演示恢复发货 } from '../订单处理/操作功能模型'
 import { 启动循环推单 } from './循环推单'
 
@@ -120,10 +121,13 @@ describe('自动推单配置与执行', () => {
     expect(共享订单.value.find(单 => 单.systemOrderNo.endsWith('11'))!.operationLogs.filter(项 => 项.operationType === '自动查询仓库失败')).toHaveLength(1)
   })
 
-  it('按满周期执行、关闭不再提交但继续查原单、卸载停止全部计时', async () => {
-    const order = onlyReady()
+  it('未匹配异常单人工审核通过后，由开关及周期控制推单，关闭后继续查原单', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-03T00:00:00Z'))
+    初始化新单首轮样例()
+    const order = 共享订单.value.find(单 => 单.systemOrderNo === 'OMS-DEMO-REVIEW-CA')!
+    共享订单.value = [order]; 仓库执行记录.value = []
     scope = effectScope(); scope.run(启动循环推单)
+    expect(执行异常人工审核(order.systemOrderNo, 当前版本(order.systemOrderNo)).成功).toBe(true)
     await vi.advanceTimersByTimeAsync(一小时)
     expect(仓库执行记录.value).toHaveLength(0)
     保存自动推单设置({ enabled: true, intervalHours: 1, weekdays: [2] })

@@ -27,6 +27,7 @@ const 已实现页面: Record<string, RouteRecordRaw['component']> = {
   'oms-ebay-review-statistics': () => import('@/页面/eBay评价统计/eBay评价统计页面.vue'),
   'oms-ebay-cancellations': () => import('@/页面/eBay取消订单申请/eBay取消订单申请页面.vue'),
   'oms-ebay-returns': () => import('@/页面/eBay退换货申请/eBay退换货申请页面.vue'),
+  'oms-ebay-after-sale-orders': () => import('@/页面/售后单管理/售后单管理页面.vue'),
   'oms-auto-service-rules': () => import('@/页面/自动客服规则/自动客服规则页面.vue'),
 }
 

@@ -1,5 +1,6 @@
-import type { 全渠道订单, 履约单摘要, 订单处理状态 } from '../全渠道订单/类型'
+import { 是未匹配审单异常, type 全渠道订单, type 履约单摘要, type 订单处理状态 } from '../全渠道订单/类型'
 import type { 仓库执行 } from './演示会话'
+import { 是手工订单 } from '../手工订单/来源规则'
 
 /** 展示来源时间自带的 UTC 偏移；缺失时不推测服务器或用户时区。 */
 export function 提取发货时区(来源时间?: string): string {
@@ -33,18 +34,19 @@ export function 获取作业路由(行: 作业行) {
 export function 命中作业仓库(行: 作业行, 仓库: string) {
   return !仓库 || 获取作业路由(行).some(项 => 项.warehouse === 仓库)
 }
-export type 作业关注 = '全部' | '可审核' | '审核待处理' | '可推仓' | '结果待核查' | '下单失败' | '待出库' | '部分出库' | '出库异常' | '取消中' | '待标发' | '标发中' | '标发失败' | '标发成功' | '无需标发' | '无标发记录'
+export type 作业关注 = '全部' | '可审核' | '审核待处理' | '可推仓' | '结果待核查' | '下单失败' | '待出库' | '部分出库' | '出库异常' | '取消中' | '待标发' | '标发中' | '标发失败' | '标发成功' | '无需标发' | '无标发记录' | '发货审核失败'
 
 /** 快捷关注只筛选已存在的事实，不写入订单或仓库状态。 */
 export function 命中作业关注(行: 作业行, 关注: 作业关注, 阻断: string[], 标发状态?: string): boolean {
   if (关注 === '全部') return true
+  if (关注 === '发货审核失败') return 行.stage === '异常' && 是未匹配审单异常(行.order)
   if (关注 === '可审核') return 行.stage === '待审核' && !阻断.length
   if (关注 === '审核待处理') return 行.stage === '待审核' && !!阻断.length
   if (关注 === '可推仓') return 行.stage === '待推单' && !阻断.length
   if (关注 === '结果待核查') return !!行.execution?.待核查 || 行.execution?.状态 === '下单中'
   if (关注 === '部分出库') return !!行.fulfillment && 行.fulfillment.shippedQuantity > 0 && 行.fulfillment.shippedQuantity < 行.fulfillment.plannedQuantity
   if (['下单失败', '待出库', '出库异常', '取消中'].includes(关注)) return 行.execution?.状态 === 关注
-  if ((行.order.manualOrder || 行.order.platformCode === '手工') && 行.stage === '已发货') return 关注 === '无需标发'
+  if (是手工订单(行.order) && 行.stage === '已发货') return 关注 === '无需标发'
   if (关注 === '无标发记录') return 行.stage === '已发货' && !标发状态
   return 行.stage === '已发货' && 标发状态 === 关注
 }

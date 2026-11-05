@@ -9,12 +9,13 @@ import { 共享订单, 仓库执行记录 } from '../订单处理/演示会话'
 import { 仓库会话单据 } from '../仓配管理/仓配会话'
 import { createConversations } from '../eBay站内信/数据'
 import { getBuyerIncomingMail } from '../eBay取消订单申请/关联站内信'
+import { beijingWallTimeToISO } from './展示工具'
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const baseline = { orders: copy(共享订单.value), executions: copy(仓库执行记录.value), rows: copy(仓库会话单据.value) }
 afterEach(async () => { vi.restoreAllMocks(); 共享订单.value = copy(baseline.orders); 仓库执行记录.value = copy(baseline.executions); 仓库会话单据.value = copy(baseline.rows); await nextTick() })
 
-describe('退货申请身份、当地时间及只读关联', () => {
+describe('退货申请身份、北京时间及只读关联', () => {
   it('相同Return ID按店铺隔离，缺失或重复同店身份不取第一条', () => {
     const row = createReturnData()[0]!, other = { ...copy(row), shopId: 'other-shop', shopName: '另一虚构店铺' }
     expect(returnKey(row)).not.toBe(returnKey(other))
@@ -25,18 +26,47 @@ describe('退货申请身份、当地时间及只读关联', () => {
     syncReturn(other, '2026-10-30T03:00:00Z')
     expect(row.lastSyncedAt).not.toBe(other.lastSyncedAt)
   })
-  it('筛选与展示按明确站点当地日期及夏令时，未知站点不猜北京时间', () => {
+  it('各站点及未知站点统一按北京时间展示和筛选，来源时刻保持不变', () => {
     const rows = createReturnData(), us = rows[0]!, uk = rows[1]!
-    expect(returnTimeZone(us)).toBe('America/Los_Angeles')
-    expect(formatReturnTime(us.createdAt, us)).toBe('2026-10-27 20:20:00 UTC-7')
-    expect(formatReturnTime(uk.createdAt, uk)).toBe('2026-10-28 03:20:00 UTC+0')
-    const filters = { ...createReturnFilters(), shops: ['shop-us'], dates: ['2026-10-27', '2026-10-27'] }
+    const source = us.createdAt
+    expect(returnTimeZone(us)).toBe('Asia/Shanghai')
+    expect(formatReturnTime(us.createdAt, us)).toBe('2026-10-28 11:20:00')
+    expect(formatReturnTime(uk.createdAt, uk)).toBe('2026-10-28 11:20:00')
+    const filters = { ...createReturnFilters(), shops: ['shop-us'], dates: ['2026-10-28', '2026-10-28'] }
     expect(filterReturns(rows, filters).some(row => row.id === us.id)).toBe(true)
-    expect(filterReturns(rows, { ...filters, dates: ['2026-10-28', '2026-10-28'] }).some(row => row.id === us.id)).toBe(false)
+    expect(filterReturns(rows, { ...filters, dates: ['2026-10-27', '2026-10-27'] }).some(row => row.id === us.id)).toBe(false)
     const unknown = { ...us, marketplaceId: 'UNKNOWN_SITE' }
-    expect(returnTimeZone(unknown)).toBeUndefined()
-    expect(filterReturns([unknown], filters)).toEqual([])
+    expect(returnTimeZone(unknown)).toBe('Asia/Shanghai')
+    expect(formatReturnTime(unknown.createdAt, unknown)).toBe('2026-10-28 11:20:00')
+    expect(filterReturns([unknown], filters)).toEqual([unknown])
+    expect(us.createdAt).toBe(source)
     expect(formatReturnTime(null, us)).toBe('—'); expect(formatReturnTime(undefined, us)).toBe('—')
+  })
+  it('日期筛选覆盖北京自然日两端，排除相邻毫秒且不接受无时区来源', () => {
+    const template = createReturnData()[0]!
+    const times = ['2026-10-27T15:59:59.999Z', '2026-10-27T16:00:00.000Z', '2026-10-28T15:59:59.999Z', '2026-10-28T16:00:00.000Z', '2026-10-28 11:20:00', 'not-a-time']
+    const rows = times.map((createdAt, index) => ({ ...template, id: `boundary-${index}`, createdAt }))
+    expect(filterReturns(rows, { ...createReturnFilters(), dates: ['2026-10-28', '2026-10-28'] }).map(row => row.id)).toEqual(['boundary-1', 'boundary-2'])
+    expect(formatReturnTime(times[1], template)).toBe('2026-10-28 00:00:00')
+    expect(formatReturnTime(times[2], template)).toBe('2026-10-28 23:59:59')
+    expect(formatReturnTime(times[4], template)).toBe('时间待核实')
+    expect(formatReturnTime(times[5], template)).toBe('时间待核实')
+  })
+  it('海外站点夏令时切换不改变北京显示或北京表单输入语义', () => {
+    const us = createReturnData()[0]!, uk = createReturnData()[1]!
+    expect(formatReturnTime('2026-03-08T09:30:00Z', us)).toBe('2026-03-08 17:30:00')
+    expect(formatReturnTime('2026-03-08T10:30:00Z', us)).toBe('2026-03-08 18:30:00')
+    expect(formatReturnTime('2026-11-01T08:30:00Z', us)).toBe('2026-11-01 16:30:00')
+    expect(formatReturnTime('2026-11-01T09:30:00Z', uk)).toBe('2026-11-01 17:30:00')
+    expect(beijingWallTimeToISO('2026-03-08T02:30')).toBe('2026-03-07T18:30:00.000Z')
+    expect(beijingWallTimeToISO('2026-11-01T01:30')).toBe('2026-10-31T17:30:00.000Z')
+  })
+  it('面单北京时间输入无损往返UTC，非法日期及非约定输入不补齐', () => {
+    const row = createReturnData()[0]!, input = '2026-11-03T00:05'
+    const source = beijingWallTimeToISO(input)!
+    expect(source).toBe('2026-11-02T16:05:00.000Z')
+    expect(formatReturnTime(source, row).slice(0, 16).replace(' ', 'T')).toBe(input)
+    for (const invalid of ['', '2026-02-30T10:15', '2026-11-31T10:15', '2026-11-03T24:00', '2026-11-03T10:60', '2026-11-03T10:15:00', '2026-11-03T10:15+08:00']) expect(beijingWallTimeToISO(invalid)).toBeNull()
   })
   it('平台阶段多选不受旧内部提交结果筛选影响，待核查不制造队列阶段', () => {
     const rows = createReturnData().slice(0, 9), filters = { ...createReturnFilters(), states: ['ITEM_KEPT'], outcomes: ['confirmed'] }

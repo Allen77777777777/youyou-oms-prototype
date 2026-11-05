@@ -36,6 +36,15 @@ describe('订单标志可访问展示', () => {
     await marker.trigger('mouseleave')
     expect(wrapper.find('[role="tooltip"]').exists()).toBe(false)
   })
+  it('手使用既有蓝色标志并显示手工发货短释义，详情和列表复用相同组件', async () => {
+    const wrapper = render([flag('MANUAL_ORDER'), flag('MANUAL_ORDER')])
+    const markers = wrapper.findAll('[data-flag-code="MANUAL_ORDER"]')
+    expect(markers).toHaveLength(1)
+    expect(markers[0]!.text()).toBe('手')
+    expect(markers[0]!.classes()).toContain('标志-blue')
+    await markers[0]!.trigger('focus')
+    expect(wrapper.get('[role="tooltip"]').text()).toBe('该订单为手工订单')
+  })
   it('鼠标悬停但未聚焦时，document Escape 收起提示且不阻断父级原生行为', async () => {
     const wrapper = render([flag('BUYER_NOTE')])
     await wrapper.get('[data-flag-code="BUYER_NOTE"]').trigger('mouseenter')

@@ -1,11 +1,15 @@
 import { reactive } from 'vue'
 import { createReturnFilters, type ReturnQueue, type ReturnAction, type ReturnActionDraft, type PreparedReturnAction } from './模型'
+import type { AfterSaleInput } from '../售后单管理/会话'
+import type { ReturnSaleDraft } from './售后联动'
 
 export const returnListView = reactive({ draft: createReturnFilters(), applied: createReturnFilters(), queue: 'all' as ReturnQueue, page: 1, pageSize: 20, searchError: '', scrollTop: 0, tableScrollTop: 0 })
 export interface ReturnDetailView {
   note: string; action: ReturnAction | null; actionDraft: ReturnActionDraft | null
   actionError: string; confirmation: boolean; prepared: PreparedReturnAction | null
   refreshFeedback: string; readScroll: number; actionScroll: number
+  saleDraft?: ReturnSaleDraft; preparedSale?: AfterSaleInput; reshipOpen?: boolean
+  reshipWork?: ReturnSaleDraft
 }
 const detailViews = new Map<string, ReturnDetailView>()
 export function readReturnDetailView(key: string): ReturnDetailView {

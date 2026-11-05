@@ -1,3 +1,4 @@
+import { 是未匹配审单异常 } from '../全渠道订单/类型'
 import type { 人工发货包裹, 人工发货方案, 全渠道订单, 订单路由 } from '../全渠道订单/类型'
 
 /** 仅供本地原型评审。真实平台条件、库存与渠道适用性仍须由审核复验。 */
@@ -154,7 +155,7 @@ export function 人工发货撤销阻断原因(上下文: 拆合发货上下文,
     if (匹配.length !== 1) { 原因.push(`来源订单 ${号} 不存在或编号不唯一，请刷新后核实`); continue }
     const 单 = 匹配[0]!
     if (!单.manualShippingPlan) 原因.push(`${号} 当前没有已保存的发货安排，请刷新列表`)
-    if (单.fulfillmentMode !== '自配送' || 单.processingStatus !== '待审核') 原因.push(`${号} 仅待审核自配送订单可以撤销发货安排`)
+    if (单.fulfillmentMode !== '自配送' || (单.processingStatus !== '待审核' && !是未匹配审单异常(单))) 原因.push(`${号} 仅待审核自配送订单及未匹配到审单规则的异常自配送订单可撤销未执行的发货安排`)
     if (单.reviews.some(项 => 项.status === '审核中')) 原因.push(`${号} 尚有审核未结束，请稍后刷新`)
     原因.push(...发货执行安全阻断原因(上下文, 单))
   }
@@ -164,6 +165,7 @@ export function 人工发货撤销阻断原因(上下文: 拆合发货上下文,
 function 人工发货来源阻断原因(上下文: 拆合发货上下文, 单: 全渠道订单, 类型: 人工发货方案['kind']): string[] {
   const 号 = 单.systemOrderNo
   const 原因: string[] = []
+  if (单.initialReviewPending) 原因.push('平台新单尚未完成首轮审单规则，暂不能编排发货安排')
   if (单.fulfillmentMode !== '自配送' || 单.processingStatus !== '待审核') 原因.push(`${号} 仅待审核自配送订单可编排发货安排`)
   if (单.blockReason || 单.cancelledAt) 原因.push(`${号} ${单.blockReason || '已确认最终取消，禁止继续发货'}`)
   if (单.reviews.some(项 => 项.status === '审核中')) 原因.push(`${号} 尚有审核未结束，请稍后刷新`)
@@ -322,6 +324,6 @@ export function 撤销人工发货方案(上下文: 拆合发货上下文, 订�
   const 来源 = 订单号.map(号 => 上下文.订单.find(单 => 单.systemOrderNo === 号)!)
   const 旧方案 = 克隆(方案)
   for (const 单 of 来源) delete 单.manualShippingPlan
-  for (const 单 of 来源) 上下文.记录操作(单, `撤销${方案.kind}`, `撤销方案 ${方案.id}；全部来源：${订单号.join('、')}；原因：${撤销原因.trim()}；方案已移除，来源订单保持待审核，后续须重新校验发货条件；原方案：${JSON.stringify(旧方案)}`)
-  return { 成功: true, 信息: `已撤销${方案.kind}方案，来源订单保持待审核` }
+  for (const 单 of 来源) 上下文.记录操作(单, `撤销${方案.kind}`, `撤销方案 ${方案.id}；全部来源：${订单号.join('、')}；原因：${撤销原因.trim()}；方案已移除，来源订单保持${单.processingStatus}，后续须重新校验发货条件；原方案：${JSON.stringify(旧方案)}`)
+  return { 成功: true, 信息: `已撤销${方案.kind}方案，来源订单状态保留` }
 }

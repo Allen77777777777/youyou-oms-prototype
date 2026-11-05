@@ -3,7 +3,10 @@ import { computed, ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElSelect, ElOption, ElCheckbox, ElAlert, ElMessage, ElMessageBox } from 'element-plus'
-import { 手工订单场景, 手工订单币种, 手工商品资料, 可关联原订单, 原订单关联阻断原因, 创建手工订单草稿, 创建手工订单, 校验手工订单 } from './模型'
+import { 手工订单场景, 手工订单币种, 手工商品资料, 手工店铺选项, 手工订单路由, 可关联原订单, 原订单关联阻断原因, 创建手工订单草稿, 创建手工订单, 校验手工订单 } from './模型'
+import WarehouseShippingFields from '../订单处理/仓库物流选择.vue'
+import { 共享订单 } from '../订单处理/演示会话'
+import { 订单备注字数上限 } from '../订单处理/订单备注模型'
 import { 手工建单界面 as session } from './界面会话'
 import { 手工订单标注 as annotation } from './标注'
 import './样式.css'
@@ -13,6 +16,7 @@ const editorBody = ref<HTMLElement>(), submitting = ref(false), errors = ref<str
 const countries = [{ value: 'US', label: '美国 US' }, { value: 'GB', label: '英国 GB' }, { value: 'DE', label: '德国 DE' }, { value: 'FR', label: '法国 FR' }, { value: 'CA', label: '加拿大 CA' }, { value: 'AU', label: '澳大利亚 AU' }, { value: 'JP', label: '日本 JP' }, { value: 'KR', label: '韩国 KR' }, { value: 'MX', label: '墨西哥 MX' }, { value: 'BR', label: '巴西 BR' }, { value: 'RU', label: '俄罗斯 RU' }, { value: 'PL', label: '波兰 PL' }, { value: 'IT', label: '意大利 IT' }, { value: 'ES', label: '西班牙 ES' }, { value: 'NL', label: '荷兰 NL' }]
 const originalOptions = computed(() => 可关联原订单.value.filter(order => !原订单关联阻断原因(order.systemOrderNo).length))
 const draft = computed(() => session.draft)
+const tagOptions = computed(() => [...new Set(共享订单.value.flatMap(order => order.tags).map(tag => tag.trim()).filter(tag => tag && tag.length <= 20))])
 if (!draft.value.items.length) draft.value.items.push({ systemSku: '', quantity: 1 })
 const itemCount = computed(() => draft.value.items.filter(item => item.systemSku).reduce((sum, item) => sum + (Number.isSafeInteger(item.quantity) && item.quantity > 0 ? item.quantity : 0), 0))
 async function clearDraft() {
@@ -47,7 +51,8 @@ async function submit() {
         <ElForm label-position="top" @submit.prevent="submit">
           <section class="manual-form-section"><h3>业务信息</h3><div class="manual-form-grid">
             <ElFormItem label="业务场景" required><ElSelect v-model="draft.scenario" aria-label="业务场景"><ElOption v-for="scenario in 手工订单场景" :key="scenario" :label="scenario" :value="scenario" /></ElSelect></ElFormItem>
-            <ElFormItem class="manual-span-2" label="关联原订单" :required="draft.scenario === '售后补寄'"><ElSelect v-model="draft.originalOrderNo" clearable filterable placeholder="按系统订单号搜索并选择" aria-label="关联原订单"><ElOption v-for="order in originalOptions" :key="order.systemOrderNo" :value="order.systemOrderNo" :label="`${order.systemOrderNo} · ${order.platformCode} ${order.platformOrderNo}`" /></ElSelect></ElFormItem>
+            <ElFormItem label="发货店铺" required v-prototype="annotation('store', '手工订单发货店铺')"><ElSelect v-model="draft.storeId" filterable clearable placeholder="请选择发货店铺" aria-label="发货店铺"><ElOption v-for="store in 手工店铺选项" :key="store.storeId" :value="store.storeId" :label="`${store.storeName} · ${store.platformCode}`" /></ElSelect></ElFormItem>
+            <ElFormItem label="关联原订单" :required="draft.scenario === '售后补寄'"><ElSelect v-model="draft.originalOrderNo" clearable filterable placeholder="按系统订单号搜索并选择" aria-label="关联原订单"><ElOption v-for="order in originalOptions" :key="order.systemOrderNo" :value="order.systemOrderNo" :label="`${order.systemOrderNo} · ${order.platformCode} ${order.platformOrderNo}`" /></ElSelect></ElFormItem>
             <ElFormItem class="manual-span-3" label="建单原因" required><ElInput v-model="draft.reason" aria-label="建单原因" placeholder="填写此次发货的业务原因" maxlength="500" show-word-limit /></ElFormItem>
           </div></section>
           <section class="manual-form-section" v-prototype="annotation('items', '手工订单商品')"><div class="manual-section-heading"><h3>商品信息 <small>已选 {{ draft.items.filter(item => item.systemSku).length }} 种 · 共 {{ itemCount }} 件</small></h3><ElButton link type="primary" :icon="Plus" :disabled="draft.items.length >= 50" @click="draft.items.push({ systemSku: '', quantity: 1 })">添加商品</ElButton></div>
@@ -62,12 +67,21 @@ async function submit() {
             <ElFormItem label="州 / 省"><ElInput v-model="draft.address.stateProvince" aria-label="州省" maxlength="100" /></ElFormItem>
             <ElFormItem label="城市" required><ElInput v-model="draft.address.city" aria-label="城市" maxlength="100" /></ElFormItem>
             <ElFormItem label="邮编" required><ElInput v-model="draft.address.postalCode" aria-label="邮编" maxlength="30" /></ElFormItem>
+            <ElFormItem label="收件公司（选填）"><ElInput v-model="draft.address.companyName" aria-label="收件公司" maxlength="100" /></ElFormItem>
+            <ElFormItem class="manual-span-2" label="邮箱（选填）"><ElInput v-model="draft.address.email" aria-label="收件邮箱" maxlength="254" placeholder="用于本次收件联系" /></ElFormItem>
             <ElFormItem class="manual-span-3" label="地址 1" required><ElInput v-model="draft.address.addressLine1" aria-label="地址1" placeholder="街道、门牌号等" maxlength="300" /></ElFormItem>
             <ElFormItem class="manual-span-3" label="地址 2"><ElInput v-model="draft.address.addressLine2" aria-label="地址2" placeholder="公寓、楼层等补充信息（选填）" maxlength="300" /></ElFormItem>
+          </div></section>
+          <section class="manual-form-section" v-prototype="annotation('routing', '本次发货仓库与物流')"><h3>发货信息</h3>
+            <WarehouseShippingFields :key="draft.requestId" :routes="手工订单路由" v-model:warehouse="draft.warehouse" v-model:channel="draft.channel" />
+          </section>
+          <section class="manual-form-section" v-prototype="annotation('notes', '订单备注与标签')"><h3>备注与标签</h3><div class="manual-form-grid">
+            <ElFormItem class="manual-span-3" label="订单标签（选填）"><ElSelect v-model="draft.tags" aria-label="订单标签" multiple filterable allow-create default-first-option :multiple-limit="10" placeholder="选择或输入标签，回车添加；最多10个，每个20字"><ElOption v-for="tag in tagOptions" :key="tag" :value="tag" :label="tag" /></ElSelect></ElFormItem>
+            <ElFormItem class="manual-span-3" label="订单备注（选填）"><ElInput v-model="draft.note" type="textarea" :rows="3" :maxlength="订单备注字数上限" show-word-limit aria-label="订单备注" placeholder="填写内部交接或本次发货的补充说明" /></ElFormItem>
           </div></section>
         </ElForm>
       </div>
     </div>
-    <footer class="manual-page-footer"><div class="manual-editor-footer"><ElButton :disabled="submitting" @click="clearDraft">清空表单</ElButton><span>创建后进入待审核，继续选择仓库与物流</span><ElButton type="primary" :loading="submitting" v-prototype="annotation('submit', '创建并进入订单处理')" @click="submit">创建并进入订单处理</ElButton></div></footer>
+    <footer class="manual-page-footer"><div class="manual-editor-footer"><ElButton :disabled="submitting" @click="clearDraft">清空表单</ElButton><span>创建后进入待审核，审核通过后安排发货</span><ElButton type="primary" :loading="submitting" v-prototype="annotation('submit', '创建并进入订单处理')" @click="submit">创建并进入订单处理</ElButton></div></footer>
   </main>
 </template>

@@ -257,4 +257,10 @@ for (const scope of scopes.filter(item => ['order-demo-winit', 'order-demo-good'
 }
 // 手工寄样的折叠收纳箱在万邑通北美账号已配对；其他账号须各自具备映射。
 mappings.push({ scopeId: 'order-demo-winit', systemSku: 'DEMO-STORAGE-01', warehouseSku: 'LINK-DEMO-STORAGE-W1', status: '已映射' })
+// 重发评审使用三件已关联退货商品的固定中台配对样例，真实建单仍需复验所选仓库账号。
+for (const [scopeId, systemSku, warehouseSku] of [
+  ['order-demo-winit', 'HOME-RACK-01', 'LINK-WYT-RACK-01'], ['order-demo-good', 'HOME-RACK-01', 'LINK-GC-RACK-01'],
+  ['order-demo-winit', 'OUT-CHAIR-02', 'LINK-WYT-CHAIR-02'], ['order-demo-good', 'OUT-CHAIR-02', 'LINK-GC-CHAIR-02'],
+  ['order-demo-winit', 'HOME-LAMP-03', 'LINK-WYT-LAMP-03'], ['order-demo-good', 'HOME-LAMP-03', 'LINK-GC-LAMP-03'],
+] as const) mappings.push({ scopeId, systemSku, warehouseSku, status: '已映射' })
 export const 关联演示数据: 关联查询数据 = { scopes, mappings, inventory, aging, snapshots }

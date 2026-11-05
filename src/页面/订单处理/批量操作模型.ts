@@ -101,6 +101,7 @@ export function 执行演示不发货(订单号: string, 期望版本: number, �
   const 原阻断 = 订单.blockReason
   const 终止履约 = 订单.fulfillmentOrders.filter(履约 => 履约.isActive)
   for (const 履约 of 终止履约) { 履约.isActive = false; 履约.status = '已终止' }
+  delete 订单.reviewExceptionCode
   订单.processingStatus = '不发货'
   订单.noShipmentReason = 终止原因
   订单.blockReason = undefined

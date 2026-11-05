@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-router'
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
-import { ElDropdown, ElDropdownItem, ElIcon, ElMessage, ElMessageBox, ElSelect, ElTooltip, type MessageBoxData } from 'element-plus'
+import { ElDropdown, ElDropdownItem, ElIcon, ElMessage, ElMessageBox, ElPagination, ElSelect, ElTooltip, type MessageBoxData } from 'element-plus'
 import RulePage from './订单规则页面.vue'
 import EditorPage from './规则编辑页面.vue'
 import PageTabs from '@/布局/页面页签.vue'
@@ -111,6 +111,32 @@ describe('规则编辑应用内页签', () => {
     expect(共享规则日志.value).toHaveLength(1)
     expect(共享规则日志.value[0]).toMatchObject({ ruleId: 副本.id, ruleName: 副本.name, action: '复制', operator: '演示用户' })
   })
+
+  it('从第二页编辑优先级，清空不能保存，填小数字后排在第一页且仅修改本条', async () => {
+    const 来源 = 共享规则.value[0]!
+    共享规则.value = Array.from({ length: 11 }, (_, index) => ({
+      ...来源, id: `priority-${index}`, name: `审单规则 ${index + 1}`, enabled: false, priority: (index + 1) * 10,
+    }))
+    const 其余规则 = JSON.stringify(共享规则.value.slice(0, 10))
+    const page = await 打开()
+    page.getComponent(ElPagination).vm.$emit('update:page-size', 10); await 稳定()
+    await page.get('.列表底栏 .btn-next').trigger('click'); await 稳定()
+    await 按钮(规则行(page, '审单规则 11'), '编辑').trigger('click'); await 稳定()
+    const 输入 = page.get<HTMLInputElement>('input[aria-label="规则优先级"]')
+    expect(输入.element.value).toBe('110')
+    await 输入.setValue(''); await 按钮(page, '保存规则').trigger('click'); await 稳定()
+    await vi.waitFor(() => expect(page.find('.el-form-item__error').text()).toContain('1～999999'))
+    expect(共享规则日志.value).toHaveLength(0)
+    await 输入.setValue('5'); await 按钮(page, '保存规则').trigger('click'); await 稳定()
+
+    expect(router.currentRoute.value.path).toBe(列表路径)
+    const 首行 = page.get('.规则表格 .el-table__row')
+    expect(首行.get('.规则名称').text()).toBe('审单规则 11')
+    expect(首行.get('.优先级数字').text()).toBe('5')
+    expect(JSON.stringify(共享规则.value.filter(项 => 项.id !== 'priority-10'))).toBe(其余规则)
+    expect(共享规则日志.value).toHaveLength(1)
+    expect(共享规则日志.value[0]?.text).toContain('优先级 110 → 5')
+  }, 15_000)
 
   // 六次真实列表/表单路由挂载需要比单页操作更长的执行窗口。
   it('两条规则草稿跨页切换独立保留，取消当前编辑仅丢弃对应草稿和页签', async () => {

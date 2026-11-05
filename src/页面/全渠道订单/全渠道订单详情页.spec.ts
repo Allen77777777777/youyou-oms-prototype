@@ -90,6 +90,24 @@ describe('订单完整详情的业务事实展示', () => {
     expect(字段值(分区(page, 'amount'), '订单总金额')).toBe('—')
     expect(分区(page, 'fulfillment').text()).toContain('手工订单无需平台标发')
   })
+  it('手工单详情与页头展示发货店铺，订单标签按原值展示且缺失时显示横线', async () => {
+    const order = 测试订单()
+    order.platformCode = '手工'; order.platformOrderNo = ''; order.platformOrderId = undefined; order.platformOrderStatus = undefined
+    order.orderType = '手工订单'; order.processingStatus = '待审核'
+    order.manualOrder = { scenario: '寄样赠送', reason: '虚构样品寄送', paidConfirmed: false, requestId: 'manual-detail-fields-test' }
+    order.tags = ['重点跟进', '寄样']
+    const 快照 = JSON.stringify(order)
+    const page = await 打开(order)
+    expect(字段值(分区(page, 'basic'), '发货店铺')).toBe('虚构详情评审店')
+    expect(字段值(分区(page, 'basic'), '订单标签')).toBe('重点跟进、寄样')
+    expect(page.get('.标题区 > p').text()).toBe('手工创建·寄样赠送·虚构详情评审店')
+    expect(JSON.stringify(order)).toBe(快照)
+    await page.setProps({ order: { ...order, storeName: '', tags: [] } })
+    expect(字段值(分区(page, 'basic'), '发货店铺')).toBe('—')
+    expect(字段值(分区(page, 'basic'), '订单标签')).toBe('—')
+    expect(page.get('.标题区 > p').text()).toBe('手工创建·寄样赠送·—')
+  })
+
   it('拆分商品并入各履约行，只展示本次分配的SKU及数量且取消独立发货安排区', async () => {
     const order = 测试订单()
     order.items[1]!.systemSku = 'DEMO-SYSTEM-SKU-B'

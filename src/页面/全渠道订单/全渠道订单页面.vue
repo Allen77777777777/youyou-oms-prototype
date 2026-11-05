@@ -36,6 +36,8 @@ import ListSort from '@/组件/筛选/列表排序.vue'
 import { 命中多选 } from '@/组件/筛选/筛选工具'
 import AllOrderProductImage from './商品缩略图.vue'
 import { 共享订单 } from '../订单处理/演示会话'
+import OrderFlags from '../订单处理/订单标志组件.vue'
+import { 计算订单标志 } from '../订单处理/订单标志模型'
 import {
   格式化列表时间,
   格式化金额,
@@ -56,6 +58,7 @@ import type { 全渠道订单, 全渠道订单筛选条件, 快速视图 } from 
 
 const router = useRouter()
 const 订单列表 = 共享订单
+const 获取手工标志 = (订单: 全渠道订单) => 计算订单标志(订单).filter(标志 => 标志.code === 'MANUAL_ORDER')
 
 const 创建默认筛选条件 = () => ({
   keyword: '',
@@ -594,6 +597,7 @@ function 获取行OMS状态(原始订单: unknown) {
                 <b class="状态徽标" :class="'tone-' + 获取行OMS状态(row).tone">{{ 获取行OMS状态(row).text }}</b>
               </div>
               <small :class="{ 阻断文字: Boolean(row.blockReason) }">{{ 获取行OMS状态(row).helper || '当前状态正常' }}</small>
+              <OrderFlags :flags="获取手工标志(row as 全渠道订单)" />
             </div>
           </template>
         </ElTableColumn>

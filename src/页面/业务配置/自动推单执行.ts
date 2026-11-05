@@ -26,7 +26,7 @@ export function 运行自动推单轮次() {
         continue
       }
       const 人工办理 = 来源.some(单 => 单.fulfillmentOrders.find(项 => 项.fulfillmentOrderNo === fulfillmentNo)?.autoPushHold)
-      const 原因 = 人工办理 ? ['异常恢复的履约需人工推单；重新审核生成的新履约可按配置执行'] : 推单阻断原因(订单, fulfillmentNo)
+      const 原因 = 人工办理 ? ['该履约沿用异常恢复前的发货方案，请人工推单'] : 推单阻断原因(订单, fulfillmentNo)
       if (原因.length) {
         rows.push({ fulfillmentNo, status: '拦截', message: 原因.join('；') })
         continue

@@ -5,13 +5,14 @@ import type { 全渠道订单 } from '../全渠道订单/类型'
 import type { 作业行 } from './展示工具'
 import { 共享订单, 操作核查证据, 当前版本, 审核资格原因, 审核阻断原因, 推单阻断原因, 执行演示审核, 执行演示推单, 演示库存, type 仓库执行, type 命令结果 } from './演示会话'
 import { 不发货阻断原因, 执行演示不发货 } from './批量操作模型'
+import { 是未匹配审单异常, 专项人工审核权限, 专项人工审核阻断原因, 执行异常人工审核 } from './演示会话'
 import { 订单关联仓库执行, 仓单来源订单, 仓单期望版本, 重新推单阻断原因, 退回待审核阻断原因, 恢复发货目标, 恢复发货阻断原因, 撤销不发货阻断原因, 执行演示重新推单, 执行演示退回待审核, 执行演示恢复发货, 执行演示撤销不发货 } from './操作功能模型'
 import { 获取作业来源订单 } from './筛选模型'
 import ManualPlanSummary from './拆合发货方案展示.vue'
 import { 展示处理原因 } from './处理提示展示'
 import { 操作设置标注, 操作来源选择标注, 操作目标范围标注, 操作发货信息标注, 操作原因标注, 操作人工确认标注, 操作提交标注, 取得操作校验标注 } from './操作原型标注'
 
-export type 设置操作 = '审核' | '推单' | '重新推单' | '退回待审核' | '不发货' | '恢复发货' | '撤销不发货'
+export type 设置操作 = '审核' | '人工审核通过' | '推单' | '重新推单' | '退回待审核' | '不发货' | '恢复发货' | '撤销不发货'
 type 目标 = { key: string; order: 全渠道订单; row?: 作业行; execution?: 仓库执行; sources: 全渠道订单[]; version: number; versions: Record<string, number>; selected: boolean; reasons: string[] }
 const emit = defineEmits<{ result: [action: string, results: Array<{ key: string; result: 命令结果 }>] }>()
 const 打开 = ref(false)
@@ -24,17 +25,23 @@ const 草稿 = reactive({ reason: '', confirmed: false })
 const 是仓单操作 = computed(() => 操作.value === '重新推单')
 const 需选择来源 = computed(() => !批量.value && !是仓单操作.value && 操作.value !== '推单' && 目标列表.value.length > 1)
 const 当前目标 = computed(() => 需选择来源.value ? 目标列表.value.filter(项 => 项.key === 来源选择.value) : 目标列表.value)
-const 本次人工方案 = computed(() => 操作.value === '审核' ? [...new Map(当前目标.value.flatMap(项 => 项.sources).filter(单 => 单.manualShippingPlan).map(单 => [单.manualShippingPlan!.id, 单.manualShippingPlan!])).values()] : [])
-function 可执行(项: 目标) { return 操作.value === '审核' ? 项.sources.every(订单 => !审核资格原因(订单)) : !项.reasons.length }
+const 是人工审核 = computed(() => 操作.value === '审核' || 操作.value === '人工审核通过')
+const 本次人工方案 = computed(() => 是人工审核.value ? [...new Map(当前目标.value.flatMap(项 => 项.sources).filter(单 => 单.manualShippingPlan).map(单 => [单.manualShippingPlan!.id, 单.manualShippingPlan!])).values()] : [])
+function 预检原因(项: 目标) { return 操作.value === '人工审核通过' ? 专项人工审核阻断原因(项.order) : 项.reasons }
+function 可执行(项: 目标) {
+  if (操作.value === '人工审核通过') return 是未匹配审单异常(项.order) && 专项人工审核权限.value
+  return 操作.value === '审核' ? 项.sources.every(订单 => !审核资格原因(订单)) : !项.reasons.length
+}
 const 合格选择 = computed(() => 当前目标.value.filter(项 => 项.selected && 可执行(项)))
 const 选中数 = computed(() => 当前目标.value.filter(项 => 项.selected).length)
-const 原因标签 = computed(() => ({ 审核: '审核说明', 推单: '', 重新推单: '修复说明', 退回待审核: '退回原因', 不发货: '不发货原因', 恢复发货: '恢复原因', 撤销不发货: '撤销原因' })[操作.value])
+const 原因标签 = computed(() => ({ 审核: '审核说明', 人工审核通过: '审核说明', 推单: '', 重新推单: '修复说明', 退回待审核: '退回原因', 不发货: '不发货原因', 恢复发货: '恢复原因', 撤销不发货: '撤销原因' })[操作.value])
 const 确认勾选文案 = computed(() => ({ 不发货: '我已核实所选订单无需 OMS 继续发货', 恢复发货: '我已完成异常复核，确认按所示目标阶段继续处理', 撤销不发货: '我已核实仍需 OMS 发货，撤销后必须重新审核' } as Record<string, string>)[操作.value] || '')
 const 恢复目标 = computed(() => 当前目标.value[0] ? 恢复发货目标(当前目标.value[0].order) : undefined)
 const 确认文案 = computed(() => {
   const n = 合格选择.value.length
   switch (操作.value) {
     case '审核': return `对 ${合格选择.value.reduce((总, 项) => 总 + 项.sources.length, 0)} 张来源订单执行人工审核，只检查系统默认发货条件。通过后进入待推单。合并方案的全部来源一起审核。`
+    case '人工审核通过': return '通过后生成或确认有效履约，从异常进入待推单。可手动推单，也可开启自动推单，由系统按设置的日期和频率复验后推仓。发货条件未通过时，订单留在异常并显示原因。'
     case '推单': return `将 ${n} 张履约单按当前发货方案推送到仓库。推单受理不代表仓库建单成功，也不代表已发货。`
     case '重新推单': return `对已确认未生效且问题已修复的 ${n} 张出库单重新推单。结果未明的请求不会重新发送。`
     case '退回待审核': return `将符合条件的 ${n} 张订单退回待审核，原审核及履约记录保留。重新配置并审核通过后才能再次推单。`
@@ -43,7 +50,7 @@ const 确认文案 = computed(() => {
     case '撤销不发货': return '将撤销本订单的不发货结论并返回待审核。原记录保留，旧仓库单不会恢复，也不会立即推单。'
   }
 })
-const 表单有效 = computed(() => 合格选择.value.length > 0 && (['审核', '推单'].includes(操作.value) || !!草稿.reason.trim()) && (!确认勾选文案.value || 草稿.confirmed))
+const 表单有效 = computed(() => 合格选择.value.length > 0 && (是人工审核.value || 操作.value === '推单' || !!草稿.reason.trim()) && (!确认勾选文案.value || 草稿.confirmed))
 const 当前校验标注 = computed(() => 取得操作校验标注(操作.value))
 
 /** 履约级命令只展示当前包；整单终止、退回等操作继续展示全部受影响范围。 */
@@ -68,6 +75,7 @@ function 展示履约(项: 目标, 订单: 全渠道订单) { const 履约 = 本
 function 资格(项: 目标): string[] {
   switch (操作.value) {
     case '审核': return 审核阻断原因(项.order, 演示库存.value[项.order.systemOrderNo] ?? '充足')
+    case '人工审核通过': return 专项人工审核阻断原因(项.order)
     case '推单': return 项.row?.fulfillment ? 推单阻断原因(项.order, 项.row.fulfillment.fulfillmentOrderNo) : ['暂无有效履约方案']
     case '重新推单': return 重新推单阻断原因(项.execution!)
     case '退回待审核': return 退回待审核阻断原因(项.order)
@@ -77,8 +85,9 @@ function 资格(项: 目标): string[] {
   }
 }
 function open(action: 设置操作, rows: 作业行[], batch = false) {
-  if (!['审核', '推单', '重新推单', '退回待审核', '不发货', '恢复发货', '撤销不发货'].includes(action)) return ElMessage.warning('该操作请到对应业务页面办理')
+  if (!['审核', '人工审核通过', '推单', '重新推单', '退回待审核', '不发货', '恢复发货', '撤销不发货'].includes(action)) return ElMessage.warning('该操作请到对应业务页面办理')
   if (!rows.length) return ElMessage.warning('请先勾选当前页对象')
+  if (action === '人工审核通过' && (batch || rows.length !== 1 || !专项人工审核权限.value || !是未匹配审单异常(rows[0]!.order))) return ElMessage.warning('仅有审核权限的人员可逐单审核未匹配审单规则的异常订单')
   操作.value = action; 批量.value = batch; 来源选择.value = ''
   Object.assign(草稿, { reason: '', confirmed: false })
   const 范围: 目标[] = []
@@ -114,6 +123,7 @@ async function 提交() {
       let result: 命令结果
       switch (操作.value) {
         case '审核': result = 执行演示审核(项.key, 项.version, 草稿.reason, 项.versions); break
+        case '人工审核通过': result = 执行异常人工审核(项.key, 项.version, 草稿.reason); break
         case '推单': {
           const versions = { ...项.versions }
           for (const source of 项.sources) {
@@ -145,18 +155,18 @@ defineExpose({ open })
       <div v-prototype="操作目标范围标注" class="范围摘要"><strong>共 {{ 当前目标.length }} 个对象</strong><span>已选 {{ 选中数 }} 个</span><span class="可处理">可处理 {{ 合格选择.length }} 个</span><span>订单及出库时间均为北京时间</span></div>
       <ElTable :data="当前目标" max-height="calc(94vh - 390px)" class="目标表">
         <ElTableColumn label="选择" width="58"><template #default="{ row }"><ElCheckbox v-model="row.selected" :aria-label="'选择操作对象 ' + row.key" :disabled="保存中" /></template></ElTableColumn>
-        <ElTableColumn label="目标及全部来源" min-width="300"><template #default="{ row }"><strong class="对象编号">{{ row.key }}</strong><div v-for="order in row.sources" :key="order.systemOrderNo" class="来源事实"><span v-if="order.systemOrderNo !== row.key">系统订单号：{{ order.systemOrderNo }}</span><span v-if="order.manualOrder" class="来源店铺">手工创建 · {{ order.manualOrder.scenario }}</span><template v-else><span class="来源店铺">{{ order.platformCode }} · {{ order.storeName || '—' }}</span><span>平台订单号：{{ order.platformOrderNo || '—' }}</span></template><span>当前阶段：{{ order.processingStatus }}</span><span v-if="order.blockReason">{{ 展示处理原因(order.blockReason) }}</span><span v-if="order.noShipmentReason">不发货原因：{{ order.noShipmentReason }}</span><span v-if="order.cancelledAt">最终取消：{{ order.cancelledAt }}</span></div></template></ElTableColumn>
-        <ElTableColumn label="发货信息" min-width="285"><template #default="{ row }"><div v-for="order in row.sources" :key="order.systemOrderNo" v-prototype="操作发货信息标注" class="执行事实"><span v-if="操作 === '审核' && order.manualShippingPlan">来源订单默认资料；本次发货以本窗口下方人工方案为准。</span><span>{{ (本次履约(row as 目标, order)?.route || order.defaultRoute)?.warehouse || '未分配仓库' }} / {{ (本次履约(row as 目标, order)?.route || order.defaultRoute)?.shippingChannel || '未分配渠道' }}</span><span>账号：{{ (本次履约(row as 目标, order)?.route || order.defaultRoute)?.warehouseAccount || '—' }}</span><div class="本次商品范围" :data-source-order="order.systemOrderNo"><span v-for="item in 本次商品(row as 目标, order)" :key="item.key" class="本次商品行">{{ item.sku }} · {{ item.label }} {{ item.quantity ?? '待核实' }} 件</span><span v-if="!本次商品(row as 目标, order).length">本次履约没有该来源订单商品，请核实分配范围</span></div><span v-if="本次履约(row as 目标, order)">本次计划 {{ 本次履约(row as 目标, order)!.plannedQuantity }} 件 · 实际出库 {{ 本次履约(row as 目标, order)!.shippedQuantity ?? '待核实' }} 件</span><span v-for="execution in 本次仓单(row as 目标, order)" :key="execution.出库单号">{{ execution.出库单号 }} · {{ execution.状态 }}{{ execution.待核查 ? ' · 待核查' : '' }}<br>{{ 展示处理原因(execution.原因) }}</span><span v-if="!本次仓单(row as 目标, order).length">尚无仓库执行</span>
+        <ElTableColumn label="目标及全部来源" min-width="300"><template #default="{ row }"><strong class="对象编号">{{ row.key }}</strong><div v-for="order in row.sources" :key="order.systemOrderNo" class="来源事实"><span v-if="order.systemOrderNo !== row.key">系统订单号：{{ order.systemOrderNo }}</span><span v-if="order.manualOrder" class="来源店铺">手工创建 · {{ order.manualOrder.scenario }}</span><template v-else><span class="来源店铺">{{ order.platformCode }} · {{ order.storeName || '—' }}</span><span>平台订单号：{{ order.platformOrderNo || '—' }}</span></template><span>当前阶段：{{ order.processingStatus }}</span><span v-if="是未匹配审单异常(order)">发货审核失败 · 未匹配到审单规则</span><span v-if="order.blockReason">{{ 展示处理原因(order.blockReason) }}</span><span v-if="order.noShipmentReason">不发货原因：{{ order.noShipmentReason }}</span><span v-if="order.cancelledAt">最终取消：{{ order.cancelledAt }}</span></div></template></ElTableColumn>
+        <ElTableColumn label="发货信息" min-width="285"><template #default="{ row }"><div v-for="order in row.sources" :key="order.systemOrderNo" v-prototype="操作发货信息标注" class="执行事实"><span v-if="是人工审核 && order.manualShippingPlan">来源订单默认资料；本次发货以本窗口下方人工方案为准。</span><span>{{ (本次履约(row as 目标, order)?.route || order.defaultRoute)?.warehouse || '未分配仓库' }} / {{ (本次履约(row as 目标, order)?.route || order.defaultRoute)?.shippingChannel || '未分配渠道' }}</span><span>账号：{{ (本次履约(row as 目标, order)?.route || order.defaultRoute)?.warehouseAccount || '—' }}</span><div class="本次商品范围" :data-source-order="order.systemOrderNo"><span v-for="item in 本次商品(row as 目标, order)" :key="item.key" class="本次商品行">{{ item.sku }} · {{ item.label }} {{ item.quantity ?? '待核实' }} 件</span><span v-if="!本次商品(row as 目标, order).length">本次履约没有该来源订单商品，请核实分配范围</span></div><span v-if="本次履约(row as 目标, order)">本次计划 {{ 本次履约(row as 目标, order)!.plannedQuantity }} 件 · 实际出库 {{ 本次履约(row as 目标, order)!.shippedQuantity ?? '待核实' }} 件</span><span v-for="execution in 本次仓单(row as 目标, order)" :key="execution.出库单号">{{ execution.出库单号 }} · {{ execution.状态 }}{{ execution.待核查 ? ' · 待核查' : '' }}<br>{{ 展示处理原因(execution.原因) }}</span><span v-if="!本次仓单(row as 目标, order).length">尚无仓库执行</span>
           <div v-for="fulfillment in 展示履约(row as 目标, order)" :key="fulfillment.fulfillmentOrderNo" class="履约事实"><strong>{{ fulfillment.fulfillmentOrderNo }} · {{ fulfillment.isActive ? '当前方案' : '历史方案' }}</strong><span>实际路由：{{ fulfillment.route.warehouse }} / {{ fulfillment.route.shippingChannel }} / {{ fulfillment.route.warehouseAccount }}</span><span>计划 {{ fulfillment.plannedQuantity }} 件 · 实际出库 {{ Number.isFinite(fulfillment.shippedQuantity) ? fulfillment.shippedQuantity : '待核实' }} 件 · {{ fulfillment.status }}</span></div>
           <span v-if="order.manualOrder">发货条件：按手工建单资料与当前仓库执行记录检查</span><span v-else>平台发货条件：{{ 操作核查证据[order.systemOrderNo]?.平台允许 === true ? '已核实，允许继续准备发货' : 操作核查证据[order.systemOrderNo]?.平台允许 === false ? '当前不允许继续发货' : '按当前准入与平台记录检查' }}</span>
           <span v-if="操作核查证据[order.systemOrderNo]">剩余发货范围：{{ 操作核查证据[order.systemOrderNo]?.剩余已核实 ? '已核实' : '尚未核实' }} · 零出库：{{ 操作核查证据[order.systemOrderNo]?.零出库已核实 ? '已核实' : '尚未核实' }}</span><span v-if="操作 === '恢复发货'">系统判定恢复到：{{ 恢复发货目标(order) || '待核实' }}</span><span v-if="操作 === '撤销不发货'">纠正成功后返回待审核</span></div></template></ElTableColumn>
-        <ElTableColumn label="业务校验" min-width="240"><template #default="{ row }"><ElTag size="small" :type="row.reasons.length ? 'warning' : 'success'">{{ row.reasons.length ? 操作 === '审核' && 可执行(row as 目标) ? '审核将记录拦截' : '不能执行' : '可处理' }}</ElTag><p v-prototype="当前校验标注" class="校验原因">{{ 展示处理原因(row.reasons.join('；')) || '当前条件齐备，提交前将再次检查' }}</p><p v-if="操作 === '审核' && row.order.platformCode === 'eBay' && row.order.platformOrderStatus === 'IN_PROGRESS' && 操作核查证据[row.order.systemOrderNo]?.剩余已核实 !== true" class="校验原因">该订单需逐单人工核实已履约与剩余范围。</p></template></ElTableColumn>
+        <ElTableColumn label="业务校验" min-width="240"><template #default="{ row }"><ElTag size="small" :type="预检原因(row as 目标).length ? 'warning' : 'success'">{{ 预检原因(row as 目标).length ? 是人工审核 && 可执行(row as 目标) ? '审核将记录拦截' : '不能执行' : '可处理' }}</ElTag><p v-prototype="当前校验标注" class="校验原因">{{ 展示处理原因(预检原因(row as 目标).join('；')) || '当前条件齐备，提交前将再次检查' }}</p><p v-if="是人工审核 && row.order.platformCode === 'eBay' && row.order.platformOrderStatus === 'IN_PROGRESS' && 操作核查证据[row.order.systemOrderNo]?.剩余已核实 !== true" class="校验原因">该订单需逐单人工核实已履约与剩余范围。</p></template></ElTableColumn>
       </ElTable>
       <p v-if="!当前目标.length" class="不可处理">{{ 需选择来源 ? '请先选择来源订单，不默认操作第一张。' : '暂无关联操作对象，请核实原执行。' }}</p>
       <section v-for="plan in 本次人工方案" :key="plan.id" class="人工审核方案"><h3>本次发货安排</h3><ManualPlanSummary :plan="plan" :orders="共享订单" /></section>
       <ElAlert v-if="当前目标.length && !合格选择.length" title="所选对象均不满足操作条件，请查看原因或调整选择" type="warning" :closable="false" show-icon />
       <ElAlert v-else-if="合格选择.length < 选中数" :title="`本次仅处理符合条件的 ${合格选择.length} 个对象，其余对象将跳过。是否继续？`" type="warning" :closable="false" show-icon />
-      <label v-if="原因标签" v-prototype="操作原因标注" class="表单标签">{{ 原因标签 }}{{ 操作 === '审核' ? '（可选）' : ' *' }}<ElInput v-model="草稿.reason" type="textarea" :rows="2" :maxlength="2000" show-word-limit :placeholder="`请输入${原因标签}`" :aria-label="原因标签" /></label>
+      <label v-if="原因标签" v-prototype="操作原因标注" class="表单标签">{{ 原因标签 }}{{ 是人工审核 ? '（可选）' : ' *' }}<ElInput v-model="草稿.reason" type="textarea" :rows="2" :maxlength="2000" show-word-limit :placeholder="`请输入${原因标签}`" :aria-label="原因标签" /></label>
       <ElCheckbox v-if="确认勾选文案" v-prototype="操作人工确认标注" v-model="草稿.confirmed" class="确认勾选">{{ 确认勾选文案 }}</ElCheckbox>
       <ElAlert :title="确认文案" :type="['不发货', '撤销不发货'].includes(操作) ? 'warning' : 'info'" :closable="false" show-icon />
     </div>

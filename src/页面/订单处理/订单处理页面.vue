@@ -8,9 +8,11 @@ import { 订单处理标注 as 标注 } from './订单处理原型标注'
 import type { 全渠道订单, 订单处理状态, 人工发货方案 } from '../全渠道订单/类型'
 import { 共享订单, 仓库执行记录, 当前版本, 审核阻断原因, 推单阻断原因, 执行演示审核, 执行演示推单, 核查演示仓库结果, 演示库存, 演示路由, type 命令结果 } from './演示会话'
 import { 展示处理原因, 获取处理建议, 获取仓库结束提示 } from './处理提示展示'
+import { 是未匹配审单异常, 专项人工审核权限 } from './演示会话'
 import { 获取作业路由, 展示计划数量, 命中作业关注, type 作业行, type 作业关注 } from './展示工具'
 import { 共享标发单 } from '../订单标发/演示会话'
 import type { 标发单 } from '../订单标发/标发逻辑'
+import { 是手工订单 } from '../手工订单/来源规则'
 import { 获取作业标发记录 } from './标发状态展示'
 import { 标注状态 } from '@/原型标注/标注状态'
 import WorkProductSummary from './作业商品摘要.vue'
@@ -67,7 +69,7 @@ function 行标志(行: 作业行) {
   return 合并来源订单标志(来源.map(订单 => 计算订单标志(订单, 订单标志演示证据)))
 }
 const 阶段任务: Record<订单处理状态, string> = { 待审核: '校验商品 · 分仓选物流', 待推单: '提交仓库 · 核查接单', 待发货: '跟踪仓库 · 核对出库', 已发货: '核对物流 · 跟进标发', 异常: '停止发货 · 人工复核', 不发货: '核对终止原因与证据' }
-const 关注配置: Record<订单处理状态, 作业关注[]> = { 待审核: ['全部', '可审核', '审核待处理'], 待推单: ['全部', '可推仓', '结果待核查', '下单失败'], 待发货: ['全部', '待出库', '部分出库', '出库异常', '取消中'], 已发货: ['全部', '待标发', '标发中', '标发失败', '标发成功', '无需标发', '无标发记录'], 异常: ['全部'], 不发货: ['全部'] }
+const 关注配置: Record<订单处理状态, 作业关注[]> = { 待审核: ['全部', '可审核', '审核待处理'], 待推单: ['全部', '可推仓', '结果待核查', '下单失败'], 待发货: ['全部', '待出库', '部分出库', '出库异常', '取消中'], 已发货: ['全部', '待标发', '标发中', '标发失败', '标发成功', '无需标发', '无标发记录'], 异常: ['全部', '发货审核失败'], 不发货: ['全部'] }
 const 默认筛选 = 默认订单处理筛选
 const 筛选 = reactive(默认筛选())
 const 已应用筛选 = reactive(默认筛选())
@@ -82,18 +84,18 @@ const 搜索类型选项: 搜索字段[] = [
 ]
 const 日期类型选项 = [{ value: 'orderedAt', label: '下单时间' }, { value: 'paidAt', label: '付款时间' }, { value: 'shipByAt', label: '最晚发货' }, { value: 'lastSyncedAt', label: '最近同步' }]
 const 平台选项 = [{ value: 'eBay', label: 'eBay' }, { value: 'Temu', label: 'Temu' }, { value: 'Mercado Libre', label: '美客多' }, { value: 'Coupang', label: 'Coupang' }, { value: 'OZON', label: 'OZON' }, { value: 'TikTok Shop', label: 'TikTok Shop' }, { value: 'Rakuten', label: '乐天' }]
-const 标志选项 = [{ value: 'REFUND', label: '退款（退）' }, { value: 'CANCEL', label: '取消（消）' }, { value: 'EBAY_MESSAGE', label: 'eBay 站内信（信）' }, { value: 'BUYER_NOTE', label: '买家留言（言）' }, { value: 'NONE', label: '当前无标志' }]
+const 标志选项 = [{ value: 'REFUND', label: '退款（退）' }, { value: 'CANCEL', label: '取消（消）' }, { value: 'EBAY_MESSAGE', label: 'eBay 站内信（信）' }, { value: 'BUYER_NOTE', label: '买家留言（言）' }, { value: 'MANUAL_ORDER', label: '手工订单（手）' }, { value: 'NONE', label: '当前无标志' }]
 const 更多条件数量 = computed(() => [筛选.inventory, 筛选.remainingShippingTime].filter(值 => 值.length).length)
 const 条件已修改 = computed(() => JSON.stringify(筛选) !== JSON.stringify(已应用筛选))
 const 排序 = ref<列表排序条件>({ field: 'orderedAt', direction: 'desc' })
 function 应用排序() { 当前页.value = 1; 清除选择() }
 
 const 队列说明: Record<订单处理状态, string> = {
-  待审核: '核对订单、现有 SKU 映射与库存结果，完成分仓及物流选择后审核。',
+  待审核: '平台新单完成首轮审单后可人工处理。核对复核原因、SKU 映射、库存及仓库物流后审核。',
   待推单: '按履约单提交仓库；已受理的请求先核查结果，仓库明确建单后才进入待发货。',
   待发货: '跟踪仓库作业与实际出库；取得跟踪号、推仓成功均不等于已发货。',
   已发货: '按履约单核对有效出库事实及后续标发；标发失败不回退已发货。',
-  异常: '查看平台变化和仓库执行，人工复核后操作不发货；平台恢复不自动退出异常。',
+  异常: '未匹配审单规则的订单可逐单人工审核。其他异常按平台变化及仓库执行事实复核。',
   不发货: '已确认无需 OMS 继续发货。区分最终取消与系统外履约，历史执行事实保留。',
 }
 const 当前单位 = computed(() => ['待推单', '待发货', '已发货'].includes(当前队列.value) ? '履约单' : '订单')
@@ -112,7 +114,7 @@ const 全部作业 = computed<作业行[]>(() => {
   const 结果: 作业行[] = []
   const 已有履约 = new Set<string>()
   for (const 订单 of 共享订单.value) {
-    if (订单.fulfillmentMode !== '自配送' || !订单.processingStatus) continue
+    if (订单.fulfillmentMode !== '自配送' || !订单.processingStatus || 订单.initialReviewPending) continue
     if (['待审核', '异常', '不发货'].includes(订单.processingStatus)) {
       结果.push({ key: 订单.systemOrderNo, order: 订单, stage: 订单.processingStatus })
       continue
@@ -179,7 +181,11 @@ async function 打开人工发货(类型: '拆分发货' | '合并发货' | '编
 }
 function 查看人工方案(订单: 全渠道订单) { 方案详情订单.value = 订单; 方案详情打开.value = true }
 function 读取人工方案库存(plan: 人工发货方案) { return 查询人工方案库存(plan, 共享订单.value) }
-function 人工发货已保存(类型: string) { 清除选择(); ElMessage.success(类型 === '保存并审核订单' ? '保存并审核成功，订单进入待推单' : `${类型}成功，订单保留待审核`) }
+function 人工发货已保存(类型: string) {
+  清除选择()
+  if (类型 === '撤销拆分发货' || 类型 === '撤销合并发货') return ElMessage.success('发货方案已撤销，来源订单各自保留当前阶段')
+  ElMessage.success(类型 === '保存并审核订单' ? '保存并审核成功，订单进入待推单' : `${类型}成功，订单保留待审核`)
+}
 const 同步中 = ref(false)
 function 设置操作入口(类型: 设置操作, 行?: 作业行) { 操作设置.value?.open(类型, 行 ? [行] : 已选.value, !行) }
 function 接收操作结果(类型: string, 结果: Array<{ key: string; result: 命令结果 }>) { 批次结果.value = 结果; 结果标题.value = `${类型}结果`; 结果打开.value = true; 清除选择() }
@@ -235,12 +241,14 @@ function 行主要操作(行: 作业行): string[] {
   if (行.stage === '待推单') return [行.execution?.状态 === '下单失败' ? '重新推单' : 行.execution ? '同步仓库状态' : '推单']
   if (行.stage === '待发货') return ['同步仓库状态']
   if (行.stage === '已发货') return []
+  if (是未匹配审单异常(行.order)) return 专项人工审核权限.value ? ['人工审核通过', '不发货'] : ['不发货']
   if (行.stage === '异常') return ['恢复发货', '不发货']
   return ['查看终止原因']
 }
 function 行更多操作(行: 作业行): string[] {
   const 操作: string[] = []
   if (行.stage === '待审核') 操作.push(...(行.order.manualShippingPlan ? ['编辑发货方案', '撤销发货方案'] : ['拆分发货']))
+  if (是未匹配审单异常(行.order) && 行.order.manualShippingPlan) 操作.push('撤销发货方案')
   if (行关联执行(行).length && !行主要操作(行).includes('同步仓库状态')) 操作.push('同步仓库状态')
   if (['待推单', '待发货'].includes(行.stage)) 操作.push('退回待审核')
   if (['待审核', '待推单', '待发货'].includes(行.stage)) 操作.push('不发货')
@@ -252,7 +260,7 @@ function 行操作入口(操作: string, 行: 作业行) {
   if (操作 === '拆分发货' || 操作 === '编辑发货方案') return void 打开人工发货(操作, 行.order)
   if (操作 === '撤销发货方案') return void 打开人工发货('撤销方案', 行.order)
   if (操作 === '同步仓库状态') return void 同步仓库状态(行)
-  if (['审核', '推单', '重新推单', '退回待审核', '不发货', '恢复发货', '撤销不发货'].includes(操作)) return 设置操作入口(操作 as 设置操作, 行)
+  if (['审核', '人工审核通过', '推单', '重新推单', '退回待审核', '不发货', '恢复发货', '撤销不发货'].includes(操作)) return 设置操作入口(操作 as 设置操作, 行)
   选择来源操作(操作 as 来源动作, 行)
 }
 const 已选来源订单 = computed(() => {
@@ -275,6 +283,7 @@ function 查询() {
 }
 function 重置() { Object.assign(筛选, 默认筛选()); 排序.value = { field: 'orderedAt', direction: 'desc' }; 查询() }
 watch([当前队列, 当前页, 每页条数], 清除选择)
+watch(() => 当前结果.value.length, 数量 => { 当前页.value = Math.min(当前页.value, Math.max(1, Math.ceil(数量 / 每页条数.value))) })
 watch(每页条数, () => { 当前页.value = 1 })
 watch(当前队列, () => { 当前页.value = 1; 当前关注.value = '全部' })
 watch(() => route.query.systemOrderNo, (编号) => {
@@ -308,11 +317,14 @@ const 详情执行列表 = computed(() => 仓库执行记录.value.filter(项 =>
 const 详情执行 = computed(() => 详情执行列表.value[0])
 function 最近自动拦截(行: 作业行) {
   const 最近审核 = 行.order.reviews[行.order.reviews.length - 1]
-  if (行.stage === '待审核' && 最近审核?.type === '自动审核' && 最近审核.status === '已拦截') return 最近审核.decisionNote
+  if (行.stage === '待审核' && 最近审核?.type === '自动审核' && 最近审核.status === '已拦截') return 最近审核
+}
+function 最近专项拦截原因(订单: 全渠道订单) {
+  const 最近审核 = 订单.reviews[订单.reviews.length - 1]
+  if (是未匹配审单异常(订单) && 最近审核?.type === '人工审核' && 最近审核.status === '已拦截') return 展示处理原因(最近审核.decisionNote)
 }
 function 下一步(行: 作业行): string {
   const 原因 = 资格原因(行)
-  if (!原因.length && 最近自动拦截(行)) return '请人工复核后审核'
   return 获取处理建议(行, 原因, 有标发失败(行) ? '标发失败' : 行标发状态(行))
 }
 const 默认原因: Record<订单处理状态, string> = { 待审核: '当前发货条件齐备', 待推单: '当前推单条件齐备', 待发货: '等待仓库出库结果', 已发货: '请核对仓库出库与平台标发结果', 异常: '异常原因待核实', 不发货: '不发货原因待核实' }
@@ -320,10 +332,11 @@ function 原因正文(行: 作业行): string {
   const 结束提示 = 获取仓库结束提示(行)
   if (结束提示) return 结束提示.原因
   const 系统原因 = 行.execution?.原因 || 行.order.blockReason
-  if (!系统原因 && 行.stage === '已发货' && 行.order.manualOrder) return '仓库已完成发货，无需平台标发'
+  if (!系统原因 && 行.stage === '已发货' && 是手工订单(行.order)) return '仓库已完成发货，无需平台标发'
   if (系统原因) return 展示处理原因(系统原因)
-  const 最近拦截 = 最近自动拦截(行)
-  if (最近拦截) return `上轮审单：${展示处理原因(最近拦截)}`
+  if (是未匹配审单异常(行.order)) {
+    return '未匹配到审单规则'
+  }
   // 人工填写的不发货原因按原文展示。
   if (行.order.noShipmentReason) return 行.order.noShipmentReason
   return 展示处理原因((行.stage === '待审核' || 行.stage === '待推单' ? 资格原因(行).join('；') : '') || 默认原因[行.stage])
@@ -336,7 +349,7 @@ const 详情步骤 = computed(() => {
   const 已建仓 = !!仓单.length && 仓单.every(项 => !!项.三方仓出库单号)
   const 已出库 = 行.fulfillment ? 行.fulfillment.shippedQuantity >= 行.fulfillment.plannedQuantity && 行.fulfillment.plannedQuantity > 0 : 行.order.processingStatus === '已发货'
   const 标发 = 行标发记录(行)
-  return [{ 标题: '订单审核', 内容: 已审 ? '已有通过记录' : '无通过记录', 完成: 已审 }, { 标题: '仓库接单', 内容: 已建仓 ? '已有三方仓出库单号' : 仓单.length ? '查看执行结果' : '尚未提交', 完成: 已建仓 }, { 标题: '实际出库', 内容: 已出库 ? '已有足量出库事实' : 行.fulfillment?.shippedQuantity ? `已出库 ${行.fulfillment.shippedQuantity} / ${行.fulfillment.plannedQuantity} 件` : '无有效出库事实', 完成: 已出库 }, { 标题: '平台标发', 内容: 行.order.manualOrder ? '无需平台标发' : 行标发状态(行) || '暂无标发记录', 完成: 标发.length > 0 && 标发.every(单 => 单.status === '标发成功') }]
+  return [{ 标题: '订单审核', 内容: 已审 ? '已有通过记录' : '无通过记录', 完成: 已审 }, { 标题: '仓库接单', 内容: 已建仓 ? '已有三方仓出库单号' : 仓单.length ? '查看执行结果' : '尚未提交', 完成: 已建仓 }, { 标题: '实际出库', 内容: 已出库 ? '已有足量出库事实' : 行.fulfillment?.shippedQuantity ? `已出库 ${行.fulfillment.shippedQuantity} / ${行.fulfillment.plannedQuantity} 件` : '无有效出库事实', 完成: 已出库 }, { 标题: '平台标发', 内容: 是手工订单(行.order) ? '无需平台标发' : 行标发状态(行) || '暂无标发记录', 完成: 标发.length > 0 && 标发.every(单 => 单.status === '标发成功') }]
 })
 
 const 结果打开 = ref(false)
@@ -554,9 +567,16 @@ function 保存路由() {
               <OrderNotes :order-no="row.order.systemOrderNo" mode="list" />
               <strong :class="{ 危险字: row.order.blockReason || row.execution?.待核查 || row.execution?.状态 === '下单失败' || 有标发失败(row as 作业行) }">{{ 下一步(row as 作业行) }}</strong>
               <span v-if="row.stage === '已发货'">{{ 展示处理原因(标发说明(row as 作业行) || 默认原因[row.stage as 订单处理状态]) }}</span>
-              <span v-else>{{ 原因正文(row as 作业行) }}</span>
+              <template v-else>
+                <span v-if="最近自动拦截(row as 作业行)">上轮审单：{{ 展示处理原因(最近自动拦截(row as 作业行)?.decisionNote) }}</span>
+                <span>{{ 原因正文(row as 作业行) }}</span>
+                <template v-if="是未匹配审单异常(row.order)">
+                  <span v-if="row.order.blockReason">未匹配到审单规则</span>
+                  <span v-if="最近专项拦截原因(row.order)">最近人工审核：{{ 最近专项拦截原因(row.order) }}</span>
+                </template>
+              </template>
               <span v-if="row.stage === '已发货'">标发承运商：{{ 标发承运商(row as 作业行) || '未提供' }}</span>
-              <small v-if="row.stage === '异常'">人工复核后可操作不发货</small>
+              <small v-if="row.stage === '异常' && !是未匹配审单异常(row.order)">人工复核后可操作不发货</small>
               <div v-if="row.order.address.buyerMessage" v-prototype="标注.买家留言" class="买家留言"><span>买家留言</span><ElTooltip :content="row.order.address.buyerMessage" placement="top"><p class="两行摘要" tabindex="0">{{ row.order.address.buyerMessage }}</p></ElTooltip></div>
             </div>
           </template>
@@ -605,7 +625,7 @@ function 保存路由() {
 
     <ElDialog v-model="路由打开" title="修改仓库物流" width="min(620px, 92vw)" append-to-body :close-on-click-modal="false"><div v-prototype="标注.路由"><div class="路由订单">{{ 路由目标?.systemOrderNo }}<ElTag size="small">待审核</ElTag></div><p class="浅色字">原方案：{{ 路由目标?.defaultRoute?.warehouse || '未分配' }} / {{ 路由目标?.defaultRoute?.shippingChannel || '未分配' }}</p><ElAlert v-if="路由目标 && 修改仓库物流阻断原因(路由目标).length" :title="展示处理原因(修改仓库物流阻断原因(路由目标).join('；'))" type="warning" :closable="false" /><ElForm label-position="top"><WarehouseChannelSelect v-model:warehouse="路由草稿.warehouse" v-model:channel="路由草稿.code" :routes="演示路由" /><div class="路由信息"><div><span>仓储服务商</span><strong>{{ 所选路由?.warehouseProvider || '—' }}</strong></div><div><span>仓库账号</span><strong>{{ 所选路由?.warehouseAccount || '—' }}</strong></div><div><span>渠道代码</span><strong>{{ 所选路由?.shippingChannelCode || '—' }}</strong></div><div><span>面单模式</span><strong>{{ '仓配一体，由仓库提供面单并发货' }}</strong></div></div><ElFormItem label="修改原因" required><ElInput v-model="路由草稿.reason" type="textarea" :rows="3" maxlength="2000" show-word-limit placeholder="说明本次仓库物流修改依据，写入操作日志" /></ElFormItem></ElForm><ElAlert title="将默认发货方案修改为所选仓库／渠道，订单保持待审核。后续审核通过后再推单，本次不会向仓库发货。" type="info" :closable="false" /></div><template #footer><ElButton @click="路由打开 = false">取消</ElButton><ElButton type="primary" :disabled="!所选路由 || !路由草稿.reason.trim() || !!(路由目标 && 修改仓库物流阻断原因(路由目标).length)" @click="保存路由">保存仓库物流</ElButton></template></ElDialog>
 
-    <ElDrawer v-model="详情打开" size="min(800px, 94vw)" append-to-body :with-header="false"><template v-if="当前详情"><div v-prototype="标注.证据" class="详情页眉"><div><small>履约执行摘要</small><h2>{{ 当前详情.key }}</h2></div><ElButton @click="详情打开 = false">关闭</ElButton></div><div class="详情状态"><ElTag :type="当前详情.order.processingStatus === '异常' ? 'danger' : 'primary'">{{ 当前详情.order.processingStatus }}</ElTag><span>{{ 当前详情.order.platformCode }} · {{ 当前详情.order.storeName }}</span></div><OrderFlags class="详情订单标志" :flags="行标志(当前详情)" /><ElAlert v-if="当前详情.order.blockReason || 当前详情.order.noShipmentReason" v-prototype="标注.发货条件" :title="当前详情.order.blockReason || 当前详情.order.noShipmentReason" :type="当前详情.order.blockReason ? 'warning' : 'info'" :closable="false" show-icon /><div v-prototype="标注.进度" class="履约节点"><div v-for="步骤 in 详情步骤" :key="步骤.标题" :class="{ 已完成: 步骤.完成 }"><ElIcon><CircleCheck v-if="步骤.完成" /><Clock v-else /></ElIcon><strong>{{ 步骤.标题 }}</strong><span>{{ 步骤.内容 }}</span></div></div><div class="下一步卡"><span>当前下一步</span><strong>{{ 下一步(当前详情) }}</strong><p>{{ 队列说明[当前详情.stage] }}</p></div><section class="详情分区"><h3>订单与履约</h3><dl><dt>系统订单号</dt><dd><ElButton link type="primary" @click="查看全渠道(当前详情.order)">{{ 当前详情.order.systemOrderNo }}<ElIcon><Document /></ElIcon></ElButton></dd><dt>平台订单号</dt><dd class="等宽">{{ 当前详情.order.platformOrderNo }}</dd><dt>平台状态</dt><dd>{{ 当前详情.order.platformOrderStatus || '—' }}</dd><dt>当前版本</dt><dd>v{{ 当前版本(当前详情.order.systemOrderNo) }}</dd><dt v-if="当前详情.order.admissionReason">进入 / 准入证据</dt><dd v-if="当前详情.order.admissionReason">{{ 当前详情.order.admissionReason }}</dd><dt>取消时间 / 原因</dt><dd>{{ 当前详情.order.cancelledAt || '无最终取消事实' }}<br v-if="当前详情.order.cancelledReason">{{ 展示处理原因(当前详情.order.cancelledReason) }}</dd></dl></section><section class="详情分区"><h3>收件信息 <small>标准订单只读摘要</small></h3><RecipientSummary v-prototype="标注.收件" :address="当前详情.order.address" /></section><section class="详情分区 履约商品范围"><h3>商品与数量 <small>{{ 当前详情.fulfillment?.items !== undefined ? '本次履约分配 · 只读' : '来源订单商品 · 只读' }}</small></h3><div v-for="商品 in 详情商品" :key="JSON.stringify([商品.sourceOrderNo, 商品.lineId])" class="商品行"><div><strong>{{ 商品.item?.systemItemName || 商品.item?.platformItemTitle || '来源商品待核实' }}</strong><span>{{ 商品.item?.systemSku || '—' }}<template v-if="!商品.item?.systemSku?.trim()"> · 未匹配系统 SKU</template></span><span>平台 SKU：{{ 商品.item?.platformSku || '—' }}</span><small>来源订单：{{ 商品.sourceOrderNo }}</small></div><div class="本包数量"><b v-if="商品.quantity !== undefined">本包计划 {{ 商品.quantity }} 件</b><small>来源下单 {{ 商品.item?.orderedQuantity ?? '待核实' }} 件</small></div></div></section><section v-prototype="标注.路由" class="详情分区"><h3>{{ 当前详情.fulfillment ? '履约执行快照' : '订单头首次 / 默认路由' }}</h3><dl><dt>仓库 / 账号</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouse || '待分配' }}<br>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouseAccount || '—' }}</dd><dt>物流渠道</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.shippingChannel || '待分配' }}</dd><dt>面单模式</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.labelMode || '待分配' }}</dd><dt v-if="当前详情.fulfillment">计划 / 有效出库</dt><dd v-if="当前详情.fulfillment">{{ 当前详情.fulfillment.plannedQuantity }} / {{ 当前详情.fulfillment.shippedQuantity }}</dd></dl><ElButton v-if="当前详情.stage === '待审核'" :icon="Setting" @click="调整路由(当前详情.order)">修改仓库物流</ElButton></section><section class="详情分区"><h3>订单标发状态</h3><p v-if="!行标发记录(当前详情).length" class="浅色字">{{ 当前详情.order.manualOrder ? '无需平台标发' : '无标发记录' }}</p><div v-for="单 in 行标发记录(当前详情)" :key="单.no" class="详情标发记录"><span>{{ 单.no }} · {{ 单.orderNo }}</span><ElButton link type="primary" @click="详情打开 = false; 查看标发详情(单)">{{ 单.status }}{{ 单.pendingVerification ? ' · 待核查' : '' }}</ElButton></div></section><section v-prototype="标注.仓库" class="详情分区"><h3>关联仓库执行</h3><template v-if="详情执行"><article v-for="执行 in 详情执行列表" :key="JSON.stringify([执行.履约单号, 执行.出库单号])" class="关联执行卡"><strong>{{ 执行.履约单号 }}</strong><dl><dt>OMS 出库单号</dt><dd class="等宽">{{ 执行.出库单号 }}</dd><dt>三方仓出库单号</dt><dd>{{ 执行.三方仓出库单号 || '尚未认领' }}</dd><dt>物流商单号</dt><dd class="等宽">{{ 执行.externalLogisticsOrderNo || '—' }}</dd><dt>仓库状态</dt><dd>{{ 执行.状态 }}{{ 执行.待核查 ? ' · 待核查' : '' }}</dd><dt>最近更新</dt><dd>{{ 执行.更新时间 }}</dd><dt v-if="执行.原因">结果说明</dt><dd v-if="执行.原因">{{ 展示处理原因(执行.原因) }}</dd></dl></article><ElButton :icon="Van" @click="查看执行(当前详情)">查看三方仓出库单</ElButton></template><p v-else class="浅色字">当前对象没有关联仓库执行记录。</p></section><section v-prototype="标注.审核" class="详情分区"><h3>审核记录 <small>每轮一段结果摘要</small></h3><p v-if="!当前详情.order.reviews.length" class="浅色字">尚未执行审核。</p><article v-for="记录 in [...当前详情.order.reviews].reverse()" :key="记录.round" class="审核记录"><header><strong>第 {{ 记录.round }} 轮 · {{ 记录.type }}</strong><ElTag size="small" :type="记录.status === '已通过' ? 'success' : 'warning'">{{ 记录.status }}</ElTag></header><p>{{ 展示处理原因(记录.decisionNote) || '尚无最终结论' }}</p><small>{{ 记录.completedAt || '—' }}</small></article></section><section class="详情分区"><h3>系统备注</h3><OrderNotes :order-no="当前详情.order.systemOrderNo" mode="detail" /></section><section v-prototype="标注.摘要日志" class="详情分区"><h3>操作日志</h3><p v-if="!当前详情.order.operationLogs.length" class="浅色字">暂无操作日志。</p><div v-for="(日志, 索引) in [...当前详情.order.operationLogs].reverse()" :key="索引" class="日志行"><ElIcon><CircleCheck /></ElIcon><div><strong>{{ 展示处理原因(日志.operationType) }} · {{ 日志.operationResult }}</strong><p>{{ 展示处理原因(日志.content) }}</p><small>{{ 日志.operatedAt }} · {{ 展示处理原因(日志.operator) }}</small></div></div></section></template><template #footer><div v-if="当前详情" class="详情动作"><ElButton @click="查看全渠道(当前详情.order)">完整订单详情</ElButton><ElButton v-if="当前详情.stage === '待审核'" type="primary" @click="详情打开 = false; 设置操作入口('审核', 当前详情)">审核</ElButton><ElButton v-else-if="当前详情.stage === '待推单' && !资格原因(当前详情).length" type="primary" @click="详情打开 = false; 设置操作入口('推单', 当前详情)">推单</ElButton><ElButton v-else-if="详情执行" type="primary" @click="详情打开 = false; 查看执行(当前详情)">查看仓库执行</ElButton></div></template></ElDrawer>
+    <ElDrawer v-model="详情打开" size="min(800px, 94vw)" append-to-body :with-header="false"><template v-if="当前详情"><div v-prototype="标注.证据" class="详情页眉"><div><small>履约执行摘要</small><h2>{{ 当前详情.key }}</h2></div><ElButton @click="详情打开 = false">关闭</ElButton></div><div class="详情状态"><ElTag :type="当前详情.order.processingStatus === '异常' ? 'danger' : 'primary'">{{ 当前详情.order.processingStatus }}</ElTag><span>{{ 当前详情.order.platformCode }} · {{ 当前详情.order.storeName }}</span></div><OrderFlags class="详情订单标志" :flags="行标志(当前详情)" /><ElAlert v-if="当前详情.order.blockReason || 当前详情.order.noShipmentReason" v-prototype="标注.发货条件" :title="当前详情.order.blockReason || 当前详情.order.noShipmentReason" :type="当前详情.order.blockReason ? 'warning' : 'info'" :closable="false" show-icon /><div v-prototype="标注.进度" class="履约节点"><div v-for="步骤 in 详情步骤" :key="步骤.标题" :class="{ 已完成: 步骤.完成 }"><ElIcon><CircleCheck v-if="步骤.完成" /><Clock v-else /></ElIcon><strong>{{ 步骤.标题 }}</strong><span>{{ 步骤.内容 }}</span></div></div><div class="下一步卡"><span>当前下一步</span><strong>{{ 下一步(当前详情) }}</strong><p>{{ 队列说明[当前详情.stage] }}</p></div><section class="详情分区"><h3>订单与履约</h3><dl><dt>系统订单号</dt><dd><ElButton link type="primary" @click="查看全渠道(当前详情.order)">{{ 当前详情.order.systemOrderNo }}<ElIcon><Document /></ElIcon></ElButton></dd><dt>平台订单号</dt><dd class="等宽">{{ 当前详情.order.platformOrderNo }}</dd><dt>平台状态</dt><dd>{{ 是手工订单(当前详情.order) ? 获取平台状态说明(当前详情.order).text : 当前详情.order.platformOrderStatus || '—' }}</dd><dt>当前版本</dt><dd>v{{ 当前版本(当前详情.order.systemOrderNo) }}</dd><dt v-if="当前详情.order.admissionReason">进入 / 准入证据</dt><dd v-if="当前详情.order.admissionReason">{{ 当前详情.order.admissionReason }}</dd><dt>取消时间 / 原因</dt><dd>{{ 当前详情.order.cancelledAt || '无最终取消事实' }}<br v-if="当前详情.order.cancelledReason">{{ 展示处理原因(当前详情.order.cancelledReason) }}</dd></dl></section><section class="详情分区"><h3>收件信息 <small>标准订单只读摘要</small></h3><RecipientSummary v-prototype="标注.收件" :address="当前详情.order.address" /></section><section class="详情分区 履约商品范围"><h3>商品与数量 <small>{{ 当前详情.fulfillment?.items !== undefined ? '本次履约分配 · 只读' : '来源订单商品 · 只读' }}</small></h3><div v-for="商品 in 详情商品" :key="JSON.stringify([商品.sourceOrderNo, 商品.lineId])" class="商品行"><div><strong>{{ 商品.item?.systemItemName || 商品.item?.platformItemTitle || '来源商品待核实' }}</strong><span>{{ 商品.item?.systemSku || '—' }}<template v-if="!商品.item?.systemSku?.trim()"> · 未匹配系统 SKU</template></span><span>平台 SKU：{{ 商品.item?.platformSku || '—' }}</span><small>来源订单：{{ 商品.sourceOrderNo }}</small></div><div class="本包数量"><b v-if="商品.quantity !== undefined">本包计划 {{ 商品.quantity }} 件</b><small>来源下单 {{ 商品.item?.orderedQuantity ?? '待核实' }} 件</small></div></div></section><section v-prototype="标注.路由" class="详情分区"><h3>{{ 当前详情.fulfillment ? '履约执行快照' : '订单头首次 / 默认路由' }}</h3><dl><dt>仓库 / 账号</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouse || '待分配' }}<br>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.warehouseAccount || '—' }}</dd><dt>物流渠道</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.shippingChannel || '待分配' }}</dd><dt>面单模式</dt><dd>{{ (当前详情.fulfillment?.route ?? 当前详情.order.defaultRoute)?.labelMode || '待分配' }}</dd><dt v-if="当前详情.fulfillment">计划 / 有效出库</dt><dd v-if="当前详情.fulfillment">{{ 当前详情.fulfillment.plannedQuantity }} / {{ 当前详情.fulfillment.shippedQuantity }}</dd></dl><ElButton v-if="当前详情.stage === '待审核'" :icon="Setting" @click="调整路由(当前详情.order)">修改仓库物流</ElButton></section><section class="详情分区"><h3>订单标发状态</h3><p v-if="!行标发记录(当前详情).length" class="浅色字">{{ 是手工订单(当前详情.order) ? '无需平台标发' : '无标发记录' }}</p><div v-for="单 in 行标发记录(当前详情)" :key="单.no" class="详情标发记录"><span>{{ 单.no }} · {{ 单.orderNo }}</span><ElButton link type="primary" @click="详情打开 = false; 查看标发详情(单)">{{ 单.status }}{{ 单.pendingVerification ? ' · 待核查' : '' }}</ElButton></div></section><section v-prototype="标注.仓库" class="详情分区"><h3>关联仓库执行</h3><template v-if="详情执行"><article v-for="执行 in 详情执行列表" :key="JSON.stringify([执行.履约单号, 执行.出库单号])" class="关联执行卡"><strong>{{ 执行.履约单号 }}</strong><dl><dt>OMS 出库单号</dt><dd class="等宽">{{ 执行.出库单号 }}</dd><dt>三方仓出库单号</dt><dd>{{ 执行.三方仓出库单号 || '尚未认领' }}</dd><dt>物流商单号</dt><dd class="等宽">{{ 执行.externalLogisticsOrderNo || '—' }}</dd><dt>仓库状态</dt><dd>{{ 执行.状态 }}{{ 执行.待核查 ? ' · 待核查' : '' }}</dd><dt>最近更新</dt><dd>{{ 执行.更新时间 }}</dd><dt v-if="执行.原因">结果说明</dt><dd v-if="执行.原因">{{ 展示处理原因(执行.原因) }}</dd></dl></article><ElButton :icon="Van" @click="查看执行(当前详情)">查看三方仓出库单</ElButton></template><p v-else class="浅色字">当前对象没有关联仓库执行记录。</p></section><section v-prototype="标注.审核" class="详情分区"><h3>审核记录 <small>每轮一段结果摘要</small></h3><p v-if="!当前详情.order.reviews.length" class="浅色字">尚未执行审核。</p><article v-for="记录 in [...当前详情.order.reviews].reverse()" :key="记录.round" class="审核记录"><header><strong>第 {{ 记录.round }} 轮 · {{ 记录.type }}</strong><ElTag size="small" :type="记录.status === '已通过' ? 'success' : 'warning'">{{ 记录.status }}</ElTag></header><p>{{ 展示处理原因(记录.decisionNote) || '尚无最终结论' }}</p><small>{{ 记录.completedAt || '—' }}</small></article></section><section class="详情分区"><h3>系统备注</h3><OrderNotes :order-no="当前详情.order.systemOrderNo" mode="detail" /></section><section v-prototype="标注.摘要日志" class="详情分区"><h3>操作日志</h3><p v-if="!当前详情.order.operationLogs.length" class="浅色字">暂无操作日志。</p><div v-for="(日志, 索引) in [...当前详情.order.operationLogs].reverse()" :key="索引" class="日志行"><ElIcon><CircleCheck /></ElIcon><div><strong>{{ 展示处理原因(日志.operationType) }} · {{ 日志.operationResult }}</strong><p>{{ 展示处理原因(日志.content) }}</p><small>{{ 日志.operatedAt }} · {{ 展示处理原因(日志.operator) }}</small></div></div></section></template><template #footer><div v-if="当前详情" class="详情动作"><ElButton @click="查看全渠道(当前详情.order)">完整订单详情</ElButton><ElButton v-if="当前详情.stage === '待审核'" type="primary" @click="详情打开 = false; 设置操作入口('审核', 当前详情)">审核</ElButton><ElButton v-else-if="当前详情.stage === '待推单' && !资格原因(当前详情).length" type="primary" @click="详情打开 = false; 设置操作入口('推单', 当前详情)">推单</ElButton><ElButton v-else-if="详情执行" type="primary" @click="详情打开 = false; 查看执行(当前详情)">查看仓库执行</ElButton></div></template></ElDrawer>
   </section>
   </ElConfigProvider>
 </template>

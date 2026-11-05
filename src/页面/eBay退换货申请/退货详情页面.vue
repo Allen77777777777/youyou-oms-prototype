@@ -3,11 +3,11 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElEmpty } from 'element-plus'
 import { returnSession } from './数据'
-import { initializeReturnDemoContext } from './关联资料'
+import { initializeAfterSaleDemo } from '../售后单管理/演示数据'
 import { findReturnRecord, returnKey } from './模型'
 import ReturnWorkbench from './退货详情工作台.vue'
 
-initializeReturnDemoContext()
+initializeAfterSaleDemo()
 const route = useRoute(), router = useRouter()
 const record = computed(() => {
   const shopId = typeof route.params.shopId === 'string' ? route.params.shopId : ''

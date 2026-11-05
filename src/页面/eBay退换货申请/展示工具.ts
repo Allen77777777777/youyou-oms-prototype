@@ -24,8 +24,30 @@ export const activityLabels: Record<string, string> = {
   EBAY_RULE_AUTO_APPROVE: '平台自动批准', SYSTEM_INITIATED_REFUND: '平台发起退款', SYSTEM_CLOSE_RETURN: '平台关闭申请',
 }
 export const activityText = (value?: string | null) => value ? activityLabels[value] || value : '待办内容待核实'
-export const feeLabels: Record<string, string> = { PURCHASE_PRICE: '商品价款', ORIGINAL_SHIPPING: '原发货运费', RETURN_SHIPPING: '退回运费', OTHER: '其他费用', TAX: '税费' }
+export const feeLabels: Record<string, string> = { PURCHASE_PRICE: '商品价款', ORIGINAL_SHIPPING: '原发货运费', RETURN_SHIPPING: '退回运费', OTHER: '其他费用', TAX: '税费', ITEM_TAX: '商品税费', ITEM_IMPORT_TAX: '进口税费' }
 export const refundStatusLabels: Record<string, string> = { NOT_STARTED: '尚未发起', SUCCESS: '退款成功', PENDING: '退款处理中', REQUESTED: '已请求退款', FAILED: '退款失败', UNKNOWN: '退款结果待核查' }
+export const returnTypeText = (value?: string | null): string => value ? ({ MONEY_BACK: '退货 / 退款', EXCHANGE: '换货（历史类型）', REPLACEMENT: '补发（历史类型）' } as Record<string,string>)[value] || value : '—'
+export function reasonTypeText(value?: string | null): string {
+  if (!value?.trim()) return '未提供'
+  const names: Record<string,string> = { CANCEL: '发货后取消', INSTORE: '门店退货', REMORSE: '买家改变主意', SNAD: '商品与描述不符', UNKNOWN: '原因大类未知' }
+  return `${names[value] || '原因类型待核实'}（${value}）`
+}
+export const booleanText = (value: boolean | null | undefined): string => value === true ? '是' : value === false ? '否' : '未提供'
+
+/** 申请商品只取该来源图片；本地原创示意图使用固定资源，不接受任意相对路径。 */
+export function returnItemPictureUrl(value?: string | null): string {
+  if (value && ['退货申请商品示意.svg', '/退货申请商品示意.svg', './退货申请商品示意.svg', `${import.meta.env.BASE_URL}退货申请商品示意.svg`].includes(value)) return value
+  const safe = safeMediaUrl(value)
+  return safe.startsWith('data:application/pdf') ? '' : safe
+}
+
+/** 仅查看明确的HTTPS地址或带格式声明的数据URI，不猜测labelData编码或文件类型。 */
+export function returnLabelMedia(value?: string | null): { url: string; kind: 'image' | 'pdf' | 'source' } | null {
+  if (!value) return null
+  const clean = value.trim(), source = safeMediaUrl(clean)
+  if (source) return { url: source, kind: source.startsWith('data:image/') ? 'image' : source.startsWith('data:application/pdf') ? 'pdf' : 'source' }
+  return null
+}
 
 /** 用户输入的是站点墙钟。拒绝夏令时缺失/重复时刻，不借用浏览器时区。 */
 export function siteWallTimeToISO(value: string, zone?: string): string | null {
@@ -42,4 +64,9 @@ export function siteWallTimeToISO(value: string, zone?: string): string | null {
     }
     return matches.length === 1 ? matches[0]! : null
   } catch { return null }
+}
+
+/** 退货办理表单固定按北京时间解释输入，不读取站点或浏览器时区。 */
+export function beijingWallTimeToISO(value: string): string | null {
+  return siteWallTimeToISO(value, 'Asia/Shanghai')
 }

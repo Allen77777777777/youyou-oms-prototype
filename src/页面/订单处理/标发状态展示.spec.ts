@@ -4,6 +4,8 @@ import type { 全渠道订单, 履约单摘要 } from '../全渠道订单/类型
 import type { 标发单, 标发状态 } from '../订单标发/标发逻辑'
 import type { 作业行 } from './展示工具'
 import { 获取作业标发记录 } from './标发状态展示'
+import { 命中作业关注 } from './展示工具'
+import { 获取处理建议 } from './处理提示展示'
 
 function 来源订单(编号: string, 履约编号: string[]): 全渠道订单 {
   const order = structuredClone(全渠道订单模拟数据[0]!)
@@ -25,6 +27,19 @@ function 作业(order: 全渠道订单, fulfillment?: 履约单摘要): 作业�
 const 编号 = (records: 标发单[]) => records.map(record => record.no).sort()
 
 describe('作业标发记录按准确来源与履约关联', () => {
+  it('仅手工类型的已发货订单显示无需标发并过滤伪造标发记录，后续只查看仓库物流', () => {
+    const order = 来源订单('OMS-TEST-MANUAL', ['FL-MANUAL'])
+    order.orderType = '手工订单'
+    const row = 作业(order, order.fulfillmentOrders[0])
+    const records = [记录('CF-FAKE', order.systemOrderNo, 'FL-MANUAL', '标发失败')]
+    const before = JSON.stringify({ order, records })
+    expect(获取作业标发记录(row, [order], records)).toEqual([])
+    expect(命中作业关注(row, '无需标发', [], '标发失败')).toBe(true)
+    expect(命中作业关注(row, '无标发记录', [])).toBe(false)
+    expect(命中作业关注(row, '标发失败', [], '标发失败')).toBe(false)
+    expect(获取处理建议(row, [], '标发失败')).toBe('请查看仓库出库及物流结果')
+    expect(JSON.stringify({ order, records })).toBe(before)
+  })
   it('订单主行保留该订单所有标发历史，包括已失效或不再显示在当前履约中的记录及全部五态', () => {
     const order = 来源订单('OMS-TEST-A', ['FL-A', 'FL-OLD'])
     order.fulfillmentOrders[1]!.isActive = false

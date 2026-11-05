@@ -4,7 +4,7 @@ import { ElButton, ElMessage, ElOption, ElSelect } from 'element-plus'
 import { getReturnBlockedReason, getReturnDetail, returnKey, uploadReturnAttachment, type ReturnRecord } from './模型'
 import type { ReturnAttachment } from './接口契约'
 
-const props = defineProps<{ row: ReturnRecord; mode: 'message' | 'label' }>()
+const props = defineProps<{ row: ReturnRecord; mode: 'message' | 'label' | 'decline' }>()
 const emit = defineEmits<{ uploaded: [file: ReturnAttachment]; busy: [value: boolean] }>()
 const purpose = ref<'ITEM_RELATED' | 'REFUND_RELATED'>('ITEM_RELATED')
 const uploading = ref(false), fileInput = ref<HTMLInputElement>(), uploadedId = ref('')
@@ -34,21 +34,21 @@ async function upload(event: Event) {
     const result = uploadReturnAttachment(row, { fileName: file.name, filePurpose: selectedPurpose, fileFormat: format, data })
     if (result.error || !result.file) return void ElMessage.warning(result.error || '附件上传未取得文件回执')
     uploadedId.value = result.file.fileId; emit('uploaded', result.file)
-    ElMessage.success(mode === 'label' ? '面单已上传并选中，请继续确认提供面单' : '附件已上传至本申请，留言尚未发送')
+    ElMessage.success(mode === 'label' ? '面单已上传并选中，请继续确认提供面单' : mode === 'decline' ? '材料已上传至本申请，拒绝退货尚未提交' : '附件已上传至本申请，留言尚未发送')
   } catch { if (current) ElMessage.error('文件读取失败，请重新选择') }
   finally { uploading.value = false; input.value = ''; if (current) emit('busy', false) }
 }
 </script>
 
 <template>
-  <section class="return-upload" :aria-label="mode === 'label' ? '上传退货面单' : '上传沟通附件'">
-    <label>{{ mode === 'label' ? '上传退货面单' : '沟通附件' }}</label>
+  <section class="return-upload" :aria-label="mode === 'label' ? '上传退货面单' : mode === 'decline' ? '上传申请材料' : '上传沟通附件'">
+    <label>{{ mode === 'label' ? '上传退货面单' : mode === 'decline' ? '申请材料（可选）' : '沟通附件' }}</label>
     <div class="upload-controls">
-      <ElSelect v-if="mode === 'message'" v-model="purpose" aria-label="沟通附件用途" :disabled="!!blockedReason || uploading"><ElOption label="商品凭证" value="ITEM_RELATED" /><ElOption label="退款资料" value="REFUND_RELATED" /></ElSelect>
+      <ElSelect v-if="mode !== 'label'" v-model="purpose" :aria-label="mode === 'decline' ? '申请材料用途' : '沟通附件用途'" :disabled="!!blockedReason || uploading"><ElOption label="商品凭证" value="ITEM_RELATED" /><ElOption label="退款资料" value="REFUND_RELATED" /></ElSelect>
       <ElButton :loading="uploading" :disabled="!!blockedReason" @click="fileInput?.click()">{{ mode === 'label' ? '上传面单' : '上传附件' }}</ElButton>
-      <input ref="fileInput" type="file" :accept="mode === 'label' ? 'image/png,image/jpeg,image/gif,image/bmp,application/pdf' : 'image/png,image/jpeg,image/gif,image/bmp'" :aria-label="mode === 'label' ? '选择退货面单' : '选择沟通附件'" :disabled="!!blockedReason || uploading" hidden @change="upload" />
+      <input ref="fileInput" type="file" :accept="mode === 'label' ? 'image/png,image/jpeg,image/gif,image/bmp,application/pdf' : 'image/png,image/jpeg,image/gif,image/bmp'" :aria-label="mode === 'label' ? '选择退货面单' : mode === 'decline' ? '选择申请材料' : '选择沟通附件'" :disabled="!!blockedReason || uploading" hidden @change="upload" />
     </div>
-    <p class="upload-hint">{{ mode === 'label' ? '上传后将选为本次面单；确认提供并取得平台回执后，才完成面单关联。' : '附件上传到本次退货申请，与下方文字留言分别提交。' }}</p>
+    <p class="upload-hint">{{ mode === 'label' ? '上传后将选为本次面单；确认提供并取得平台回执后，才完成面单关联。' : mode === 'decline' ? '材料独立上传到本次申请；拒绝退货另行确认提交，取消操作不会撤回已上传材料。' : '附件上传到本次退货申请，与下方文字留言分别提交。' }}</p>
     <p v-if="latestFile" class="upload-result" role="status">{{ latestFile.fileName }} · {{ fileStates[latestFile.fileStatus] || '状态待核实' }}</p>
     <p v-if="blockedReason" class="upload-hint blocked">{{ blockedReason }}</p>
   </section>

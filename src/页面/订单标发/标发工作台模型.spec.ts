@@ -9,6 +9,17 @@ const 单: 标发单 = { no: 'CF-TEST', orderNo: 来源.systemOrderNo, fulfillme
   lineId: 来源.items[0]!.externalLineId, idempotencyKey: 'DEMO-KEY', pendingVerification: true, reason: '请求超时', attempts: [] }
 
 describe('标发工作台动作范围', () => {
+  it('手工类型伪造的标发记录不能提交、重提、查询或写入不标发结论', () => {
+    const manual = { ...来源, orderType: '手工订单' }
+    const target = structuredClone({ ...单, status: '待标发' as const, pendingVerification: false })
+    const before = JSON.stringify({ manual, target })
+    for (const action of ['提交标发', '重新提交', '查询结果', '不标发'] as const) {
+      expect(标发动作阻断(target, action, manual)).toEqual(['手工订单没有平台标发责任，不提交平台标发'])
+    }
+    expect(设置不标发(target, manual, '无需回传', 'time', '用户').length).toBeGreaterThan(0)
+    expect(JSON.stringify({ manual, target })).toBe(before)
+    expect(标发确认指纹(target, manual)).not.toBe(标发确认指纹(target, 来源))
+  })
   it('待核查仅允许查询，成功和豁免不能查询或重提，未接入平台不伪造查询成功', () => {
     expect(标发动作阻断(单, '查询结果', 来源)).toEqual([])
     expect(标发动作阻断(单, '重新提交', 来源).join()).toContain('禁止重提')

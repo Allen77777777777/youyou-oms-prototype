@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { mailSession, requestBuyerMailNavigation } from '../eBay站内信/会话'
 import { formatBuyerMailTime, getBuyerIncomingMail } from './关联站内信'
 
-const props = defineProps<{ shopId: string; buyerId: string; timeZone?: string }>()
+const props = defineProps<{ shopId: string; buyerId: string; timeZone?: string; formatTime?: (value: string) => string }>()
 const router = useRouter()
 const expanded = ref(false), expandedBodies = ref<string[]>([])
 const messages = computed(() => getBuyerIncomingMail(mailSession.conversations, props.shopId, props.buyerId))
@@ -26,7 +26,7 @@ watch(() => [props.shopId, props.buyerId], () => { expanded.value = false; expan
     <div v-if="!messages.length" class="buyer-mail-empty">暂无该买家在本店的站内信</div>
     <div v-else class="buyer-mail-list">
       <article v-for="message in visibleMessages" :key="message.key" class="buyer-mail-card" :data-message-id="message.messageId">
-        <header class="buyer-mail-card-heading"><strong><button type="button" class="buyer-mail-link" @click="openMail(message.conversationId, message.messageId)">{{ message.subject || '无主题' }}</button></strong><time :datetime="message.at" :title="timeZone || '站点时区待配置'">{{ formatBuyerMailTime(message.at, timeZone) }}</time></header>
+        <header class="buyer-mail-card-heading"><strong><button type="button" class="buyer-mail-link" @click="openMail(message.conversationId, message.messageId)">{{ message.subject || '无主题' }}</button></strong><time :datetime="message.at" :title="formatTime ? undefined : timeZone || '站点时区待配置'">{{ formatTime ? formatTime(message.at) : formatBuyerMailTime(message.at, timeZone) }}</time></header>
         <div class="buyer-mail-source">来源会话：{{ message.conversationId }}</div>
         <p class="buyer-mail-body" :class="{ collapsed: isLong(message.bodyText) && !bodyOpen(message.key) }">{{ message.bodyText || '暂无正文' }}</p>
         <button type="button" class="buyer-mail-link" :aria-label="`查看站内信 ${message.messageId}`" @click="openMail(message.conversationId, message.messageId)">查看站内信</button>

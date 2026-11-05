@@ -41,13 +41,13 @@ const annotation: 原型标注 = {
   标题: '规则执行设置',
   分类: '规则',
   状态: '待评审',
-  版本: '0.2',
+  版本: '0.5',
   事实等级: '合理假设',
-  说明: '用户确认循环执行与立即执行使用同一套审单规则。默认关闭、间隔初值 2 小时及 1 至 24 整小时范围为本轮实现方案。',
-  prd引用: ['PRD/订单规则功能PRD.md', 'PRD/业务配置功能PRD.md'],
+  说明: '每轮按开始时的待审核状态取单，上轮人工截留的订单也参加本轮匹配。立即与定时使用相同规则。默认关闭、间隔初值 2 小时及 1 至 24 整小时范围为实现方案。',
+  prd引用: ['PRD/审单规则三种去向PRD.md', 'PRD/订单规则功能PRD.md', 'PRD/业务配置功能PRD.md'],
   交互规则: [
     '保存后按当前间隔启动或调整循环，取消编辑保留原设置。关闭循环后仍可在订单处理立即执行一轮。',
-    '每轮按当时的待审核队列逐单检查。命中团队审单规则的订单留待人工复核，人工审核只校验系统默认发货条件。',
+    '按优先级取首条命中。人工审核留待复核，自动审核须通过发货条件，全部未命中进入异常。运行时没有启用规则也属于未匹配；售后重发手工单跳过，交人工审核。',
     '本地会话内切换页面继续计时，刷新或关闭原型结束会话。正式后台调度、配置持久化、权限及审计待接入。',
   ],
 }
@@ -109,9 +109,13 @@ const navigationAnnotation: 原型标注 = {
               </dd>
               <dd v-else>每 <strong>{{ settings.intervalHours }}</strong> 小时执行一轮</dd>
             </div>
-            <div class="setting-row"><dt>订单范围</dt><dd>执行时全部处于「待审核」的自发货订单</dd></div>
-            <div class="setting-row"><dt>审单依据</dt><dd>系统默认审单规则、当前已启用的自定义审单规则</dd></div>
-            <div class="setting-row"><dt>执行结果</dt><dd>审核通过的订单进入「待推单」，被拦截的订单留待处理。</dd></div>
+            <div class="setting-row"><dt>订单范围</dt><dd>每轮检查当前全部待审核自发货订单，包括上轮人工截留的订单。售后重发手工单跳过，交人工审核。</dd></div>
+            <div class="setting-row"><dt>匹配顺序</dt><dd>从上往下检查已启用的审单规则，首条命中即停止。</dd></div>
+            <div class="setting-row"><dt>执行结果</dt><dd class="review-routes">
+              <p><strong>人工审核</strong>留在「待审核」，按命中原因复核。</p>
+              <p><strong>自动审核</strong>发货条件通过后进入「待推单」，未通过则显示拦截原因。</p>
+              <p><strong>未匹配</strong>进入「异常 → 发货审核失败」。本轮没有启用规则时也按未匹配处理。</p>
+            </dd></div>
           </dl>
           <footer v-if="editing" class="panel-actions">
             <ElButton type="primary" @click="save">保存</ElButton>
@@ -151,6 +155,8 @@ h3 { font-size: 15px; }
 .setting-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 13px 0; line-height: 22px; }
 .setting-row + .setting-row { border-top: 1px solid var(--yy-border-light); }
 dt { color: var(--yy-text-secondary); }
+.review-routes p + p { margin-top: 5px; }
+.review-routes strong { display: inline-block; min-width: 5.5em; font-weight: 600; }
 .hours-input, .panel-actions { display: flex; align-items: center; }
 .hours-input { gap: 8px; }
 .hours-input small { color: var(--yy-text-secondary); }

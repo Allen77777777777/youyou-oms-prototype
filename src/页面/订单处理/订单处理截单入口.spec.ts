@@ -4,7 +4,7 @@ import { flushPromises, shallowMount, type DOMWrapper, type VueWrapper } from '@
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import ProcessingPage from './订单处理页面.vue'
-import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本 } from './演示会话'
+import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本, 专项人工审核权限, 执行异常人工审核, 当前版本 } from './演示会话'
 import { 共享标发单 } from '../订单标发/演示会话'
 import { 标注状态 } from '@/原型标注/标注状态'
 
@@ -94,6 +94,46 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; 恢复数据(); 标注状态.退出(); vi.restoreAllMocks() })
 
 describe('订单处理保留仓库事实，将截单办理入口交给三方仓出库单', () => {
+  it('发货审核失败按原因码过滤，专人逐单审核后同步两端计数', async () => {
+    const 订单 = 单('01')
+    订单.processingStatus = '异常'
+    订单.reviewExceptionCode = 'NO_REVIEW_RULE_MATCH'
+    单('20').blockReason = '备注中的未匹配到审单规则'
+    const page = await 打开()
+    const 待推单数 = () => Number(page.get('[data-stage="待推单"] b').text())
+    const 原待推单数 = 待推单数()
+    await page.get('[data-stage="异常"]').trigger('click')
+    const 分类 = page.findAll('.关注选项 button').find(button => button.text().includes('发货审核失败'))!
+    const 初始数 = Number(分类.get('b').text())
+    await 分类.trigger('click')
+    expect(page.find(`[data-column="操作"] [data-row="${单('20').systemOrderNo}"]`).exists()).toBe(false)
+    const row = page.get(`[data-column="操作"] [data-row="${订单.systemOrderNo}"]`)
+    expect(row.text()).toContain('人工审核通过')
+    expect(row.text()).not.toContain('恢复发货')
+    expect(page.get('.批量操作组').text()).not.toContain('人工审核通过')
+    try {
+      专项人工审核权限.value = false
+      await 稳定()
+      expect(row.text()).not.toContain('人工审核通过')
+    } finally { 专项人工审核权限.value = true }
+    expect(执行异常人工审核(订单.systemOrderNo, 当前版本(订单.systemOrderNo)).成功).toBe(true)
+    await 稳定()
+    expect(Number(分类.get('b').text())).toBe(初始数 - 1)
+    expect(待推单数()).toBe(原待推单数 + 1)
+  })
+
+  it('平台新单首轮未完成时不开放作业行，完成后可办理审核、拆分和合并', async () => {
+    const 订单 = 单('01')
+    订单.initialReviewPending = true
+    const page = await 打开('01')
+    const 操作行 = `[data-column="操作"] [data-row="${订单.systemOrderNo}"]`
+    expect(page.find(操作行).exists()).toBe(false)
+    delete 订单.initialReviewPending
+    await 稳定()
+    expect(page.get(操作行).text()).toContain('审核')
+    expect(page.get(操作行).text()).toContain('拆分发货')
+    expect(page.get('.批量操作组').text()).toContain('合并发货')
+  })
   it('六态队列的批量栏、行主操作和更多菜单均不提供截单，保留同步入口', async () => {
     const page = await 打开()
     const 原数据 = 快照()

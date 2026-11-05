@@ -1,10 +1,12 @@
 import type { 全渠道订单 } from '../全渠道订单/类型'
 import { 标发阻断原因, type 标发单 } from './标发逻辑'
+import { 是手工订单 } from '../手工订单/来源规则'
 
 export type 标发动作 = '提交标发' | '重新提交' | '查询结果' | '不标发'
 export interface 标发处理结果 { no: string; result: '成功' | '失败' | '跳过' | '处理中'; status: string; reason: string }
 
 export function 标发动作阻断(单: 标发单, 动作: 标发动作, 来源?: 全渠道订单): string[] {
+  if (来源 && 是手工订单(来源)) return ['手工订单没有平台标发责任，不提交平台标发']
   if (动作 === '不标发') {
     const 原因: string[] = []
     if (!来源 || 来源.systemOrderNo !== 单.orderNo) 原因.push('来源订单不存在或关联不一致，请先核查')
@@ -29,7 +31,7 @@ export function 标发动作阻断(单: 标发单, 动作: 标发动作, 来源?
 export function 标发确认指纹(单: 标发单, 来源?: 全渠道订单): string {
   return JSON.stringify([单.no, 单.orderNo, 单.fulfillmentNo, 单.status, 单.pendingVerification,
     单.lineId, 单.quantity, 单.carrier, 单.tracking, 单.shippedAt, 单.idempotencyKey, 单.externalId, 单.attempts, 单.exemptionReason, 单.nonMarkRecord,
-    来源 && [来源.systemOrderNo, 来源.platformCode, 来源.storeId, 来源.platformOrderNo, 来源.fulfillmentMode]])
+    来源 && [来源.systemOrderNo, 来源.platformCode, 来源.storeId, 来源.platformOrderNo, 来源.fulfillmentMode, 是手工订单(来源)]])
 }
 
 export function 不标发原因错误(原因: string): string {

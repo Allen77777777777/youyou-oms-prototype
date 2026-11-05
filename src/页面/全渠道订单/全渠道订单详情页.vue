@@ -22,6 +22,7 @@ import { 格式化北京时间, 计算剩余发货时间 } from '../订单处理
 import type { 作业行 } from '../订单处理/展示工具'
 import { 格式化金额, 获取OMS状态说明, 获取SKU状态说明, 获取同步状态说明, 获取平台状态说明 } from './订单工具'
 import type { 全渠道订单, 订单商品行, 订单路由 } from './类型'
+import { 是手工订单 } from '../手工订单/来源规则'
 
 const props = defineProps<{ order: 全渠道订单 }>()
 const router = useRouter()
@@ -43,7 +44,7 @@ const OMS状态 = computed(() => 获取OMS状态说明(props.order))
 const 平台状态 = computed(() => 获取平台状态说明(props.order))
 const 当前标志 = computed(() => 计算订单标志(props.order, 订单标志演示证据))
 const 仓库执行 = computed(() => 订单关联仓库执行(props.order))
-const 标发记录 = computed(() => 共享标发单.value.filter(单 => 单.orderNo === props.order.systemOrderNo))
+const 标发记录 = computed(() => 是手工订单(props.order) ? [] : 共享标发单.value.filter(单 => 单.orderNo === props.order.systemOrderNo))
 const 库存作业 = computed<作业行>(() => ({ key: props.order.systemOrderNo, order: props.order, stage: props.order.processingStatus ?? '待审核' }))
 const 当前履约 = computed(() => props.order.fulfillmentOrders.filter(单 => 单.isActive === true))
 const 发货方式 = computed(() => [props.order.fulfillmentMode, props.order.fulfillmentMode === '自配送' ? props.order.manualShippingPlan?.kind : undefined].filter(Boolean).join(' · '))
@@ -55,6 +56,7 @@ const 字段 = (label: string, value?: string, wide = false) => ({ label, value:
 const 基础字段 = computed(() => props.order.manualOrder ? [
   字段('系统订单号', props.order.systemOrderNo), 字段('订单来源', '手工创建'),
   字段('业务用途', props.order.manualOrder.scenario), 字段('关联原订单', props.order.manualOrder.originalOrderNo),
+  字段('发货店铺', props.order.storeName), 字段('订单标签', props.order.tags.join('、'), true),
   字段('订单类型', props.order.orderType), 字段('履约模式', props.order.fulfillmentMode),
   字段('建单原因', props.order.manualOrder.reason, true),
 ] : [
@@ -146,7 +148,7 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
       <header class="详情头部">
         <div class="标题区">
           <div class="标题行"><h1>订单详情</h1><strong class="订单编号">{{ order.systemOrderNo }}</strong><ElTooltip content="复制系统订单号"><button type="button" class="复制按钮" aria-label="复制系统订单号" @click="复制系统订单号"><ElIcon><CopyDocument /></ElIcon></button></ElTooltip><OrderFlags :flags="当前标志" /></div>
-          <p v-if="order.manualOrder">手工创建<span>·</span>{{ order.manualOrder.scenario }}</p>
+          <p v-if="order.manualOrder">手工创建<span>·</span>{{ order.manualOrder.scenario }}<span>·</span>{{ order.storeName.trim() || '—' }}</p>
           <p v-else>{{ order.platformCode }}<span>·</span>{{ order.storeName }}<span>·</span>平台订单号 <b>{{ order.platformOrderNo }}</b></p>
         </div>
         <div v-prototype="状态标注" class="头部状态">
@@ -210,7 +212,7 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
           <ElTableColumn label="处理原因 / 结果说明" min-width="240"><template #default="{ row }"><span class="完整正文">{{ row.原因 || '—' }}</span></template></ElTableColumn>
         </ElTable>
         <h3 class="子标题">订单标发记录 <span>{{ 标发记录.length }} 张</span></h3>
-        <ElTable :data="标发记录" row-key="no" class="明细表 标发表" table-layout="fixed" :empty-text="order.manualOrder ? '手工订单无需平台标发' : '暂无订单标发记录'">
+        <ElTable :data="标发记录" row-key="no" class="明细表 标发表" table-layout="fixed" :empty-text="是手工订单(order) ? '手工订单无需平台标发' : '暂无订单标发记录'">
           <ElTableColumn label="标发单 / 履约单" min-width="210"><template #default="{ row }"><div class="复合信息"><ElButton link type="primary" class="表内入口 等宽" @click="查看标发(row.no)">{{ row.no }}</ElButton><span class="等宽">{{ row.fulfillmentNo }}</span><span class="等宽">订单行：{{ row.lineId }}</span></div></template></ElTableColumn>
           <ElTableColumn label="标发状态" width="120"><template #default="{ row }"><div class="复合信息"><b class="状态徽标" :class="row.status === '标发失败' ? 'tone-danger' : row.status === '标发成功' ? 'tone-success' : 'tone-info'">{{ row.status }}</b><span v-if="row.pendingVerification" class="待核查字">平台结果待核查</span></div></template></ElTableColumn>
           <ElTableColumn label="标发内容" min-width="245"><template #default="{ row }"><dl class="单元字段"><div><dt>承运商</dt><dd>{{ row.carrier || '—' }}</dd></div><div><dt>跟踪号</dt><dd>{{ row.tracking || '—' }}</dd></div><div><dt>标发数量</dt><dd>{{ row.quantity ?? '—' }}</dd></div><div><dt>发货时间</dt><dd :title="row.shippedAt">{{ 格式化北京时间(row.shippedAt) }}</dd></div></dl></template></ElTableColumn>

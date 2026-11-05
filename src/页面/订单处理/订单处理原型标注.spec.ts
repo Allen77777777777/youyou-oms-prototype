@@ -121,6 +121,30 @@ afterEach(async () => {
 
 // 保留真实表格、共享来源、重复锚点及原有断言；固定业务夹具控制 jsdom 布局开销。
 describe('订单处理业务与原型标注索引集成', { timeout: 20_000 }, () => {
+  it('共享履约读取全部来源的手工标志，列表与执行摘要同源且不回写普通来源', async () => {
+    限定订单夹具(['OMS-DEMO-ACTION-33', 'OMS-DEMO-ACTION-34'])
+    const 手工来源 = 共享订单.value[1]!
+    手工来源.orderType = '手工订单'; 手工来源.platformCode = '手工'
+    手工来源.platformOrderId = undefined; 手工来源.platformOrderNo = ''; 手工来源.platformOrderStatus = undefined
+    手工来源.manualOrder = { scenario: '其他', reason: '共享来源标志集成', paidConfirmed: false, requestId: 'shared-manual-flag' }
+    const before = 快照()
+    await 打开()
+    await router.replace({ path: 页面路径, query: { systemOrderNo: 手工来源.systemOrderNo } }); await 布局()
+    expect(主行()).toHaveLength(1)
+    expect(主行()[0]!.get('[data-flag-code="MANUAL_ORDER"]').text()).toBe('手')
+    await 主行()[0]!.get('button.编号').trigger('click'); await 布局()
+    expect(page.get('.详情订单标志 [data-flag-code="MANUAL_ORDER"]').text()).toBe('手')
+    expect(快照()).toBe(before)
+    expect(共享订单.value[0]!.orderType).not.toBe('手工订单')
+    // 代表来源本身为手工类型时，摘要也沿用平台状态不适用的展示契约。
+    共享订单.value[0]!.orderType = '手工订单'
+    共享订单.value[0]!.platformOrderStatus = undefined
+    const 手工快照 = 快照()
+    await 布局()
+    const 平台状态标签 = page.get('.el-drawer').findAll('dt').find(项 => 项.text() === '平台状态')
+    expect(平台状态标签?.element.nextElementSibling?.textContent).toBe('不适用')
+    expect(快照()).toBe(手工快照)
+  })
   it('模式开关不改业务事实或查询，重复行同 ID 只索引一张卡片', async () => {
     await 打开(); const before = 快照()
     expect(document.body.querySelector('[aria-label="原型标注索引"]')).toBeNull()

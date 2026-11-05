@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360" role="img" aria-label="虚构商品图片：白色折叠收纳架">
+  <rect width="480" height="360" rx="16" fill="#f2f5f8"/>
+  <ellipse cx="240" cy="291" rx="144" ry="15" fill="#e1e7ee"/>
+  <g fill="#fff" stroke="#667b8b" stroke-width="7" stroke-linejoin="round">
+    <path d="M126 100h225v158H126z"/><path d="m126 100 25-22h225l-25 22M351 100l25-22v158l-25 22" fill="#dce7ee"/>
+    <path d="M126 158h225M126 210h225M145 258v25M331 258v25" fill="none"/>
+  </g>
+  <g fill="#c5d6e2"><rect x="151" y="116" width="56" height="33" rx="3"/><rect x="232" y="116" width="92" height="33" rx="3"/><rect x="151" y="173" width="82" height="28" rx="3"/></g>
+  <text x="240" y="328" font-family="Arial,sans-serif" font-size="15" text-anchor="middle" fill="#6b8191">DEMO · LISTING IMAGE</text>
+</svg>

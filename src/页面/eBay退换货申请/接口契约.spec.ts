@@ -1,8 +1,51 @@
 import { describe, expect, it } from 'vitest'
 import { createReturnData } from './数据'
-import { apiMoney, applyReturnFull, applyReturnSummary, buildReturnRequest, createReturnActionDraft, getReturnBlockedReason, parseMoney, parseReturnFull, parseReturnSummary, safePlatformUrl } from './模型'
+import { apiMoney, applyReturnFull, applyReturnSummary, buildReturnRequest, createReturnActionDraft, getReturnApprovalAction, getReturnBlockedReason, getReturnDetail, parseMoney, parseReturnFull, parseReturnSummary, prepareReturnAction, safePlatformUrl, submitPreparedReturnAction } from './模型'
 
 describe('Post-Order退货请求和读取合同', () => {
+  it('统一入口优先批准资格，缺资格仍阻断，确认后资格变化不偷换决定', () => {
+    const row = createReturnData()[0]!
+    expect(getReturnApprovalAction(row)).toBe('approve')
+    row.options = ['SELLER_OFFER_RETURNS']
+    const action = getReturnApprovalAction(row), draft = createReturnActionDraft(row, action)
+    expect(action).toBe('offerReturn')
+    const prepared = prepareReturnAction(row, action, draft).prepared!
+    row.options = ['SELLER_APPROVE_REQUEST']
+    expect(submitPreparedReturnAction(row, prepared)).not.toBe('')
+    expect(row.pendingRequest).toBeUndefined()
+    row.options = []
+    expect(getReturnBlockedReason(row, getReturnApprovalAction(row))).toContain('不支持')
+    row.options = ['SELLER_OFFER_RETURNS']
+    getReturnDetail(row).readStatus.detail.status = 'failed'
+    expect(getReturnBlockedReason(row, getReturnApprovalAction(row))).toContain('完整刷新')
+  })
+
+  it('接受默认要求寄回，切为保留商品不提交隐藏的RMA草稿', () => {
+    const row = createReturnData()[0]!
+    row.keepItem = true
+    const draft = createReturnActionDraft(row, 'approve')
+    expect(draft.keepOriginalItem).toBe(false)
+    draft.rmaNumber = 'DEMO-RMA'
+    expect(buildReturnRequest(row, 'approve', draft).request!.body).toMatchObject({ keepOriginalItem: false, RMANumber: 'DEMO-RMA' })
+    draft.keepOriginalItem = true
+    expect(buildReturnRequest(row, 'approve', draft).request!.body).toEqual({ decision: 'APPROVE', keepOriginalItem: true })
+  })
+
+  it('接受申请与提议退回分别校验平台资格，保留商品参数不切换决定', () => {
+    const row = createReturnData()[0]!, draft = createReturnActionDraft(row, 'approve')
+    row.options = ['SELLER_APPROVE_REQUEST']
+    expect(getReturnBlockedReason(row, 'approve')).toBe('')
+    expect(getReturnBlockedReason(row, 'offerReturn')).toContain('不支持')
+    for (const keepOriginalItem of [false, true]) {
+      draft.keepOriginalItem = keepOriginalItem
+      expect(buildReturnRequest(row, 'approve', draft).request!.body).toEqual({ decision: 'APPROVE', keepOriginalItem })
+      expect(buildReturnRequest(row, 'offerReturn', draft).request!.body).toEqual({ decision: 'OFFER_RETURN', keepOriginalItem })
+    }
+    row.options = ['SELLER_OFFER_RETURNS']
+    expect(getReturnBlockedReason(row, 'offerReturn')).toBe('')
+    expect(getReturnBlockedReason(row, 'approve')).toContain('不支持')
+  })
+
   it('按最小货币单位合计，0.10+0.20准确构造0.30，拒绝指数及未知精度', () => {
     const row = createReturnData()[2]!
     row.detail!.refund.items = [{ refundFeeType: 'PURCHASE_PRICE', label: '商品价款', estimated: '0.10', min: '0.00', max: '1.00', currency: 'USD', optional: false }, { refundFeeType: 'ORIGINAL_SHIPPING', label: '原运费', estimated: '0.20', min: '0.00', max: '1.00', currency: 'USD', optional: false }]
@@ -21,7 +64,7 @@ describe('Post-Order退货请求和读取合同', () => {
   it('decide参数与留言/收货分开，留言不带附件、keepOriginalItem或退款参数', () => {
     const row = createReturnData()[0]!, draft = createReturnActionDraft(row, 'partial')
     draft.text = 'Offer'; draft.partialAmount = '10.00'; draft.keepOriginalItem = true
-    expect(buildReturnRequest(row, 'partial', draft).request!.body).toEqual({ comments: { content: 'Offer' }, decision: 'OFFER_PARTIAL_REFUND', partialRefundAmount: { value: 10, currency: 'USD' }, keepOriginalItem: true })
+    expect(buildReturnRequest(row, 'partial', draft).request!.body).toEqual({ comments: { content: 'Offer' }, decision: 'OFFER_PARTIAL_REFUND', partialRefundAmount: { value: 10, currency: 'USD' } })
     expect(buildReturnRequest(row, 'message', draft).request!.body).toEqual({ message: { content: 'Offer' } })
     expect(buildReturnRequest(row, 'receive', draft).request!.path).toMatch(/mark_as_received$/)
     draft.rmaNumber = 'DEMO-RMA'; expect(buildReturnRequest(row, 'provideRma', draft).request!.body).toMatchObject({ decision: 'PROVIDE_RMA', RMANumber: 'DEMO-RMA', rMAProvided: true })
@@ -59,8 +102,22 @@ describe('Post-Order退货请求和读取合同', () => {
     expect(parsed).not.toHaveProperty('partialOfferLimit')
   })
   it('hold与关闭字段不猜来源，图片文件严格按提交方，历史保留活动', () => {
-    const parsed = parseReturnFull({ detail: { returnContentOnHold: true, holdInfo: { holdStatus: 'ON_HOLD', holdReleaseDate: { value: '2026-11-01T00:00:00Z' } }, closeInfo: { returnCloseReason: 'REFUNDED', returnCloseDate: { value: '2026-10-30T00:00:00Z' } }, files: [{ fileId: 'FILE', submitter: 'EBAY', fileStatus: 'PUBLISHED', filePurpose: 'LABEL_RELATED' }], responseHistory: [{ activity: 'EBAY_RULE_AUTO_APPROVE', author: 'EBAY', creationDate: { value: '2026-10-29T00:00:00Z' }, notes: { content: 'Automatically approved' } }] } })
-    expect(parsed.holdInfo?.until).toBe('2026-11-01T00:00:00Z'); expect(parsed.holdInfo?.reason).toBe(''); expect(parsed.files[0]?.submitter).toBe('EBAY'); expect(parsed.history[0]?.activity).toBe('EBAY_RULE_AUTO_APPROVE')
+    const parsed = parseReturnFull({ detail: { returnContentOnHold: true, holdInfo: { holdStatus: 'ON_HOLD', holdReleaseDate: { value: '2026-11-01T00:00:00Z' } }, closeInfo: { returnCloseReason: 'REFUNDED', returnCloseDate: { value: '2026-10-30T00:00:00Z' } }, files: [{ fileId: 'FILE', submitter: 'EBAY', fileStatus: 'PUBLISHED', filePurpose: 'LABEL_RELATED' }], responseHistory: [{ activity: 'EBAY_RULE_AUTO_APPROVE', author: 'EBAY', creationDate: { value: '2026-10-29T00:00:00Z' }, notes: 'Automatically approved' }] } })
+    expect(parsed.holdInfo?.until).toBe('2026-11-01T00:00:00Z'); expect(parsed.holdInfo?.reason).toBe(''); expect(parsed.files[0]?.submitter).toBe('EBAY'); expect(parsed.history[0]?.activity).toBe('EBAY_RULE_AUTO_APPROVE'); expect(parsed.history[0]?.text).toBe('Automatically approved')
+  })
+  it('按官方字符串读取多条历史说明，保留来源顺序、属性及无说明的活动', () => {
+    const row = createReturnData()[0]!
+    applyReturnFull(row, { detail: { responseHistory: [
+      { activity: 'SELLER_SEND_MESSAGE', author: 'SELLER', creationDate: { value: '2026-10-29T01:00:00Z' }, fromState: 'ITEM_SHIPPED', toState: 'ITEM_SHIPPED', notes: 'Please confirm the return tracking number.', attributes: { updatedTrackingNumber: 'DEMO-RETURN-001' } },
+      { activity: 'BUYER_MARK_RETURN_SHIPPED', author: 'BUYER', creationDate: { value: '2026-10-28T01:00:00Z' }, fromState: 'ITEM_READY_TO_SHIP', toState: 'ITEM_SHIPPED' },
+      { activity: 'FUTURE_PLATFORM_ACTIVITY', author: 'OTHER', creationDate: { value: '2026-10-28T01:00:00Z' }, notes: '' },
+    ] } })
+    expect(row.history.map(({ parsedAttributes: _parsed, ...entry }) => entry)).toEqual([
+      { activity: 'SELLER_SEND_MESSAGE', author: 'SELLER', at: '2026-10-29T01:00:00Z', fromState: 'ITEM_SHIPPED', toState: 'ITEM_SHIPPED', text: 'Please confirm the return tracking number.', attributes: { updatedTrackingNumber: 'DEMO-RETURN-001' } },
+      { activity: 'BUYER_MARK_RETURN_SHIPPED', author: 'BUYER', at: '2026-10-28T01:00:00Z', fromState: 'ITEM_READY_TO_SHIP', toState: 'ITEM_SHIPPED', text: '', attributes: {} },
+      { activity: 'FUTURE_PLATFORM_ACTIVITY', author: 'OTHER', at: '2026-10-28T01:00:00Z', fromState: '', toState: '', text: '', attributes: {} },
+    ])
+    expect(row.history[0]?.parsedAttributes?.updatedTrackingNumber).toBe('DEMO-RETURN-001')
   })
   it('平台链接只能使用来源可信HTTPS eBay域，不造缺失入口', () => {
     expect(safePlatformUrl(undefined)).toBeNull(); expect(safePlatformUrl('javascript:alert(1)')).toBeNull(); expect(safePlatformUrl('https://ebay.com.bad.example/')).toBeNull(); expect(safePlatformUrl('https://www.ebay.com/')).toBe('https://www.ebay.com/')

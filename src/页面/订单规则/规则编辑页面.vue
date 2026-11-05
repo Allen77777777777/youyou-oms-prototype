@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElButton, ElTag, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
 import RuleForm from './规则编辑表单.vue'
-import { 共享规则, 记录规则操作 } from './演示会话'
+import { 共享规则, 写入规则配置, 记录规则操作 } from './演示会话'
 import { 共享订单 } from '../订单处理/演示会话'
 import { 渠道会话 } from '../仓配管理/仓配会话'
 import { 校验规则配置, type 订单规则 } from './规则逻辑'
@@ -45,7 +45,7 @@ async function 保存(保存项: 订单规则) {
   if (error) return void ElMessage.warning(error)
   const 原项 = session.mode === 'edit' ? 共享规则.value.find(项 => 项.id === session.sourceId) : undefined
   if (保存项.enabled || (原项 && 原项.enabled !== 保存项.enabled)) {
-    try { await ElMessageBox.confirm(`保存后“${保存项.name}”将${保存项.enabled ? '参与' : '不再参与'}后续规则试算。`, 保存项.enabled ? '保存启用规则' : '保存并停用规则', { confirmButtonText: 保存项.enabled ? '保存并启用' : '保存并停用', cancelButtonText: '继续编辑', type: 'warning' }) } catch { return }
+    try { await ElMessageBox.confirm(`保存后“${保存项.name}”将${保存项.enabled ? '参与' : '不再参与'}后续${保存项.type === '审单规则' ? '审单规则执行及试算' : '规则试算'}。`, 保存项.enabled ? '保存启用规则' : '保存并停用规则', { confirmButtonText: 保存项.enabled ? '保存并启用' : '保存并停用', cancelButtonText: '继续编辑', type: 'warning' }) } catch { return }
   }
   if (!会话仍有效()) return void ElMessage.warning('编辑已结束，本次保存已取消')
   if (!检查版本()) return void ElMessage.warning('确认期间规则已变化，请重新打开编辑')
@@ -58,10 +58,10 @@ async function 保存(保存项: 订单规则) {
   保存项.updatedAt = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) + ' UTC+8'
   保存项.version = 原项 ? 原项.version + 1 : 1
   保存项.id = 原项?.id || `RULE-DEMO-${crypto.randomUUID()}`
-  if (原项) 共享规则.value.splice(共享规则.value.findIndex(项 => 项.id === 原项.id), 1, 保存项)
-  else 共享规则.value.push(保存项)
+  写入规则配置(保存项)
   const action = 原项 ? '编辑' : session.mode === 'copy' ? '复制' : '新增'
-  记录规则操作(保存项, action, `${action}规则「${保存项.name}」；${保存项.enabled ? '启用' : '停用'}；${保存项.conditions.length} 项条件全部满足${保存项.type === '订单标发规则' ? `；${格式化标发动作(保存项)}` : 保存项.type === '分仓规则' ? `；${分仓配置摘要(保存项, 渠道会话.value).join('；')}` : ''}${原项 && 原项.name !== 保存项.name ? `；原名称：${原项.name}` : ''}`, 保存项.updatedAt)
+  const 优先级记录 = 原项 && 原项.priority !== 保存项.priority ? `优先级 ${原项.priority} → ${保存项.priority}` : `优先级 ${保存项.priority}`
+  记录规则操作(保存项, action, `${action}规则「${保存项.name}」；${保存项.enabled ? '启用' : '停用'}；${优先级记录}；${保存项.conditions.length} 项条件全部满足${保存项.type === '订单标发规则' ? `；${格式化标发动作(保存项)}` : 保存项.type === '分仓规则' ? `；${分仓配置摘要(保存项, 渠道会话.value).join('；')}` : `；${保存项.action}`}${原项 && 原项.name !== 保存项.name ? `；原名称：${原项.name}` : ''}`, 保存项.updatedAt)
   ElMessage.success('规则已保存到本次会话')
   await 结束编辑(session, editorPath)
 }

@@ -23,6 +23,24 @@ async function choose(wrapper: VueWrapper, file: File) {
 }
 
 describe('办理区内上传退货附件', () => {
+  it('拒绝表单按拒绝资格独立上传材料，不附加到决定请求或提交拒绝', async () => {
+    const row = reactive(createReturnData()[0]!), detail = getReturnDetail(row)
+    row.options = ['SELLER_DECLINE_REQUEST']
+    const { wrapper, draft } = form(row, 'decline')
+    draft.text = 'Please review the product photo.'
+    expect(wrapper.get('input[aria-label="选择申请材料"]').attributes('disabled')).toBeUndefined()
+    await choose(wrapper, new File([png], '申请材料.png', { type: 'image/png' }))
+    await vi.waitFor(() => expect(detail.files.some(file => file.fileName === '申请材料.png')).toBe(true))
+    expect(detail.files.find(file => file.fileName === '申请材料.png')!.fileStatus).toBe('CREATED')
+    expect(row.outcome).toBe('idle')
+    expect(row.pendingAction).toBeNull()
+    expect(buildReturnRequest(row, 'decline', draft).request!.body).toEqual({ decision: 'DECLINE', comments: { content: 'Please review the product photo.' } })
+    expect(wrapper.text()).toContain('取消操作不会撤回已上传材料')
+    await wrapper.findAll('button').find(button => button.text() === '取消')!.trigger('click')
+    expect(wrapper.emitted('cancel')).toHaveLength(1)
+    expect(detail.files.some(file => file.fileName === '申请材料.png')).toBe(true)
+  })
+
   it('资料区只读，移除独立上传和平台后台办理入口', () => {
     const row = createReturnData()[0]!
     row.detail!.availableActions = [{ actionType: 'SELLER_SEND_MESSAGE', actionURL: 'https://www.ebay.com/return/123' }]
@@ -75,7 +93,7 @@ describe('办理区内上传退货附件', () => {
     expect(buildReturnRequest(row, 'label', draft).request!.body).toEqual({ labelAction: 'NO_LABEL', noLabelReason: 'WORK_WITH_BUYER' })
   })
 
-  it.each(['pending', 'unknown', 'closed', 'case', 'caseClosed', 'hidden', 'ineligible', 'unknownState', 'readFailed'] as const)('%s时关闭上传入口', async condition => {
+  it.each((['message', 'decline'] as const).flatMap(mode => (['pending', 'unknown', 'closed', 'case', 'caseClosed', 'hidden', 'ineligible', 'unknownState', 'readFailed'] as const).map(condition => [mode, condition] as const)))('%s在%s时关闭上传入口', async (mode, condition) => {
     const row = reactive(createReturnData()[0]!), detail = getReturnDetail(row)
     if (condition === 'pending' || condition === 'unknown') row.outcome = condition
     if (condition === 'closed') row.status = 'CLOSED'
@@ -85,7 +103,7 @@ describe('办理区内上传退货附件', () => {
     if (condition === 'ineligible') row.options = []
     if (condition === 'unknownState') row.state = 'FUTURE'
     if (condition === 'readFailed') detail.readStatus.summary.status = 'failed'
-    const { wrapper } = form(row, 'message')
+    const { wrapper } = form(row, mode)
     expect(wrapper.get('input[type="file"]').attributes('disabled')).toBeDefined()
     const before = detail.files.length
     await choose(wrapper, new File([png], '不能上传.png', { type: 'image/png' }))

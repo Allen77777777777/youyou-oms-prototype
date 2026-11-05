@@ -59,6 +59,36 @@ beforeEach(恢复数据)
 afterEach(() => { 实例.splice(0).forEach(wrapper => wrapper.unmount()); 恢复数据(); document.body.innerHTML = '' })
 
 describe('操作设置弹窗的对象范围与提交确认', () => {
+  it('未匹配异常单笔审核通过后进入待推单，窗口说明可手动或按设置自动推单', async () => {
+    const 订单 = 单('01')
+    订单.processingStatus = '异常'
+    订单.reviewExceptionCode = 'NO_REVIEW_RULE_MATCH'
+    const 原仓单数 = 仓库执行记录.value.length
+    const page = await 打开组件('人工审核通过', [行('01')])
+    expect(page.text()).toContain('未匹配到审单规则')
+    expect(page.text()).toContain('从异常进入待推单')
+    expect(page.text()).toContain('可手动推单，也可开启自动推单')
+    await 按钮(page, '确认人工审核通过').trigger('click')
+    await flushPromises()
+    expect(订单.processingStatus).toBe('待推单')
+    const 有效履约 = 订单.fulfillmentOrders.filter(项 => 项.isActive)
+    expect(有效履约).toHaveLength(1)
+    expect(有效履约[0]!.autoPushHold).not.toBe(true)
+    expect(仓库执行记录.value).toHaveLength(原仓单数)
+  })
+
+  it('确认前库存变动导致专项人工审核失败，保留异常并显示本次拦截', async () => {
+    const 订单 = 单('01')
+    订单.processingStatus = '异常'
+    订单.reviewExceptionCode = 'NO_REVIEW_RULE_MATCH'
+    const page = await 打开组件('人工审核通过', [行('01')])
+    演示库存.value[订单.systemOrderNo] = '不足'
+    await 按钮(page, '确认人工审核通过').trigger('click')
+    await flushPromises()
+    expect(订单.processingStatus).toBe('异常')
+    expect(订单.fulfillmentOrders).toHaveLength(0)
+    expect(page.emitted('result')?.[0]?.[1]).toMatchObject([{ result: { 成功: false, 信息: expect.stringContaining('库存不足') } }])
+  })
   it('旧截单调用无法打开单个或批量弹窗，不发出结果也不改写仓库状态和操作日志', async () => {
     const 快照 = JSON.stringify({ orders: 共享订单.value, executions: 仓库执行记录.value, evidence: 操作核查证据.value, inventory: 演示库存.value, versions: 订单版本.value })
     for (const batch of [false, true]) {
@@ -229,7 +259,7 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
   })
 
   it('28条待审核批量无需审核说明也可提交，普通拦截留痕且部分履约不代替人工核查', async () => {
-    const orders = 共享订单.value.filter(order => order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
+    const orders = 共享订单.value.filter(order => !order.manualOrder && order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
     expect(orders).toHaveLength(28)
     const 原轮数 = new Map(orders.map(order => [order.systemOrderNo, order.reviews.length]))
     const rows: 作业行[] = orders.map(order => ({ key: order.systemOrderNo, order, stage: '待审核' }))
@@ -271,7 +301,7 @@ describe('操作设置弹窗的对象范围与提交确认', () => {
   })
 
   it('28条待审核批量不发货先跳过两张已有人工方案，其余26张终止且不创建仓单', async () => {
-    const orders = 共享订单.value.filter(order => order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
+    const orders = 共享订单.value.filter(order => !order.manualOrder && order.fulfillmentMode === '自配送' && order.processingStatus === '待审核')
     expect(orders).toHaveLength(28)
     const protectedOrders = orders.filter(order => order.manualShippingPlan)
     expect(protectedOrders.map(order => order.systemOrderNo)).toEqual(['OMS-DEMO-SPLIT-STAGE-REVIEW', 'OMS-DEMO-SPLIT-STAGE-LOWSTOCK'])

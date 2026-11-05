@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
 import { 共享订单备注, 订单备注字数上限 } from '../订单处理/订单备注模型'
-import { 创建规则样例, 命中规则, 试算规则, 校验规则配置, eBay平台订单状态选项, 规则动作, type 订单规则, type 规则条件 } from './规则逻辑'
+import { 创建规则样例, 命中规则, 试算规则, 校验规则配置, eBay平台订单状态选项, 规则动作, 读取审单动作, type 订单规则, type 规则条件 } from './规则逻辑'
 import { 默认审单分组 } from './默认审单清单'
 import { 创建规则渠道样例 } from './规则路由'
 import { 创建规则草稿, 丢弃规则草稿 } from './规则编辑会话'
@@ -10,6 +10,33 @@ import { 共享规则 } from './演示会话'
 import { 中台系统用户资料 } from './规则基础选项'
 
 describe('订单规则本地试算', () => {
+  it('三类规则均支持重复数字，保存校验整数边界和清空值', () => {
+    const 列表 = 创建规则样例()
+    for (const type of ['审单规则', '分仓规则', '订单标发规则'] as const) {
+      const 来源 = 列表.find(项 => 项.type === type)!
+      const 新项 = { ...来源, id: '新规则', name: '同优先级的新规则' }
+      for (const priority of [1, 来源.priority, 999999]) expect(校验规则配置({ ...新项, priority }, 列表)).toBe('')
+      for (const priority of [NaN, 0, -1, 1.5, 1000000, null, undefined, '10']) {
+        expect(校验规则配置({ ...新项, priority: priority as number }, 列表)).toContain('优先级')
+      }
+    }
+  })
+  it('新增和复制的默认数字取同类最大值加十并封顶，编辑回显原值', () => {
+    const 来源 = 创建规则样例()[0]!, 停用同类 = { ...来源, id: '停用', enabled: false, priority: 999996 }
+    const 其他类型 = { ...创建规则样例()[1]!, priority: 999999 }
+    const 列表 = [来源, 停用同类, 其他类型]
+    const 草稿 = [
+      创建规则草稿('审单规则', [其他类型])!,
+      创建规则草稿('审单规则', [来源, 其他类型])!,
+      创建规则草稿('审单规则', 列表, 'copy', 来源)!,
+      创建规则草稿('审单规则', 列表, 'edit', 来源)!,
+    ]
+    try {
+      expect(草稿.map(项 => 项.draft.priority)).toEqual([10, 来源.priority + 10, 999999, 来源.priority])
+    } finally {
+      草稿.forEach(项 => 丢弃规则草稿(项.key))
+    }
+  })
   it('停用或无条件规则不会意外匹配所有订单', () => { const 规则 = 创建规则样例()[0]!; const 单 = 全渠道订单模拟数据[0]!; 规则.enabled = false; expect(命中规则(规则, 单)).toBe(false); 规则.enabled = true; 规则.conditions = []; expect(命中规则(规则, 单)).toBe(false) })
   it('所有条件必须同时满足，遗留任一满足配置不命中也不可保存', () => {
     const 规则 = 创建规则样例()[0]!, 单 = 全渠道订单模拟数据[0]!
@@ -881,12 +908,29 @@ describe('基础三项与收货国家同行多选', () => {
   })
 })
 
-describe('审单规则唯一动作留在待审核', () => {
-  it('动作目录、全部审单样例和新建默认一致，旧动作及空动作不得保存或试算命中', () => {
-    expect(规则动作.审单规则).toEqual(['留在待审核'])
-    expect(共享规则.value.filter(项 => 项.type === '审单规则').every(项 => 项.action === '留在待审核')).toBe(true)
+describe('审单规则动作与旧配置兼容', () => {
+  it('优先规则配置损坏时保留后续模拟命中，已能排除适用范围或首条已命中的情况仍按有效规则办理', () => {
+    const 单 = structuredClone(全渠道订单模拟数据[0]!)
+    const 旧规则 = { ...创建规则样例()[0]!, action: '损坏动作' }
+    const 自动 = { ...旧规则, id: 'AUTO', name: '自动审核测试', priority: 20, action: '自动审核' }
+    const 计算 = () => 试算规则([自动, 旧规则], 单, '审单规则')
+    const 阻断 = 计算()
+    expect(阻断.blockedRule?.rule.id).toBe(旧规则.id)
+    expect(阻断.blockedRule?.configError).toContain('执行动作')
+    expect(阻断.hit).toBeUndefined()
+    expect(阻断.trace.find(项 => 项.rule.id === 自动.id)?.matched).toBe(true)
+    旧规则.conditions = [{ field: 'countryCode', operator: '等于', value: 'GB' }]
+    expect(计算().hit?.id).toBe(自动.id)
+    旧规则.conditions = 自动.conditions
+    旧规则.priority = 30
+    expect(计算().blockedRule).toBeUndefined()
+    expect(计算().hit?.id).toBe(自动.id)
+  })
+  it('提供两种动作，新建默认人工；旧建议自动审核及空动作不得放行', () => {
+    expect(规则动作.审单规则).toEqual(['人工审核', '自动审核'])
+    expect(共享规则.value.filter(项 => 项.type === '审单规则').every(项 => !!读取审单动作(项.action))).toBe(true)
     const 新建 = 创建规则草稿('审单规则', 创建规则样例())!
-    try { expect(新建.draft.action).toBe('留在待审核') } finally { 丢弃规则草稿(新建.key) }
+    try { expect(新建.draft.action).toBe('人工审核') } finally { 丢弃规则草稿(新建.key) }
     const 单 = structuredClone(全渠道订单模拟数据[0]!)
     for (const action of ['进入人工复核', '满足门禁后建议自动审核', '']) {
       const 规则 = { ...创建规则样例()[0]!, action }, 前快照 = JSON.stringify(规则)
@@ -897,23 +941,23 @@ describe('审单规则唯一动作留在待审核', () => {
     }
   })
 
-  it('旧人工复核措辞只在独立编辑或复制草稿映射，来源已保存规则保持不变', () => {
-    const 来源 = { ...创建规则样例()[0]!, id: 'LEGACY-MANUAL-ACTION-TEST', action: '进入人工复核' }
+  it.each(['留在待审核', '进入人工复核', '人工审核', '自动审核'])('编辑与复制继承动作 %s，来源保持不变', action => {
+    const 来源 = { ...创建规则样例()[0]!, id: 'LEGACY-MANUAL-ACTION-TEST', action }
     const 前快照 = JSON.stringify(来源)
     const 编辑 = 创建规则草稿(来源.type, [来源], 'edit', 来源)!, 复制 = 创建规则草稿(来源.type, [来源], 'copy', 来源)!
     try {
-      expect(编辑.draft.action).toBe('留在待审核')
-      expect(复制.draft.action).toBe('留在待审核')
+      expect(编辑.draft.action).toBe(action === '自动审核' ? action : '人工审核')
+      expect(复制.draft.action).toBe(编辑.draft.action)
       expect(校验规则配置(编辑.draft, [来源])).toBe('')
       expect(复制.draft.enabled).toBe(false)
       编辑.draft.action = '进入人工复核'
       expect(创建规则草稿(来源.type, [来源], 'edit', 来源)).toBe(编辑)
-      expect(编辑.draft.action).toBe('留在待审核')
+      expect(编辑.draft.action).toBe('人工审核')
       expect(JSON.stringify(来源)).toBe(前快照)
     } finally { 丢弃规则草稿(编辑.key); 丢弃规则草稿(复制.key) }
   })
 
-  it('旧自动审核建议不自动迁移，用户复核并改选唯一动作后才允许保存', () => {
+  it('旧自动审核建议不自动迁移，用户明确选择有效动作后才允许保存', () => {
     const 来源 = { ...创建规则样例()[0]!, id: 'LEGACY-AUTO-REVIEW-ACTION-TEST', action: '满足门禁后建议自动审核' }
     const 前快照 = JSON.stringify(来源), 草稿 = 创建规则草稿(来源.type, [来源], 'edit', 来源)!
     try {

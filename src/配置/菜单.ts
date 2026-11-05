@@ -142,6 +142,7 @@ const OMS菜单: 菜单节点 = {
         页面('oms-tickets', '工单管理', '/oms/ebay-service/tickets', 70, '用户规划', '已确认'),
         页面('oms-ebay-cancellations', '取消订单申请', '/oms/ebay-service/cancellations', 80, '用户规划', '已确认'),
         页面('oms-ebay-returns', '退货退款申请', '/oms/ebay-service/returns', 85, '用户规划', '已确认'),
+        页面('oms-ebay-after-sale-orders', '售后单管理', '/oms/ebay-service/after-sale-orders', 87, '用户规划', '已确认'),
         页面('oms-service-kpi', '客服KPI统计', '/oms/ebay-service/kpi', 90, '用户规划', '已确认'),
       ],
     },

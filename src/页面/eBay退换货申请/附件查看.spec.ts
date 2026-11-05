@@ -49,7 +49,7 @@ describe('单击预览及真实原件下载', () => {
     expect(wrapper.get('.file-thumbnail img').attributes('src')).toBe(thumb)
     expect(wrapper.get('.file-thumbnail').element.tagName).toBe('BUTTON')
     expect(wrapper.get('.file-name').element.tagName).toBe('BUTTON')
-    expect(wrapper.get('.file-time').text()).toContain('2026-10-27 20:21:00')
+    expect(wrapper.get('.file-time').text()).toBe('2026-10-28 11:21:00')
     expect(wrapper.get('.file-source').text()).toBe('买家 · 商品凭证')
     await wrapper.get('.file-thumbnail').trigger('click')
     expect(wrapper.get('.preview-image img').attributes('src')).toBe(original)
