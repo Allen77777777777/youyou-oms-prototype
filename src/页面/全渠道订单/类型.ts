@@ -171,6 +171,13 @@ export interface 全渠道订单 {
   processingStatus?: 订单处理状态
   initialReviewPending?: true
   reviewExceptionCode?: 'NO_REVIEW_RULE_MATCH'
+  /** 审单自动重跑按订单累计；状态切换及人工执行均不重置。当前仅本地会话。 */
+  reviewRetry?: {
+    firstCompletedAt: string
+    dailyDate: string
+    dailyCount: number
+    totalCount: number
+  }
   admissionReason?: string
   blockReason?: string
   noShipmentReason?: string

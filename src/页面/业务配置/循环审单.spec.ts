@@ -16,7 +16,7 @@ async function 前进(时长: number) {
 beforeEach(() => {
   vi.useFakeTimers()
   执行.mockClear()
-  保存审单执行设置({ enabled: false, intervalHours: 2 })
+  保存审单执行设置({ enabled: false, intervalHours: 2, dailyRetryLimit: 3, retryDays: 3 })
   作用域 = effectScope()
   作用域.run(启动循环审单)
 })
@@ -55,5 +55,19 @@ describe('循环执行审单规则', () => {
     作用域.stop()
     await 前进(一小时)
     expect(执行).toHaveBeenCalledTimes(1)
+  })
+
+  it('只调整重跑次数或天数不重启扫描计时，下一原定时点仍执行', async () => {
+    保存审单执行设置({ enabled: true, intervalHours: 2, dailyRetryLimit: 3, retryDays: 3 })
+    await 前进(一小时)
+    保存审单执行设置({ enabled: true, intervalHours: 2, dailyRetryLimit: 5, retryDays: 7 })
+    await 前进(一小时 - 1)
+    expect(执行).not.toHaveBeenCalled()
+    await 前进(1)
+    expect(执行).toHaveBeenCalledExactlyOnceWith('定时执行')
+    await 前进(一小时)
+    保存审单执行设置({ enabled: true, intervalHours: 2, dailyRetryLimit: 1, retryDays: 1 })
+    await 前进(一小时)
+    expect(执行).toHaveBeenCalledTimes(2)
   })
 })

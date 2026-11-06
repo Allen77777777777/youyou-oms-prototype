@@ -1,0 +1,12 @@
+$ vitest run "src/页面/eBay退换货申请/详情页签.spec.ts" "--maxWorkers=1" "--testTimeout=15000" "-t" "从工单定位同店退货申请，可在详情新增独立工单且维持申请状态"
+
+ RUN  v3.2.7 D:/优优电商/原型
+
+ ✓ src/页面/eBay退换货申请/详情页签.spec.ts (8 tests | 7 skipped) 6017ms
+   ✓ 退货详情应用内独立页签 > 从工单定位同店退货申请，可在详情新增独立工单且维持申请状态  6012ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 7 skipped (8)
+   Start at  14:45:25
+   Duration  25.69s (transform 6.01s, setup 0ms, collect 17.84s, tests 6.02s, environment 999ms, prepare 190ms)
+

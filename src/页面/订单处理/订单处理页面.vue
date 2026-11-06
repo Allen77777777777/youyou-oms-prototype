@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, CircleCheck, Clock, CopyDocument, Document, InfoFilled, QuestionFilled, Refresh, Setting, Van, Warning } from '@element-plus/icons-vue'
 import { ElAlert, ElButton, ElCheckbox, ElConfigProvider, ElDialog, ElDrawer, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElMessage, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTabs, ElTabPane, ElTag, ElTooltip } from 'element-plus'
@@ -20,6 +20,7 @@ import OrderNotes from './订单备注组件.vue'
 import WarehouseChannelSelect from './仓库物流选择.vue'
 import ActionSettings, { type 设置操作 } from './操作设置弹窗.vue'
 import ReviewRuleRunner from './审单轮次操作.vue'
+import ReviewRetryHint from './审单重跑提示.vue'
 import ManualShippingActions from './拆合发货操作.vue'
 import ManualPlanSummary from './拆合发货方案展示.vue'
 import { 保存人工发货方案, 保存多组合并发货方案, 撤销人工发货方案 } from './拆合发货模型'
@@ -51,6 +52,10 @@ const router = useRouter()
 const route = useRoute()
 const 六态: 订单处理状态[] = ['待审核', '待推单', '待发货', '已发货', '异常', '不发货']
 const 当前队列 = ref<订单处理状态>('待审核')
+const 重跑显示时刻 = ref(Date.now())
+let 重跑显示计时器: ReturnType<typeof setInterval> | undefined
+onMounted(() => { 重跑显示计时器 = setInterval(() => { 重跑显示时刻.value = Date.now() }, 60_000) })
+onUnmounted(() => { if (重跑显示计时器) clearInterval(重跑显示计时器) })
 const 当前页 = ref(1)
 const 每页条数 = ref(20)
 const 高级筛选 = ref(false)
@@ -461,7 +466,7 @@ function 保存路由() {
     <div v-prototype="标注.关注" class="关注栏">
       <strong>作业关注</strong><div class="关注选项"><button v-for="关注 in 关注配置[当前队列]" :key="关注" :class="{ 激活: 当前关注 === 关注 }" :aria-pressed="当前关注 === 关注" @click="切换关注(关注)">{{ 关注 }} <b>{{ 关注数量(关注) }}</b></button></div>
       <span v-if="标注模式">当前查询范围 · 标签可重叠</span>
-      <ReviewRuleRunner v-if="当前队列 === '待审核'" @executed="清除选择" />
+      <ReviewRuleRunner v-if="当前队列 === '待审核' || 当前队列 === '异常'" @executed="清除选择" />
     </div>
     <section v-prototype="标注.批量扩展" class="作业工具栏" :class="{ 已选择: 已选.length }">
       <div class="批量操作组">
@@ -577,6 +582,7 @@ function 保存路由() {
               </template>
               <span v-if="row.stage === '已发货'">标发承运商：{{ 标发承运商(row as 作业行) || '未提供' }}</span>
               <small v-if="row.stage === '异常' && !是未匹配审单异常(row.order)">人工复核后可操作不发货</small>
+              <ReviewRetryHint v-if="row.stage === '待审核' || 是未匹配审单异常(row.order)" :order="row.order" :now="重跑显示时刻" />
               <div v-if="row.order.address.buyerMessage" v-prototype="标注.买家留言" class="买家留言"><span>买家留言</span><ElTooltip :content="row.order.address.buyerMessage" placement="top"><p class="两行摘要" tabindex="0">{{ row.order.address.buyerMessage }}</p></ElTooltip></div>
             </div>
           </template>

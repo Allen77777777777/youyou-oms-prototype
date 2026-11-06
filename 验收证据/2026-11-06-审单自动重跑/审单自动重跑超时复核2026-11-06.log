@@ -1,0 +1,47 @@
+$ vitest run "src/页面/订单规则/规则编辑页签.spec.ts" "src/页面/eBay退换货申请/详情页签.spec.ts" "--maxWorkers=1"
+
+ RUN  v3.2.7 D:/优优电商/原型
+
+ ✓ src/页面/订单规则/规则编辑页签.spec.ts (8 tests) 41714ms
+   ✓ 规则编辑应用内页签 > 新增打开独立页签且默认停用，空条件保存被拦截，取消关闭页签并丢弃草稿  5030ms
+   ✓ 规则编辑应用内页签 > 复制启用规则保存为新 ID 的停用规则，来源不变且保存后关闭复制页签  4243ms
+   ✓ 规则编辑应用内页签 > 从第二页编辑优先级，清空不能保存，填小数字后排在第一页且仅修改本条  8585ms
+   ✓ 规则编辑应用内页签 > 两条规则草稿跨页切换独立保留，取消当前编辑仅丢弃对应草稿和页签  6398ms
+   ✓ 规则编辑应用内页签 > 编辑期间来源版本变化时禁止覆盖，保留草稿页签并提示重新打开  2472ms
+   ✓ 规则编辑应用内页签 > 等待 A 的启用保存确认时切换到已有草稿 B，确认仅保存清理 A 并保留 B  4571ms
+   ✓ 规则编辑应用内页签 > 顶部关闭编辑页签丢弃未保存名称和嵌套条件，重新打开从共享规则创建新草稿  4987ms
+   ✓ 规则编辑应用内页签 > 确认删除只移除目标规则及其编辑草稿和页签，其他草稿保留且删除历史可追溯  5422ms
+ ❯ src/页面/eBay退换货申请/详情页签.spec.ts (8 tests | 1 failed) 24664ms
+   × 退货详情应用内独立页签 > 从工单定位同店退货申请，可在详情新增独立工单且维持申请状态 5775ms
+     → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ 退货详情应用内独立页签 > 列表打开新标签，返回保留未应用查询、队列、页码和两层滚动位置  4000ms
+   ✓ 退货详情应用内独立页签 > 同ReturnID跨店独立标签，草稿与阅读位置隔离，关闭只清理当前申请  6461ms
+   ✓ 退货详情应用内独立页签 > 详情处理后队列最后一页消失，返回仍保留队列并校准到最后有效页  2731ms
+   ✓ 退货详情应用内独立页签 > 支持详情直达，错店或同店身份重复时空态，不选择第一条申请  598ms
+   ✓ 退货详情应用内独立页签 > 新详情仍冻结确认来源，未知结果不能重复提交且不出现后台办理入口  3416ms
+   ✓ 退货详情应用内独立页签 > 已关闭退货申请仍可写站内信，保留申请历史、售后结果和原办理资格  747ms
+   ✓ 退货详情应用内独立页签 > 商品SKU与订单行ID只读可靠双交易身份，冲突或多行不冒用申请技术ID  930ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/页面/eBay退换货申请/详情页签.spec.ts > 退货详情应用内独立页签 > 从工单定位同店退货申请，可在详情新增独立工单且维持申请状态
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/页面/eBay退换货申请/详情页签.spec.ts:49:3
+     47| 
+     48| describe('退货详情应用内独立页签', () => {
+     49|   it('从工单定位同店退货申请，可在详情新增独立工单且维持申请状态', async () => {
+       |   ^
+     50|     const row = returnSession.records.find(item => item.id === 'DEMO-R…
+     51|     const source = { kind: 'return' as const, id: row.id, shopId: row.…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 15 passed (16)
+   Start at  14:42:46
+   Duration  99.03s (transform 8.26s, setup 0ms, collect 28.76s, tests 66.38s, environment 2.40s, prepare 419ms)
+
+[ELIFECYCLE] Test failed. See above for more details.

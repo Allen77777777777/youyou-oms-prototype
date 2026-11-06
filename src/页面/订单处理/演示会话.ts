@@ -222,6 +222,32 @@ export function 是售后重发订单(单: 全渠道订单): boolean {
   return 单.orderType === '手工订单' && 单.manualOrder?.scenario === '售后补寄' && Boolean(单.manualOrder.afterSaleNo)
 }
 
+/** 仅允许未匹配异常重新进入审单；普通资料缺项由后续发货条件判断，不能借此解除其他异常。 */
+export function 未匹配异常重跑阻断原因(订单: 全渠道订单): string[] {
+  if (!是未匹配审单异常(订单)) return ['仅未匹配到审单规则的异常订单可以自动重跑']
+  const 原因: string[] = []
+  const 核查 = 操作核查证据.value[订单.systemOrderNo]
+  if (是售后重发订单(订单)) 原因.push('售后重发订单须人工审核')
+  if (订单.blockReason || 订单.cancelledAt) 原因.push(订单.blockReason || '已确认最终取消，不能自动恢复审单')
+  if (!是手工订单(订单) && 核查?.平台允许 === false) 原因.push('当前平台付款或取消状态不允许自动恢复审单')
+  const 标志 = 计算订单标志(订单, 订单标志演示证据).filter(项 => 项.code === 'REFUND' || 项.code === 'CANCEL')
+  if (标志.length) 原因.push('当前存在退款或取消标志，请人工核查')
+  if (!可发数量有效(订单) || 核查?.剩余已核实 === false || 核查?.范围已核清 === false || 核查?.范围无重叠 === false) 原因.push('真实待发范围或数量尚未核清，请人工处理')
+  if (!是手工订单(订单) && 订单.platformCode === 'eBay' && 订单.platformOrderStatus === 'IN_PROGRESS' && 核查?.剩余已核实 !== true) 原因.push('部分履约的剩余范围须先人工核实')
+  if (订单.fulfillmentOrders.some(项 => 项.isActive)) 原因.push('已有有效履约路径，请人工核查后处理')
+  if (核查?.零出库已核实 === false || 订单.fulfillmentOrders.some(项 => !Number.isInteger(项.shippedQuantity) || 项.shippedQuantity !== 0 || 项.status === '已发货' || 项.shippedAt)) 原因.push('历史实际出库未核清，不能自动恢复审单')
+  const 履约号 = new Set(订单.fulfillmentOrders.map(项 => 项.fulfillmentOrderNo))
+  const 执行 = 仓库执行记录.value.filter(项 => 项.订单号.includes(订单.systemOrderNo) || 履约号.has(项.履约单号))
+  if (执行.some(项 => 项.待核查 || !['下单失败', '已取消'].includes(项.状态) || !履约号.has(项.履约单号))) 原因.push('原仓库执行未结束或结果未明，请先人工核查')
+  if (执行.some(项 => 项.出库事实 && (!Number.isInteger(项.出库事实.shipped) || 项.出库事实.shipped !== 0))) 原因.push('原仓库存在出库事实或出库数量未知，请先核清剩余范围')
+  if (关联人工发货订单号(人工发货上下文(), [订单.systemOrderNo]).length !== 1 ||
+    执行.some(项 => 项.订单号.some(号 => 号 !== 订单.systemOrderNo)) ||
+    共享订单.value.some(项 => 项.systemOrderNo !== 订单.systemOrderNo && 项.fulfillmentOrders.some(履约 => 履约号.has(履约.fulfillmentOrderNo)))) 原因.push('关联共享发货路径，请先处理合并安排并核清全部来源')
+  // 手工订单继续使用其本单付款及关联原单防重发保护，不借平台异常重跑绕过。
+  原因.push(...手工发货条件阻断(订单, 共享订单.value, 仓库执行记录.value))
+  return [...new Set(原因)]
+}
+
 export function 专项人工审核阻断原因(订单: 全渠道订单): string[] {
   if (!专项人工审核权限.value) return ['当前操作人无人工审核权限']
   if (!是未匹配审单异常(订单)) return ['仅未匹配到审单规则的异常订单可办理专项人工审核']
