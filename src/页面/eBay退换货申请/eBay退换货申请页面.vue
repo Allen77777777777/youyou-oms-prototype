@@ -1,15 +1,19 @@
 <script setup lang="ts">
+import { currentHandlerId, handlerFilterOptions, handlerNames, matchesHandlerFilter } from '@/组件/客服处理人/处理人'
+import { getReturnHandlerIds } from './处理人'
+import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
-import { ElButton, ElEmpty, ElMessage, ElPagination, ElTable, ElTableColumn, ElTooltip, type TableInstance } from 'element-plus'
+import { ElCheckbox, ElButton, ElEmpty, ElMessage, ElPagination, ElTable, ElTableColumn, ElTooltip, type TableInstance } from 'element-plus'
 import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import TicketSourceActions from '@/页面/工单管理/来源工单操作.vue'
 import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import DateRange from '@/组件/筛选/时间范围.vue'
 import { 校验字段搜索, 校验时间范围, type 搜索字段 } from '@/组件/筛选/筛选工具'
 import { returnSession, returnShops, syncReturnList } from './数据'
 import { initializeAfterSaleDemo } from '../售后单管理/演示数据'
-import { createReturnFilters, filterReturns, formatReturnTime, getReturnDetail, inReturnQueue, isEscalated, returnKey, stateNames, type ReturnQueue, type ReturnRecord } from './模型'
+import { createReturnFilters, filterReturns, formatReturnTime, getReturnDetail, inReturnQueue, isEscalated, isReturnClosed, isReturnTimePast, returnKey, stateNames, type ReturnQueue, type ReturnRecord } from './模型'
 import PlatformStatus from './平台状态资料.vue'
 import { activityNames, moneyText } from './接口契约'
 import { returnTypeText } from './展示工具'
@@ -18,26 +22,37 @@ import { returnAnnotation as annotation } from './标注'
 
 initializeAfterSaleDemo()
 const router = useRouter(), session = returnSession
-const { draft, applied, queue, page, pageSize, searchError } = toRefs(returnListView)
+const { draft, applied, onlyMine, queue, page, pageSize, searchError } = toRefs(returnListView)
 const queues: Array<{ id: ReturnQueue; label: string }> = [{ id: 'all', label: '全部' }, { id: 'response', label: '待处理' }, { id: 'processing', label: '处理中' }, { id: 'case', label: '已升级纠纷' }, { id: 'closed', label: '已关闭' }]
 const fields: 搜索字段[] = [{ value: 'id', label: 'ReturnID' }, { value: 'orderNo', label: '平台订单号' }, { value: 'buyerId', label: '买家ID' }, { value: 'sku', label: '系统SKU' }]
 const shops = computed(() => returnShops)
 const reasons = computed(() => [...new Map(session.records.map(row => [row.reasonCode, { value: row.reasonCode, label: row.reason }])).values()])
 const states = computed(() => Object.entries(stateNames).map(([value, label]) => ({ value, label })))
-const filtered = computed(() => filterReturns(session.records, applied.value))
+const filtered = computed(() => filterReturns(session.records, applied.value).filter(row => {
+  if (!onlyMine.value && !applied.value.handlers.length) return true
+  const ids = getReturnHandlerIds(row)
+  return matchesHandlerFilter(ids, applied.value.handlers) && (!onlyMine.value || ids.includes(currentHandlerId.value))
+}))
 const results = computed(() => filtered.value.filter(row => inReturnQueue(row, queue.value)))
 const rows = computed(() => results.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 function query() { searchError.value = 校验字段搜索(draft.value.query, draft.value.mode) ?? 校验时间范围(draft.value.dates) ?? ''; if (searchError.value) return; Object.assign(applied.value, JSON.parse(JSON.stringify(draft.value))); page.value = 1 }
-function reset() { Object.assign(draft.value, createReturnFilters()); queue.value = 'all'; query() }
+function reset() { onlyMine.value = false; Object.assign(draft.value, createReturnFilters()); queue.value = 'all'; query() }
 function changeQueue(value: ReturnQueue) { queue.value = value; page.value = 1 }
+watch([onlyMine, currentHandlerId], () => { page.value = 1 })
 watch(pageSize, () => { page.value = 1 })
 watch(() => results.value.length, count => { page.value = Math.min(page.value, Math.max(1, Math.ceil(count / pageSize.value))) }, { immediate: true })
-const now = ref(new Date().toISOString()), clock = setInterval(() => { now.value = new Date().toISOString() }, 30_000)
+const now = ref(Date.now()), clock = setInterval(() => { now.value = Date.now() }, 30_000)
 onBeforeUnmount(() => clearInterval(clock))
 const time = (value: string | null | undefined, row: ReturnRecord) => formatReturnTime(value, row)
-const closed = (row: ReturnRecord) => row.state === 'CLOSED' || row.status === 'CLOSED'
-const due = (row: ReturnRecord) => { const detail = getReturnDetail(row); return detail.sellerDue ? { ...detail.sellerDue, who: '卖家' } : detail.buyerDue ? { ...detail.buyerDue, who: '买家' } : null }
-const overdue = (row: ReturnRecord) => !!getReturnDetail(row).sellerDue?.at && Date.parse(getReturnDetail(row).sellerDue!.at!) < Date.parse(now.value) && !closed(row) && !isEscalated(row)
+const due = (row: ReturnRecord) => {
+  if (isReturnClosed(row)) return null
+  const { sellerDue, buyerDue } = getReturnDetail(row)
+  return sellerDue ? { ...sellerDue, who: '卖家' } : buyerDue ? { ...buyerDue, who: '买家' } : null
+}
+const overdue = (row: ReturnRecord) => {
+  const task = due(row)
+  return task?.who === '卖家' && isReturnTimePast(task.at, now.value) && !isEscalated(row)
+}
 const refreshFeedback = ref(''), tableWrap = ref<HTMLElement>(), table = ref<TableInstance>()
 function saveScroll() { returnListView.scrollTop = tableWrap.value?.scrollTop || 0; returnListView.tableScrollTop = tableWrap.value?.querySelector('.el-table__body-wrapper .el-scrollbar__wrap')?.scrollTop || 0 }
 onMounted(() => nextTick(() => { if (tableWrap.value) tableWrap.value.scrollTop = returnListView.scrollTop; table.value?.setScrollTop(returnListView.tableScrollTop) }))
@@ -49,6 +64,8 @@ function syncAll() { const result = syncReturnList(session.records, applied.valu
 <template>
   <section v-prototype="annotation('overview')" class="returns-page">
     <div v-prototype="annotation('filters')" class="returns-filters">
+      <ElCheckbox v-model="onlyMine">只看我的</ElCheckbox>
+      <MultiFilter v-model="draft.handlers" :options="handlerFilterOptions" placeholder="处理人" :width="130" />
       <MultiFilter v-model="draft.shops" :options="shops" placeholder="店铺" :width="154" />
       <MultiFilter v-model="draft.states" :options="states" placeholder="平台处理状态" :width="155" />
       <MultiFilter v-model="draft.reasons" :options="reasons" placeholder="退货原因" :width="145" />
@@ -64,13 +81,17 @@ function syncAll() { const result = syncReturnList(session.records, applied.valu
     <div v-prototype="annotation('table')" ref="tableWrap" class="returns-table-wrap">
       <ElTable ref="table" :data="rows" class="returns-table" :row-key="returnKey" border height="calc(100vh - 290px)" :header-cell-style="{ color: 'var(--yy-text-heading)', background: '#f7f9fb' }">
         <ElTableColumn label="ReturnID" min-width="195"><template #default="{ row }"><button class="link-button" @click="openDetail(row as ReturnRecord)">{{ row.id }}</button><div class="muted">{{ row.orderNo }}</div><div class="muted">{{ row.shopName }} · {{ row.site }}</div></template></ElTableColumn>
-        <ElTableColumn label="申请商品 / 买家" min-width="215"><template #default="{ row }"><div class="product-title">{{ getReturnDetail(row as ReturnRecord).contentOnHold || getReturnDetail(row as ReturnRecord).itemOnHold ? '平台已隐藏商品内容' : row.title || '未提供商品标题' }}</div><div class="muted">{{ row.sku }} × {{ getReturnDetail(row as ReturnRecord).quantityConflict ? '待核实' : row.quantity ?? '—' }}</div><div class="muted">买家：{{ row.buyerId }}</div></template></ElTableColumn>
+        <ElTableColumn label="申请商品 / 买家" min-width="215"><template #default="{ row }"><div class="product-title">{{ getReturnDetail(row as ReturnRecord).contentOnHold || getReturnDetail(row as ReturnRecord).itemOnHold ? '平台已隐藏商品内容' : row.title || '未提供商品标题' }}</div><div class="muted">{{ row.sku }} × {{ getReturnDetail(row as ReturnRecord).quantityConflict ? '待核实' : row.quantity ?? '—' }}</div><div class="muted">买家：<BuyerLink :shop-id="row.shopId" :buyer-id="row.buyerId" /></div></template></ElTableColumn>
         <ElTableColumn label="买家诉求 / 原因" min-width="145"><template #default="{ row }"><div>当前 {{ returnTypeText(getReturnDetail(row as ReturnRecord).currentType) }}</div><div class="muted">初始 {{ returnTypeText(row.returnType) }}</div><div class="muted">{{ row.reason }}</div></template></ElTableColumn>
         <ElTableColumn label="平台处理状态" min-width="180"><template #default="{ row }"><PlatformStatus :row="row as ReturnRecord" small /></template></ElTableColumn>
         <ElTableColumn label="退货物流" min-width="160"><template #default="{ row }"><div>{{ row.shipping }}</div><div v-if="row.caseId" class="case-id">纠纷：{{ row.caseId }}</div></template></ElTableColumn>
         <ElTableColumn label="卖家预计 / 实际退款" min-width="160" align="right"><template #default="{ row }"><strong>{{ moneyText(getReturnDetail(row as ReturnRecord).refund.sellerEstimated) }}</strong><div class="muted">实际 {{ moneyText(getReturnDetail(row as ReturnRecord).refund.sellerActual) }}</div></template></ElTableColumn>
         <ElTableColumn label="申请时间 / 当前待办" min-width="205"><template #default="{ row }"><div>{{ time(row.createdAt, row as ReturnRecord) }}</div><div v-if="due(row as ReturnRecord)" :class="overdue(row as ReturnRecord) ? 'overdue' : 'muted'">{{ due(row as ReturnRecord)!.who }} · {{ activityNames[due(row as ReturnRecord)!.activity] || due(row as ReturnRecord)!.activity }}<br />{{ time(due(row as ReturnRecord)!.at, row as ReturnRecord) }}</div><div v-else class="muted">暂无待办</div></template></ElTableColumn>
-        <ElTableColumn label="操作" fixed="right" width="85"><template #default="{ row }"><ElButton link type="primary" @click="openDetail(row as ReturnRecord)">{{ row.state === 'CLOSED' || isEscalated(row as ReturnRecord) ? '查看' : '处理' }}</ElButton></template></ElTableColumn>
+        <ElTableColumn label="处理人" min-width="98"><template #default="{ row }">{{ handlerNames(getReturnHandlerIds(row as ReturnRecord)) }}</template></ElTableColumn>
+        <ElTableColumn label="操作" fixed="right" width="132"><template #default="{ row }"><div class="return-row-actions">
+          <ElButton link type="primary" @click="openDetail(row as ReturnRecord)">{{ isReturnClosed(row as ReturnRecord) || isEscalated(row as ReturnRecord) ? '查看' : '处理' }}</ElButton>
+          <TicketSourceActions compact :source="{ kind: 'return', id: row.id, shopId: row.shopId, shopName: row.shopName, summary: row.title }" />
+        </div></template></ElTableColumn>
         <template #empty><ElEmpty description="没有匹配的退货退款申请" :image-size="70" /></template>
       </ElTable>
     </div>
@@ -89,4 +110,5 @@ function syncAll() { const result = syncReturnList(session.records, applied.valu
 @media(max-width:700px){.detail-grid{grid-template-columns:95px minmax(0,1fr)}.detail-heading{flex-wrap:wrap}.detail-heading>.detail-heading-status{text-align:left}}
 
 .refresh-result{color:#909399;font-size:12px;line-height:1.6;flex:1}.returns-toolbar{gap:12px}.confirm-refund-item{display:flex;justify-content:space-between;padding:7px 0;gap:12px;border-bottom:1px solid #ebeef5}.activity-kind{font-size:11px!important;color:#6b7d92}.footer-actions .action-buttons{row-gap:8px}.case-decision{line-height:1.8}.action-section :deep(.action-form){margin-top:0}
+.return-row-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 </style>

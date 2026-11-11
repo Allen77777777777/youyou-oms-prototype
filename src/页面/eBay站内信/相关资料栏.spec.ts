@@ -67,7 +67,10 @@ describe('站内信相关资料栏', () => {
     expect(wrapper.get('.context-facts').text()).toContain('GBP')
     for (const [tab, recordId] of [['物流', 'PKG-order-10'], ['售后', 'RET-DEMO-10'], ['纠纷', 'CASE-DEMO-10'], ['评价', 'REV-DEMO-10']]) {
       await button(wrapper, tab!).trigger('click')
-      expect(wrapper.get('.context-record').text()).toContain(recordId)
+      if (tab === '物流') {
+        expect(wrapper.get('[data-package-id]').attributes('data-package-id')).toBe(recordId)
+        expect(wrapper.get('[data-package-id]').text()).toContain('DEMO-TRACK-10')
+      } else expect(wrapper.get('.context-record').text()).toContain(recordId)
     }
     await button(wrapper, '动态').trigger('click')
     expect(wrapper.get('.context-timeline').text()).toContain('仓库已发货')
@@ -108,8 +111,11 @@ describe('站内信相关资料栏', () => {
     expect(wrapper.get('.large-state').text()).toContain('同步失败')
     expect(wrapper.find('.context-record').exists()).toBe(false)
     const other = makePanel()
-    expect(other.get('[data-context-section="disputes"] .section-count').text()).toBe('0')
-    expect(other.get('[data-context-section="disputes"]').text()).toContain('暂无纠纷记录')
+    expect(other.get('.context-empty-categories [aria-label="当前订单暂无纠纷记录，查看纠纷"]').text()).toBe('纠纷 0')
+    await other.get('.context-empty-categories [aria-label="当前订单暂无纠纷记录，查看纠纷"]').trigger('click')
+    expect(other.emitted('update:activeTab')?.slice(-1)[0]).toEqual(['disputes'])
+    await other.setProps({ activeTab: 'disputes' })
+    expect(other.get('.large-state').text()).toContain('暂无纠纷记录')
   })
 
   it('候选订单不提升为已关联事实，售前无订单保留可信商品信息', async () => {
@@ -138,6 +144,6 @@ describe('站内信相关资料栏', () => {
     await wrapper.setProps({ selectedOrderId: 'order-04' })
     expect(wrapper.get('.order-summary').text()).toContain('空气滤芯')
     expect(wrapper.get('[data-context-section="reviews"]').text()).toContain('好评')
-    expect(wrapper.get('[data-context-section="afterSales"] .section-count').text()).toBe('0')
+    expect(wrapper.get('.context-empty-categories [aria-label="当前订单暂无售后申请记录，查看售后"]').text()).toBe('售后 0')
   })
 })

@@ -78,6 +78,22 @@ beforeEach(async () => {
 afterEach(() => { wrapper?.unmount(); ElMessage.closeAll() })
 
 describe('退货退款申请连续详情与处理', () => {
+  it('申请关闭后列表和详情不再催办，保留平台仍返回的双方期限', async () => {
+    const row = session.records[6]!, detail = getReturnDetail(row)
+    detail.sellerDue = { activity: 'SELLER_ISSUE_REFUND', at: '2026-10-26T04:00:00Z' }
+    detail.buyerDue = { activity: 'BUYER_ESCALATE', at: '2026-11-15T04:00:00Z' }
+    detail.timeoutAt = '2026-11-25T04:00:00Z'
+    detail.closeInfo!.reason = 'PARTIALLY_REFUNDED'
+    await flushPromises()
+    expect(rowFor(row).text()).toContain('暂无待办')
+    expect(rowFor(row).text()).not.toContain('2026-10-26 12:00:00')
+    await open(row)
+    expect(wrapper.find('.responsibility-panel').exists()).toBe(false)
+    expect(wrapper.get('.close-panel').text()).toContain('已部分退款')
+    expect(detail.sellerDue.at).toBe('2026-10-26T04:00:00Z')
+    expect(detail.buyerDue.at).toBe('2026-11-15T04:00:00Z')
+    expect(detail.timeoutAt).toBe('2026-11-25T04:00:00Z')
+  })
   it('重发紧随拒绝退货，原申请只需确认商品、数量、原因，提交待审不建手工单', async () => {
     const row = session.records[0]!, before = JSON.stringify([row.state, row.status, row.history, row.pendingRequest])
     const orderCount = 共享订单.value.length
@@ -363,9 +379,11 @@ describe('退货退款申请连续详情与处理', () => {
     expect(history.findAll('.history-entry > p:not(.activity-kind)').map(entry => entry.text())).toEqual(record.history.map(entry => entry.text))
     expect(JSON.stringify(record.history)).toBe(sourceHistory)
     expect(history.text()).not.toContain('仅内部执行记录证据')
-    const logs = wrapper.get('.return-operation .internal-notes-panel .internal-records')
+    const logs = wrapper.get('.return-operation .operation-logs-panel .internal-records')
     expect(logs.attributes('open')).toBeUndefined()
     expect(logs.text()).toContain('仅内部执行记录证据')
+    expect(logs.text()).toContain('操作日志')
+    expect(logs.text()).toContain('操作人：未记录')
     expect(logs.text()).not.toContain('Return来源卖家沟通独立证据')
     expect(wrapper.find('.return-reading .internal-notes-panel').exists()).toBe(false)
     const mail = wrapper.findComponent(BuyerMail)
@@ -383,7 +401,7 @@ describe('退货退款申请连续详情与处理', () => {
   })
 
   it('未选办理动作也能在右侧保存内部备注，不改变未知结果或平台处理过程', async () => {
-    const record = session.records[7]!, source = JSON.stringify({ state: record.state, status: record.status, outcome: record.outcome, history: record.history, pendingRequest: record.pendingRequest, logs: record.logs })
+    const record = session.records[7]!, source = JSON.stringify({ state: record.state, status: record.status, outcome: record.outcome, history: record.history, pendingRequest: record.pendingRequest }), originalLogCount = record.logs.length
     await open(record)
     expect(wrapper.find('.return-operation .action-form').exists()).toBe(false)
     const notes = wrapper.get('.return-operation .internal-notes-panel')
@@ -395,8 +413,31 @@ describe('退货退款申请连续详情与处理', () => {
     expect((notes.get('textarea').element as HTMLTextAreaElement).value).toBe('')
     expect(notes.text()).toContain('仅内部跟进，等待核实上次退款结果')
     expect(wrapper.get('.return-history-panel').text()).not.toContain('仅内部跟进')
-    expect(JSON.stringify({ state: record.state, status: record.status, outcome: record.outcome, history: record.history, pendingRequest: record.pendingRequest, logs: record.logs })).toBe(source)
+    expect(JSON.stringify({ state: record.state, status: record.status, outcome: record.outcome, history: record.history, pendingRequest: record.pendingRequest })).toBe(source)
+    expect(record.logs).toHaveLength(originalLogCount + 1)
+    expect(record.logs.slice(-1)[0]).toMatchObject({ action: '添加内部备注', result: '已保存' })
+    expect(record.logs.slice(-1)[0]?.content).not.toContain('等待核实上次退款结果')
     expect(button('发起退款', '.return-operation').attributes('disabled')).toBeDefined()
+  })
+
+  it('历史备注最新在前独立展示，旧人员时间缺失显示未记录且不改写原资料', async () => {
+    const record = session.records[0]!
+    record.notes = [
+      { text: '旧缺人员时间备注' },
+      { text: '旧空资料备注', author: ' ', at: '' },
+      { text: '较早的核查记录', author: '客服小林', at: '2026-10-28T10:00:00Z' },
+      { text: '最近的核查记录', author: '跟单员小周', at: '2026-10-29T10:00:00Z' },
+    ]
+    const original = JSON.stringify(record.notes)
+    await open(record)
+    const notes = wrapper.get('.return-operation .internal-notes-panel'), entries = notes.findAll('.note-entry')
+    expect(entries.map(entry => entry.get('p').text())).toEqual(['最近的核查记录', '较早的核查记录', '旧空资料备注', '旧缺人员时间备注'])
+    expect(entries[0]!.get('small').text()).toContain('操作人：跟单员小周')
+    expect(entries[0]!.get('small').text()).toContain(formatReturnTime('2026-10-29T10:00:00Z', record))
+    for (const entry of entries.slice(2)) expect(entry.get('small').text()).toBe('操作人：未记录 · 时间：未记录')
+    expect(wrapper.get('.operation-logs-panel').text()).not.toContain('最近的核查记录')
+    expect(notes.find('.service-operation-logs').exists()).toBe(false)
+    expect(JSON.stringify(record.notes)).toBe(original)
   })
 
   it('不确定退款结果保持局部提示和防重，顶部刷新不改成成功或影响其他申请', async () => {
@@ -497,6 +538,7 @@ describe('退货退款申请连续详情与处理', () => {
     await open(record)
     await click('发起退款', '.return-operation')
     expect(wrapper.get('.refund-edit-table').text()).toContain('商品价款')
+    expect(wrapper.get('input[aria-label="退款金额 PURCHASE_PRICE"]').attributes('disabled')).toBeDefined()
     await select('系统售后原因', '质量问题')
     await click('确认内容')
     const confirmation = wrapper.get('[data-title="确认发起退款"]')
@@ -528,7 +570,7 @@ describe('退货退款申请连续详情与处理', () => {
   it('RMA与面单分步办理，上传先保留待关联状态，平台回执后转买家寄回待办', async () => {
     const record = session.records[9]!, detail = getReturnDetail(record)
     await open(record)
-    expect(wrapper.get('.application-panel').text()).toContain('买家寄回前需提供 RMA')
+    expect(wrapper.get('.application-panel').text()).toContain('RMA 策略要求提供编号')
     await click('提供退货授权', '.return-operation')
     await click('确认内容')
     expect(wrapper.get('.action-form .inline-error').text()).toContain('退货授权编号')

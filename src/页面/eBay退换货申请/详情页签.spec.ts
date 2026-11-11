@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { ElIcon, ElMessage, ElPagination, ElTooltip } from 'element-plus'
@@ -13,6 +13,10 @@ import { resolveReturnItem, resolveReturnOrder } from './关联导航'
 import { getReturnDetail, inReturnQueue, returnKey } from './模型'
 import { readReturnDetailView, resetReturnViews, returnListView } from './视图会话'
 import { 共享订单 } from '../订单处理/演示会话'
+import { mailSession, resetMailSession } from '../eBay站内信/会话'
+import { mailboxEntries } from '../eBay站内信/邮箱模型'
+import { recordsForReturn } from '../售后单管理/会话'
+import { relatedTickets, sourceLocation, tickets } from '../工单管理/会话'
 
 const listPath = '/oms/ebay-service/returns'
 let wrapper: VueWrapper | undefined, router: Router
@@ -42,6 +46,29 @@ beforeEach(() => { returnSession.records = createReturnData(); resetReturnViews(
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; ElMessage.closeAll(); document.body.innerHTML = '' })
 
 describe('退货详情应用内独立页签', () => {
+  it('从工单定位同店退货申请，可在详情新增独立工单且维持申请状态', async () => {
+    const row = returnSession.records.find(item => item.id === 'DEMO-RT-012')!
+    const source = { kind: 'return' as const, id: row.id, shopId: row.shopId, shopName: row.shopName, summary: row.title }
+    const count = relatedTickets(source).length
+    const before = tickets.value.slice(), originalStatus = row.status
+    await open()
+    const firstRow = wrapper!.get('.returns-table .el-table__row')
+    const firstId = firstRow.get('.link-button').text()
+    await firstRow.get('.return-row-actions .ticket-source-actions button').trigger('click'); await stable()
+    expect(wrapper!.get('[data-title="创建工单"]').text()).toContain(firstId)
+    await click('取消', '[data-title="创建工单"]')
+    await router.push(sourceLocation(source)); await stable()
+    expect(wrapper!.get('.detail-id').text()).toContain(row.id)
+    try {
+      await click('创建工单', '.return-detail-toolbar')
+      await wrapper!.get('input[aria-label="工单事项"]').setValue('请仓库回传实收凭证')
+      await click('创建', '[data-title="创建工单"]')
+      expect(relatedTickets(source)).toHaveLength(count + 1)
+      expect(relatedTickets(source)[0]!.source).toEqual(source)
+      expect(wrapper!.get('.return-detail-toolbar').text()).toContain('关联工单（' + (count + 1) + '）')
+      expect(row.status).toBe(originalStatus)
+    } finally { tickets.value = before }
+  })
   it('列表打开新标签，返回保留未应用查询、队列、页码和两层滚动位置', async () => {
     returnListView.pageSize = 10; returnListView.page = 2
     returnListView.applied.query = 'DEMO-RT'; returnListView.draft.query = '尚未查询的草稿'
@@ -134,6 +161,7 @@ describe('退货详情应用内独立页签', () => {
   it('新详情仍冻结确认来源，未知结果不能重复提交且不出现后台办理入口', async () => {
     await open(); await openRecord(0)
     const row = returnSession.records[0]!
+    const mailBefore = JSON.stringify(mailSession.conversations)
     await click('发送消息', '.return-operation')
     await wrapper!.get('textarea[aria-label="退货退款处理说明"]').setValue('确认时的消息')
     await click('确认内容')
@@ -143,11 +171,46 @@ describe('退货详情应用内独立页签', () => {
     expect(row.pendingRequest?.body).toMatchObject({ message: { content: '确认时的消息' } })
     expect(row.pendingRequest?.body).not.toHaveProperty('fileId')
     expect(row.outcome).toBe('pending')
+    expect(JSON.stringify(mailSession.conversations)).toBe(mailBefore)
     await openRecord(7)
     expect(returnSession.records[7]!.outcome).toBe('unknown')
     expect(button('发起退款', '.return-operation').attributes('disabled')).toBeDefined()
     expect(wrapper!.find('.platform-links').exists()).toBe(false)
     expect(wrapper!.text()).not.toContain('平台办理入口')
+  }, 20000)
+
+  it('已关闭退货申请仍可写站内信，保留申请历史、售后结果和原办理资格', async () => {
+    resetMailSession()
+    try {
+      const row = returnSession.records.find(r => r.state === 'CLOSED' && !r.options.includes('SELLER_SEND_MESSAGE'))!
+      await open(`${listPath}/${row.shopId}/${row.id}`)
+      const before = {
+        history: JSON.stringify(row.history), outcome: row.outcome, pending: row.pendingRequest,
+        saleCount: recordsForReturn(row.shopId, row.id).length,
+      }
+      expect(button('发送消息', '.return-operation').attributes('disabled')).toBeDefined()
+      const wireText = 'Here is a follow-up about the shipment.'
+      await click('发送站内信', '.cancel-buyer-mail')
+      const dialog = '[data-title="联系买家"]'
+      expect(wrapper!.get(dialog).text()).toContain(row.buyerId)
+      await wrapper!.get(`${dialog} textarea[aria-label="联系买家站内信正文"]`).setValue(wireText)
+      await click('发送站内信', dialog)
+      await vi.waitFor(() => {
+        const message = mailboxEntries(mailSession.conversations, 'outbox').find(entry => entry.message?.body === wireText)?.message
+        expect(message).toMatchObject({
+          kind: 'outgoing', delivery: 'success',
+          originApplication: { kind: 'return', applicationId: row.id, shopId: row.shopId, orderNo: row.orderNo },
+        })
+      }, { timeout: 5000 })
+      expect(row.state).toBe('CLOSED')
+      expect(row.outcome).toBe(before.outcome)
+      expect(row.pendingRequest).toEqual(before.pending)
+      expect(JSON.stringify(row.history)).toBe(before.history)
+      expect(recordsForReturn(row.shopId, row.id)).toHaveLength(before.saleCount)
+      expect(button('发送消息', '.return-operation').attributes('disabled')).toBeDefined()
+    } finally {
+      resetMailSession()
+    }
   }, 20000)
 
   it('商品SKU与订单行ID只读可靠双交易身份，冲突或多行不冒用申请技术ID', async () => {

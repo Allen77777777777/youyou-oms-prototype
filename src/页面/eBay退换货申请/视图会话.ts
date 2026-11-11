@@ -3,7 +3,7 @@ import { createReturnFilters, type ReturnQueue, type ReturnAction, type ReturnAc
 import type { AfterSaleInput } from '../售后单管理/会话'
 import type { ReturnSaleDraft } from './售后联动'
 
-export const returnListView = reactive({ draft: createReturnFilters(), applied: createReturnFilters(), queue: 'all' as ReturnQueue, page: 1, pageSize: 20, searchError: '', scrollTop: 0, tableScrollTop: 0 })
+export const returnListView = reactive({ onlyMine: false, draft: createReturnFilters(), applied: createReturnFilters(), queue: 'all' as ReturnQueue, page: 1, pageSize: 20, searchError: '', scrollTop: 0, tableScrollTop: 0 })
 export interface ReturnDetailView {
   note: string; action: ReturnAction | null; actionDraft: ReturnActionDraft | null
   actionError: string; confirmation: boolean; prepared: PreparedReturnAction | null
@@ -18,6 +18,6 @@ export function readReturnDetailView(key: string): ReturnDetailView {
 }
 export function clearReturnDetailView(key: string): void { detailViews.delete(key) }
 export function resetReturnViews(): void {
-  Object.assign(returnListView, { draft: createReturnFilters(), applied: createReturnFilters(), queue: 'all', page: 1, pageSize: 20, searchError: '', scrollTop: 0, tableScrollTop: 0 })
+  Object.assign(returnListView, { onlyMine: false, draft: createReturnFilters(), applied: createReturnFilters(), queue: 'all', page: 1, pageSize: 20, searchError: '', scrollTop: 0, tableScrollTop: 0 })
   detailViews.clear()
 }

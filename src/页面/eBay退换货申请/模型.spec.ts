@@ -57,6 +57,23 @@ describe('退换货申请操作边界', () => {
     expect(inReturnQueue(row, 'case')).toBe(true)
     expect(getReturnBlockedReason(row, 'escalate', now)).toContain('已升级')
   })
+  it('介入时间窗只接收明确绝对时刻，无偏移或无效日历均不放行，端点仍包含', () => {
+    const row = createReturnData()[4]!
+    row.escalation.start = '2026-10-29T14:00:00+08:00'
+    row.escalation.end = '2026-10-30T06:00:00Z'
+    expect(getReturnBlockedReason(row, 'escalate', now)).toBe('')
+    expect(getReturnBlockedReason(row, 'escalate', row.escalation.end)).toBe('')
+    expect(getReturnBlockedReason(row, 'escalate', '2026-10-29T05:59:59.999Z')).toContain('尚未到')
+    expect(getReturnBlockedReason(row, 'escalate', '2026-10-30T06:00:00.001Z')).toContain('已超过')
+    for (const value of ['2026-10-29T06:00:00', '2026-10-29', '2026-10-29T06:00:00-00:00', '2026-02-30T06:00:00Z']) {
+      row.escalation.start = value
+      expect(getReturnBlockedReason(row, 'escalate', now)).toContain('资料不完整')
+      row.escalation.start = now; row.escalation.end = value
+      expect(getReturnBlockedReason(row, 'escalate', now)).toContain('资料不完整')
+      row.escalation.end = '2026-10-30T06:00:00Z'
+      expect(getReturnBlockedReason(row, 'escalate', value)).toContain('资料不完整')
+    }
+  })
   it('未知state、缺卖家能力、非退款诉求均不推定操作资格', () => {
     const row = createReturnData()[0]!
     row.state = 'FUTURE_STATE'; expect(getReturnBlockedReason(row, 'approve', now)).not.toBe('')

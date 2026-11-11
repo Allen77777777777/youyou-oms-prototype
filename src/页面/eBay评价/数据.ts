@@ -1,3 +1,5 @@
+import { getSkuHandlerIds } from '@/组件/客服处理人/处理人'
+import type { ReviewSkuLink } from './类型'
 import type { BuyerFeedbackRecord, BuyerFeedbackSendSource, ReviewCommentType, ReviewReasonCategory, ReviewRecord } from './类型'
 import { buyerFeedbackTemplates } from '../消息模板管理/评价模板数据'
 export { buyerFeedbackTemplates } from '../消息模板管理/评价模板数据'
@@ -30,6 +32,11 @@ const products = [
   { title: '点火线圈', sku: 'DEMO-IC-05', english: 'Demo Ignition Coil' },
   { title: '雨刷套装', sku: 'DEMO-WB-06', english: 'Demo Wiper Blade Set' },
 ]
+/** 这些虚构交易行的关联由样例明确提供。缺少该证据的历史记录不按展示 SKU 自动派人。 */
+function verifiedItem(row: ReviewRecord | BuyerFeedbackRecord): ReviewSkuLink {
+  const { shopId, buyerId, orderLineItemId, sku } = row
+  return { shopId, buyerId, orderLineItemId, sku, handlerIds: getSkuHandlerIds([sku]) }
+}
 const negativeTexts = [
   ['The part does not fit my vehicle. I need help checking the model.', '配件不适配我的车辆，需要协助核对车型。', '车型适配'],
   ['The package arrived later than expected. Please check the delivery.', '包裹晚于预期送达，请核查配送情况。', '配送延迟'],
@@ -63,7 +70,7 @@ export function createReviews(): ReviewRecord[] {
       commentType, content: automated ? 'This seller successfully completed an order.' : isIssue ? issue[0]! : 'Exactly as described. The part arrived safely and works well. Thank you!',
       translation: automated ? '卖家已成功完成本次交易。' : isIssue ? issue[1]! : '与描述一致，配件完好送达并可正常使用。谢谢！',
       createdAt, automated, platformState: 'ENTERED', handlingStatus,
-      owner: index % 4 === 0 ? '' : reviewOwners[index % reviewOwners.length]!, reason: isIssue && index % 3 !== 0 ? issue[2]! : '',
+      reason: isIssue && index % 3 !== 0 ? issue[2]! : '',
       notes: [], logs: [{ id: `log-${suffix}-sync`, at: createdAt, by: '系统', action: '同步评价', detail: '虚构评价样例已载入。' }],
       eligibleForRevision: isIssue,
       logistics: { warehouse: ['万邑通-演示美西仓', '谷仓-演示英国仓', '4PX-演示德国仓', '西邮-演示澳洲仓'][index % 4]!, channel: ['演示标准配送', '演示经济配送'][index % 2]!, trackingNumber: `DEMO-TRACK-FB-${suffix}`, status: index % 7 === 0 ? '已签收，待核对' : '已签收' },
@@ -82,7 +89,7 @@ export function createReviews(): ReviewRecord[] {
     orderId: 'order-01', orderNo: 'DEMO-1001', orderLineItemId: 'DEMO-MAIL-LINE-01', conversationId: 'conv-01',
     commentType: 'NEUTRAL', content: 'The part does not fit my vehicle. I have opened a return request.',
     translation: '商品适配不符合预期，我已发起退货申请。', createdAt: '2026-10-26T18:10:00+08:00',
-    handlingStatus: 'pending', reason: '车型适配', owner: '客服01',
+    handlingStatus: 'pending', reason: '车型适配',
     logistics: { warehouse: '—', channel: 'UPS', trackingNumber: 'DEMO-TRACK-01', status: '已签收' },
     afterSalesSummary: 'RET-DEMO-01 · 退货申请待卖家处理',
   })
@@ -107,6 +114,7 @@ export function createReviews(): ReviewRecord[] {
   records[47]!.createdAt = '2026-09-25T16:20:00+08:00'
   records[46]!.eligibleForRevision = false
   records[47]!.eligibleForRevision = false
+  for (const row of records) row.skuLink = verifiedItem(row)
   return records
 }
 
@@ -149,5 +157,6 @@ export function createBuyerFeedback(): BuyerFeedbackRecord[] {
       }],
     })
   }
+  for (const row of records) row.skuLink = verifiedItem(row)
   return records
 }

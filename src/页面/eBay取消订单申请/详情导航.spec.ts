@@ -29,6 +29,18 @@ beforeEach(() => { cancellationSession.records = createCancellations(); resetMai
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; ElMessage.closeAll() })
 
 describe('取消申请详情导航', () => {
+  it('工单来源按店铺和CancelID打开，原号在其他店铺时不替代来源', async () => {
+    const us = cancellationSession.records[0]!
+    const uk = { ...us, shopId: 'shop-demo-2', shop: 'DEMO 英国二店', site: '英国' }
+    cancellationSession.records.push(uk)
+    const path = '/oms/ebay-service/cancellations'
+    const router = await start(path + '?shopId=shop-demo-2&cancelId=' + uk.cancelId)
+    expect(wrapper!.get('.detail-heading').text()).toContain(uk.shop)
+    expect(wrapper!.get('.detail-heading').text()).not.toContain(us.shop)
+    await router.push({ path, query: { shopId: 'missing-shop', cancelId: uk.cancelId } }); await flushPromises()
+    expect(wrapper!.find('.detail-content').exists()).toBe(false)
+    expect(wrapper!.get('[role="alert"]').text()).toContain('未找到唯一对应的取消申请')
+  })
   it('OMS订单号打开共享详情路由，仓单号直接打开同一出库对象详情', async () => {
     const router = await start('/oms/ebay-service/cancellations')
     await click('CXL-DEMO-0001'); await click('OMS-DEMO-CXL-0001')

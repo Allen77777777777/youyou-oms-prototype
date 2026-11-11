@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import { validateReviewText } from '../eBay评价/模型'
 import { buyerFeedbackTemplates, reviewReplyTemplates } from './评价模板数据'
+import { recordTemplateChange, resetTemplateChanges } from './变更记录'
 
 export type FeedbackTemplateType = 'buyer-positive' | 'review-reply'
 export interface FeedbackTemplate {
@@ -16,7 +17,7 @@ function initialTemplates(): FeedbackTemplate[] {
     .map(item => ({ ...item, type, enabled: true, updatedAt: '2026-10-29T09:00:00+08:00' })))
 }
 export const feedbackTemplateSession = reactive({ templates: initialTemplates() })
-export function resetFeedbackTemplateSession() { feedbackTemplateSession.templates = initialTemplates() }
+export function resetFeedbackTemplateSession() { feedbackTemplateSession.templates = initialTemplates(); resetTemplateChanges(['buyer-positive', 'review-reply']) }
 export function validateFeedbackTemplate(input: FeedbackTemplateInput, id?: string): string | undefined {
   if (!feedbackTemplateTypes.some(item => item.value === input.type)) return '请选择评价模板类型'
   const name = input.name.trim()
@@ -26,15 +27,23 @@ export function validateFeedbackTemplate(input: FeedbackTemplateInput, id?: stri
   if (/\{\{|\}\}/.test(input.text)) return '评价模板不支持变量，请填写完整的评价内容'
   return validateReviewText(input.text)
 }
-export function saveFeedbackTemplate(input: FeedbackTemplateInput, id?: string): { template?: FeedbackTemplate; error?: string } {
+export function saveFeedbackTemplate(input: FeedbackTemplateInput, id?: string, copiedFrom?: string): { template?: FeedbackTemplate; error?: string } {
   const existing = id ? feedbackTemplateSession.templates.find(item => item.id === id) : undefined
   if (id && !existing) return { error: '该评价模板已不存在，请刷新列表' }
   if (existing && existing.type !== input.type) return { error: '已有模板不能更换类型，请新增另一类型模板' }
   const error = validateFeedbackTemplate(input, id)
   if (error) return { error }
   const value: FeedbackTemplate = { id: id ?? `feedback-template-${globalThis.crypto.randomUUID()}`, type: input.type, name: input.name.trim(), text: input.text.trim(), enabled: input.enabled, updatedAt: new Date().toISOString() }
+  const changes: string[] = []
+  if (existing) {
+    if (existing.name !== value.name) changes.push(`名称：${existing.name} → ${value.name}`)
+    if (existing.text !== value.text) changes.push(`正文已修改（${Array.from(existing.text).length} → ${Array.from(value.text).length} 字符）`)
+    if (existing.enabled !== value.enabled) changes.push(`状态：${existing.enabled ? '启用' : '停用'} → ${value.enabled ? '启用' : '停用'}`)
+    if (!changes.length) return { template: existing }
+  }
   if (existing) Object.assign(existing, value)
   else feedbackTemplateSession.templates.unshift(value)
+  recordTemplateChange(value.type, value.id, value.name, existing ? '编辑模板' : copiedFrom ? '复制模板' : '新增模板', existing ? changes.join('；') : `${copiedFrom ? `来源模板：${copiedFrom}；` : ''}创建${feedbackTemplateTypes.find(item => item.value === value.type)!.label}模板，状态：${value.enabled ? '启用' : '停用'}`)
   return { template: existing ?? feedbackTemplateSession.templates[0] }
 }
 export function copyFeedbackTemplate(id: string) {
@@ -42,17 +51,21 @@ export function copyFeedbackTemplate(id: string) {
   if (!source) return { error: '该评价模板已不存在' }
   let suffix = 1, name = `${source.name.slice(0, 65)}（副本）`
   while (feedbackTemplateSession.templates.some(item => item.type === source.type && item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) name = `${source.name.slice(0, 65)}（副本 ${++suffix}）`
-  return saveFeedbackTemplate({ ...source, name, enabled: false })
+  return saveFeedbackTemplate({ ...source, name, enabled: false }, undefined, source.id)
 }
 export function setFeedbackTemplateEnabled(id: string, enabled: boolean): string | undefined {
   const item = feedbackTemplateSession.templates.find(value => value.id === id)
   if (!item) return '该评价模板已不存在'
   if (enabled) { const error = validateFeedbackTemplate(item, id); if (error) return error }
+  if (item.enabled === enabled) return undefined
+  recordTemplateChange(item.type, item.id, item.name, enabled ? '启用模板' : '停用模板', `状态：${item.enabled ? '启用' : '停用'} → ${enabled ? '启用' : '停用'}`)
   item.enabled = enabled; item.updatedAt = new Date().toISOString()
 }
 export function deleteFeedbackTemplate(id: string): string | undefined {
   const index = feedbackTemplateSession.templates.findIndex(item => item.id === id)
   if (index < 0) return '该评价模板已不存在'
+  const item = feedbackTemplateSession.templates[index]!
+  recordTemplateChange(item.type, item.id, item.name, '删除模板', '已删除；历史变更记录保留', true)
   feedbackTemplateSession.templates.splice(index, 1)
 }
 export function getAvailableFeedbackTemplates(type: FeedbackTemplateType) {

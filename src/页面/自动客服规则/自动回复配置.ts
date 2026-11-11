@@ -6,6 +6,15 @@ export interface AutoReplyWeeklyPeriod {
   end: string
 }
 export interface AutoReplySpecificPeriod { id: string; start: string; end: string }
+export interface LegacyAutoReplySchedule {
+  timeZone: string
+  weeklyEnabled: boolean
+  weekly: AutoReplyWeeklyPeriod[]
+  specificEnabled: boolean
+  specificPeriods: AutoReplySpecificPeriod[]
+  capturedAt: string
+  reviewedAt?: string
+}
 export interface AutoReplyConfig {
   shopIds: string[]
   /** 旧单店铺配置只用于读取／迁移，新保存移除此字段。 */
@@ -15,21 +24,35 @@ export interface AutoReplyConfig {
   weekly: AutoReplyWeeklyPeriod[]
   specificEnabled: boolean
   specificPeriods: AutoReplySpecificPeriod[]
+  /** 旧非北京时段仅留作核对，不参与当前配置。 */
+  legacySchedule?: LegacyAutoReplySchedule
+  timeZoneReviewRequired?: boolean
 }
 
 export const autoReplyWeekdays = [
   { value: 1, label: '周一' }, { value: 2, label: '周二' }, { value: 3, label: '周三' },
   { value: 4, label: '周四' }, { value: 5, label: '周五' }, { value: 6, label: '周六' }, { value: 7, label: '周日' },
 ]
-/** 保存 IANA 时区身份；不使用固定偏移代替有夏令时的地区。 */
+/** 客服休息时段统一按北京时间配置，不受店铺或运行环境时区影响。 */
 export const autoReplyTimeZones = [
   { value: 'Asia/Shanghai', label: '北京时间（Asia/Shanghai）' },
-  { value: 'UTC', label: '协调世界时（UTC）' },
-  { value: 'America/Los_Angeles', label: '美国洛杉矶（America/Los_Angeles）' },
-  { value: 'America/New_York', label: '美国纽约（America/New_York）' },
-  { value: 'Europe/London', label: '英国伦敦（Europe/London）' },
-  { value: 'Europe/Berlin', label: '德国柏林（Europe/Berlin）' },
 ]
+/** 不将旧墙钟直接改标北京；保存原时区和时段，清空当前启用范围供人工重设。 */
+export function migrateAutoReplyTimeZone(config: AutoReplyConfig | undefined): boolean {
+  if (!config || config.timeZone === 'Asia/Shanghai') return false
+  config.legacySchedule = {
+    timeZone: config.timeZone, weeklyEnabled: config.weeklyEnabled,
+    weekly: JSON.parse(JSON.stringify(config.weekly)), specificEnabled: config.specificEnabled,
+    specificPeriods: JSON.parse(JSON.stringify(config.specificPeriods)), capturedAt: new Date().toISOString(),
+  }
+  config.timeZone = 'Asia/Shanghai'
+  config.timeZoneReviewRequired = true
+  config.weeklyEnabled = false
+  config.weekly = defaultAutoReplyConfig().weekly.map(period => ({ ...period, enabled: false, allDay: false }))
+  config.specificEnabled = false
+  config.specificPeriods = []
+  return true
+}
 export function defaultAutoReplyConfig(): AutoReplyConfig {
   return {
     shopIds: [], timeZone: 'Asia/Shanghai', weeklyEnabled: true,
@@ -50,7 +73,7 @@ export function normalizeAutoReplyShops(config: AutoReplyConfig | undefined): vo
   delete config.shopId
 }
 const validTime = (time: unknown): time is string => typeof time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)
-/** 特定时段为所选时区的墙上时间，此处只校验日历，不使用运行机器的本地时区。 */
+/** 特定时段为北京时间的日历配置，此处不把排班配置伪装成 UTC 事件时刻。 */
 function validDateTime(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} (?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return false
   const year = Number(value.slice(0, 4)), month = Number(value.slice(5, 7)), day = Number(value.slice(8, 10))
@@ -64,6 +87,7 @@ export function weeklyPeriodSummary(period: AutoReplyWeeklyPeriod): string {
 }
 export function autoReplyScheduleSummary(config: AutoReplyConfig | undefined): string[] {
   if (!config) return ['休息时段未配置']
+  if (config.timeZoneReviewRequired) return ['原休息时段待核对，请编辑并重新设置北京时间时段']
   const result: string[] = []
   if (config.weeklyEnabled) result.push(`每周：${config.weekly.filter(item => item.enabled).map(weeklyPeriodSummary).join('；') || '未选择休息日'}`)
   if (config.specificEnabled) result.push(...(config.specificPeriods.length ? config.specificPeriods.map(item => `特定：${item.start} ～ ${item.end}`) : ['特定：未配置']))
@@ -76,7 +100,8 @@ export function validateAutoReplyConfig(config: AutoReplyConfig | undefined): st
   if (!shops.length) return '请选择店铺账号'
   if (shops.some(shopId => typeof shopId !== 'string' || !shopId.trim() || shopId !== shopId.trim())) return '店铺账号配置无效，请重新选择'
   if (new Set(shops).size !== shops.length) return '店铺账号不能重复选择'
-  if (!autoReplyTimeZones.some(item => item.value === config.timeZone)) return '请选择有效时区'
+  if (config.timeZone !== 'Asia/Shanghai') return '自动回复时区已统一为北京时间，请重新核对休息时段'
+  if (config.timeZoneReviewRequired) return '请重新设置北京时间休息时段，并确认已核对原配置'
   if (typeof config.weeklyEnabled !== 'boolean' || typeof config.specificEnabled !== 'boolean') return '休息时段开关无效'
   if (!config.weeklyEnabled && !config.specificEnabled) return '请至少设置每周休息时段或特定时间段'
   if (config.weeklyEnabled) {

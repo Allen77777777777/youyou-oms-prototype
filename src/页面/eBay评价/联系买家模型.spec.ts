@@ -1,3 +1,4 @@
+import { currentHandlerId } from '@/组件/客服处理人/处理人'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -30,6 +31,22 @@ const contactWrappers: VueWrapper[] = []
 afterEach(() => { contactWrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = ''; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('评价联系买家与邮箱共享发送记录', () => {
+  it('提交后切换当前客服，发送成功与最近处理人归原提交人', async () => {
+    const before = currentHandlerId.value
+    try {
+      currentHandlerId.value = 'staff-02'
+      prepare()
+      const pending = sendReviewContact(existingId, getReviewContactIdentity(existingId))
+      currentHandlerId.value = 'staff-03'
+      await vi.advanceTimersByTimeAsync(300)
+      expect((await pending).ok).toBe(true)
+      const conversation = getReviewContactConversation(existingId)!
+      const message = conversation.messages[conversation.messages.length - 1]!
+      expect(message).toMatchObject({ sender: '客服02', delivery: 'success' })
+      expect(conversation.lastHandledBy).toBe('客服02')
+      expect(conversation.operationLogs?.filter(log => log.content.includes(message.id)).map(log => log.operator)).toEqual(['客服02', '客服02'])
+    } finally { currentHandlerId.value = before }
+  })
   it('精确关联会话发送一次，进入发件箱且不改评价、处理状态、买家好评和邮箱草稿', async () => {
     const c = getReviewContactConversation(existingId)!, draft = prepare()
     const reviewsBefore = JSON.stringify(reviewSession)

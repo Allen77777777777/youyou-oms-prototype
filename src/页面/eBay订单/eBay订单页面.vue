@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, reactive, ref, watch } from 'vue'
 import {
   ArrowDown,
@@ -40,7 +41,7 @@ import eBay订单详情 from './eBay订单详情.vue'
 import EbayTimezoneSwitch from './时区切换.vue'
 import { 当前eBay时区 } from './时区偏好'
 import { 获取显示时区, 转换eBay时间 } from './时间工具'
-import { eBay订单模拟数据 } from './模拟数据'
+import { ebayOrderSession } from './会话'
 import {
   格式化eBay站点,
   格式化列表时间,
@@ -57,9 +58,7 @@ import type { eBay订单, eBay订单商品, eBay订单筛选条件 } from './类
 
 const route = useRoute()
 const router = useRouter()
-const 订单列表 = ref<eBay订单[]>(
-  eBay订单模拟数据.map((订单) => ({ ...订单, sync: { ...订单.sync } })),
-)
+const 订单列表 = ebayOrderSession
 
 const 创建默认筛选条件 = () => ({
   keyword: '',
@@ -514,7 +513,7 @@ function 执行查询() {
                 <button v-prototype="打开详情标注" type="button" @click="打开详情(row)">{{ row.orderId }}</button>
                 <span v-if="row.salesRecordReference">销售记录 {{ row.salesRecordReference }}</span>
               </div>
-              <div class="买家行"><span>买家</span><strong>{{ row.buyerUsername }}</strong></div>
+              <div class="买家行"><span>买家</span><strong><BuyerLink :shop-id="row.sellerId" :buyer-id="row.buyerUsername" /></strong></div>
               <div class="商品摘要">
                 <ElTooltip content="原型占位图，非订单真实商品图" placement="top">
                   <img class="列表商品图" :src="手机商品占位图" alt="原型商品占位图" />

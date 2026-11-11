@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import { emptyReturnDetail, formatMinor, parseMoney, type ReturnAddress, type ReturnRecord } from './模型'
 import { syncReturnWithSales } from './售后联动'
 import { completeReturnFieldSamples } from './字段补齐样例'
+import { demoMailRecipient } from '../eBay站内信/申请收件身份'
 export const returnShops = [
   { value: 'shop-us', label: '演示店铺-US' }, { value: 'demo-outdoor-uk', label: '户外精选店 UK' },
   { value: 'demo-parts-us', label: '汽配专营店 US' }, { value: 'demo-new-us', label: '生活精选新店 US' },
@@ -113,6 +114,7 @@ export function createReturnData(): ReturnRecord[] {
     }
   }
   completeReturnFieldSamples(records)
+  for (const row of records) row.mailRecipient = demoMailRecipient(row.shopId, row.buyerId)
   return records
 }
 export const returnSession = reactive({ records: createReturnData() })
@@ -123,6 +125,8 @@ export function syncReturnList(records: ReturnRecord[], shopIds: string[], now =
     if (shop.value === 'demo-read-failed') { failed++; continue }
     if (shop.value === 'demo-new-us' && !records.some(row => row.shopId === shop.value)) {
       const first = createReturnData()[0]!
+      // 首次拉取的新买家尚未核实站内信收件身份，不能沿用示例申请的映射。
+      delete first.mailRecipient
       first.id = 'DEMO-RT-NEW-001'; first.shopId = shop.value; first.shopName = shop.label; first.orderNo = 'DEMO-NEW-ORDER-001'; first.buyerId = 'demo_new_buyer'; first.systemOrderNo = undefined; first.outbounds = null; first.orderProducts = null; first.detail!.files = []; first.detail!.orderAddress = null; records.push(first); added++
     }
     for (const row of records.filter(item => item.shopId === shop.value)) { const result = syncReturnWithSales(row, now); if (result.status === 'success') succeeded++; else failed++ }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import CustomerServiceLogList from '@/组件/客服日志/日志列表.vue'
 import { ElButton, ElDialog, ElEmpty, ElInput, ElMessage, ElMessageBox } from 'element-plus'
-import { countMailTagReferences, deleteMailTag, mailTagDefinitions, mailTagPresetColors, MAX_MAIL_TAG_NAME_LENGTH, MAX_MAIL_TAGS, saveMailTag, tagStyle } from './设置模型'
+import { countMailTagReferences, deleteMailTag, mailTagDefinitions, mailTagOperationLogs, mailTagPresetColors, MAX_MAIL_TAG_NAME_LENGTH, MAX_MAIL_TAGS, saveMailTag, tagStyle } from './设置模型'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -51,6 +52,7 @@ async function remove(id: string) {
         <p v-if="error" class="mail-tag-error" role="alert">{{ error }}</p><footer><ElButton @click="cancelEdit">取消编辑</ElButton><ElButton type="primary" @click="save">保存标签</ElButton></footer>
       </section>
       <div class="mail-tag-list"><ElEmpty v-if="!mailTagDefinitions.length" description="暂无标签，可新增业务标签" :image-size="50" /><article v-for="tag in mailTagDefinitions" :key="tag.id" class="mail-tag-row" :data-tag-id="tag.id"><span class="mail-tag-preview" :style="tagStyle(tag.id)" :title="tag.label">{{ tag.label }}</span><span class="mail-tag-usage">{{ countMailTagReferences(tag.id) }} 个会话</span><div class="mail-tag-actions"><ElButton link type="primary" :aria-label="`编辑标签 ${tag.label}`" @click="beginEdit(tag.id)">编辑</ElButton><ElButton link type="danger" :loading="deletingId === tag.id" :disabled="!!deletingId && deletingId !== tag.id" :aria-label="`删除标签 ${tag.label}`" @click="remove(tag.id)">删除</ElButton></div></article></div>
+      <CustomerServiceLogList :entries="mailTagOperationLogs" />
     </section>
     <template #footer><ElButton @click="visible = false">关闭</ElButton></template>
   </ElDialog>

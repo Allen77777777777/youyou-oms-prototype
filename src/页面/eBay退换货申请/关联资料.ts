@@ -4,9 +4,9 @@ import { 共享订单, 仓库执行记录, 演示路由, type 仓库执行 } fro
 import { 仓库会话单据, 创建仓库执行投影 } from '../仓配管理/仓配会话'
 import { 创建推单出库快照 } from '../仓配管理/三方仓出库模型'
 import { createReturnData } from './数据'
-import { resolveReturnOrder } from './关联导航'
+import { resolveReturnOrder, resolveReturnItem } from './关联导航'
 import { returnKey, type ReturnRecord } from './模型'
-import { demoReturnItemLinks } from './虚构商品关联'
+import { demoReturnItemLinks, type DemoReturnItemLink } from './虚构商品关联'
 
 const money = (cents: number, currency: string) => ({ currency, value: `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}` })
 // 固定虚构订单单价，与Return预计退款额独立，不从退款字段反算订单价格。
@@ -61,9 +61,44 @@ function createDemoOrder(source: ReturnRecord): { order: 全渠道订单; execut
   return { order, executions }
 }
 
-/** 仅退货页面显式初始化；导入模块、创建来源数据或其他工作台启动不会新增共享订单。 */
-export function initializeReturnDemoContext(): void {
+function linkFixtureItem(source: ReturnRecord, order: 全渠道订单): DemoReturnItemLink | undefined {
+  const detail = source.detail, item = order.items[0]
+  if (!detail?.itemId || !detail.transactionId || !item) return
+  item.platformItemId = detail.itemId
+  return { shopId: source.shopId, orderNo: source.orderNo, itemId: detail.itemId, transactionId: detail.transactionId, systemOrderNo: order.systemOrderNo, externalLineId: item.externalLineId }
+}
+
+// 买家详情等只读入口共用同一份固定样例。共享订单已有身份（包括冲突）时以共享资料为准。
+let readonlySamples: Map<string, { order: 全渠道订单; link: DemoReturnItemLink }> | undefined
+function readonlyReturnSamples() {
+  if (!readonlySamples) {
+    readonlySamples = new Map()
+    for (const sample of createReturnData().filter(row => row.systemOrderNo && row.orderProducts?.length && row.outbounds?.length)) {
+      const { order } = createDemoOrder(sample)
+      const link = linkFixtureItem(sample, order)
+      if (link) readonlySamples.set(returnKey(sample), { order, link })
+    }
+  }
+  return readonlySamples
+}
+export function readHandlerReturnItem(source: ReturnRecord, orders: readonly 全渠道订单[]) {
+  if (!source.systemOrderNo) return
+  if (orders.some(order => order.systemOrderNo === source.systemOrderNo ||
+    (order.platformCode === 'eBay' && order.storeId === source.shopId && order.platformOrderNo === source.orderNo))) {
+    return resolveReturnItem(source, orders)
+  }
+  const fixture = readonlyReturnSamples().get(returnKey(source))
+  if (fixture) return resolveReturnItem(source, [fixture.order], [fixture.link])
+}
+
+export function readSharedUkOrderFixture() {
+  return readonlyReturnSamples().get(returnKey({ shopId: 'demo-outdoor-uk', id: 'DEMO-RT-002' }))?.order
+}
+
+/** 显式打开业务入口时才补齐可导航资料；跨模块只读查询不会新增订单。 */
+export function initializeReturnDemoContext(onlyOrderNo?: string): void {
   for (const source of createReturnData().filter(row => row.systemOrderNo && row.orderProducts?.length && row.outbounds?.length)) {
+    if (onlyOrderNo && source.systemOrderNo !== onlyOrderNo) continue
     const sameSystemId = 共享订单.value.filter(order => order.systemOrderNo === source.systemOrderNo)
     // 有现成身份时只复用，不从来源商品或编号覆盖现有共享事实。
     if (sameSystemId.length) continue
@@ -71,12 +106,8 @@ export function initializeReturnDemoContext(): void {
     if (platformIdentity.length) continue
     const { order, executions } = createDemoOrder(source)
     if (!resolveReturnOrder(source, [order])) continue
-    const detail = source.detail
-    const item = order.items[0]
-    if (detail?.itemId && detail.transactionId && item) {
-      item.platformItemId = detail.itemId
-      demoReturnItemLinks.push({ shopId: source.shopId, orderNo: source.orderNo, itemId: detail.itemId, transactionId: detail.transactionId, systemOrderNo: order.systemOrderNo, externalLineId: item.externalLineId })
-    }
+    const link = linkFixtureItem(source, order)
+    if (link) demoReturnItemLinks.push(link)
     共享订单.value.push(order)
     for (const execution of executions) {
       if (仓库执行记录.value.some(existing => existing.出库单号 === execution.出库单号)) continue

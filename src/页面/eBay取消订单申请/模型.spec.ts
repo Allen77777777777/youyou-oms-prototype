@@ -63,13 +63,13 @@ describe('eBay取消申请处理边界', () => {
   it('备注和刷新日志不冒充平台历史，退款成功样例保留四个来源活动', () => {
     const r = rows()[4]!, history = JSON.stringify(r.activityHistories)
     expect(r.activityHistories.map(e => e.activityType)).toEqual(['BUYER_CREATE_CANCEL', 'SELLER_APPROVE', 'SYSTEM_REFUND', 'SYSTEM_NOTIFY_REFUND_STATUS'])
-    expect(addNote(r, '核查中')).toBe(true); expect(addNote(r, '已核对')).toBe(true); expect(r.notes).toEqual(['已核对', '核查中'])
+    expect(addNote(r, '核查中')).toBe(true); expect(addNote(r, '已核对')).toBe(true); expect(r.notes.map(note => typeof note === 'string' ? note : note.text)).toEqual(['已核对', '核查中'])
     syncCancellation(r); expect(JSON.stringify(r.activityHistories)).toBe(history)
     expect(r.activityHistories[2]?.activityParty).toBe('UNKNOWN')
     expect(addNote(r, '')).toBe(false)
   })
 })
-describe('取消申请身份、平台阶段与站点日期', () => {
+describe('取消申请身份、平台阶段与北京时间', () => {
   it('相同CancelID按店铺隔离，不用平台订单或OMS编号替代', () => {
     const first = rows()[0]!, second = { ...first, shopId: 'another-shop', orderId: 'another-order' }
     expect(cancelKey(first)).not.toBe(cancelKey(second))
@@ -89,25 +89,34 @@ describe('取消申请身份、平台阶段与站点日期', () => {
     for (const state of ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_FAILED_RETRY', 'CONFIRM_REFUND_PENDING']) expect(inQueue({ ...r, cancelState: state }, 'processing')).toBe(true)
     expect(inQueue({ ...r, cancelState: 'INITIAL' }, 'all')).toBe(true); expect(inQueue({ ...r, cancelState: 'OTHER' }, 'processing')).toBe(false)
   })
-  it('同一UTC时刻按每条申请站点日期筛选，可跨当地日期', () => {
+  it('同一UTC时刻在所有站点按同一北京日期筛选，不改变来源', () => {
     const us = rows()[0]!, de = { ...us, marketplaceId: 'EBAY_DE', shopId: 'germany' }, f = createFilters()
-    f.dates = ['2026-10-28', '2026-10-28']; expect(filterCancellations([us, de], f)).toEqual([us])
-    f.dates = ['2026-10-29', '2026-10-29']; expect(filterCancellations([us, de], f)).toEqual([de])
+    const original = JSON.stringify([us, de])
+    f.dates = ['2026-10-28', '2026-10-28']; expect(filterCancellations([us, de], f)).toEqual([])
+    f.dates = ['2026-10-29', '2026-10-29']; expect(filterCancellations([us, de], f)).toEqual([us, de])
+    expect(formatCancelTime(us.createdAt, us)).toBe('2026-10-29 09:30:00')
+    expect(formatCancelTime(de.createdAt, de)).toBe('2026-10-29 09:30:00')
+    expect(JSON.stringify([us, de])).toBe(original)
   })
-  it('按站点当地日期包含首尾瞬间，不包含次日零点', () => {
+  it('按北京自然日包含首尾毫秒，不包含相邻日', () => {
     const r = rows()[0]!, f = createFilters(); f.dates = ['2026-10-28', '2026-10-28']
-    const source = ['2026-10-28T07:00:00Z', '2026-10-29T06:59:59.999Z', '2026-10-29T07:00:00Z'].map(createdAt => ({ ...r, createdAt }))
+    const source = ['2026-10-27T16:00:00Z', '2026-10-28T15:59:59.999Z', '2026-10-28T16:00:00Z', '2026-10-27T15:59:59.999Z'].map(createdAt => ({ ...r, createdAt }))
     expect(filterCancellations(source, f).map(x => x.createdAt)).toEqual(source.slice(0, 2).map(x => x.createdAt))
   })
-  it('秋季夏令时结束的重复当地小时按真实偏移显示', () => {
+  it('英国夏令时重复小时在北京仍显示不同的真实时刻', () => {
     const r = { ...rows()[0]!, marketplaceId: 'EBAY_GB' }
-    expect(formatCancelTime('2026-10-25T00:30:00Z', r)).toBe('2026-10-25 01:30:00 UTC+1')
-    expect(formatCancelTime('2026-10-25T01:30:00Z', r)).toMatch(/^2026-10-25 01:30:00 UTC(?:\+0)?$/)
+    expect(formatCancelTime('2026-10-25T00:30:00Z', r)).toBe('2026-10-25 08:30:00')
+    expect(formatCancelTime('2026-10-25T01:30:00Z', r)).toBe('2026-10-25 09:30:00')
   })
-  it('未配置站点或无偏移源时间不猜时区，日期筛选排除而保留原值提示', () => {
+  it('未知站点仍显示北京，无偏移来源不猜时区且有日期筛选时排除', () => {
     const r = rows()[0]!, unknown = { ...r, marketplaceId: 'UNKNOWN' }, wall = { ...r, createdAt: '2026-10-29 09:30:00' }, f = createFilters()
-    expect(formatCancelTime(unknown.createdAt, unknown)).toContain('站点时区待配置'); expect(formatCancelTime(wall.createdAt, wall)).toContain('时间格式待核查')
+    expect(formatCancelTime(unknown.createdAt, unknown)).toBe('2026-10-29 09:30:00'); expect(formatCancelTime(wall.createdAt, wall)).toBe('时间待核实')
     expect(filterCancellations([unknown, wall], f)).toHaveLength(2)
-    f.dates = ['2026-10-20', '2026-10-30']; expect(filterCancellations([unknown, wall], f)).toHaveLength(0)
+    f.dates = ['2026-10-20', '2026-10-30']; expect(filterCancellations([unknown, wall], f)).toEqual([unknown])
+    expect(wall.createdAt).toBe('2026-10-29 09:30:00')
+  })
+  it('显式偏移与UTC同一瞬间显示一致，非法日期和未知偏移不解析', () => {
+    expect(formatCancelTime('2026-11-01T01:30:00-07:00')).toBe(formatCancelTime('2026-11-01T08:30:00Z'))
+    for (const value of ['2026-02-30T00:00:00Z', '2026-11-06T10:00:00-00:00', '2026-11-06T10:00:00']) expect(formatCancelTime(value)).toBe('时间待核实')
   })
 })

@@ -71,11 +71,11 @@ describe('原因分类资料管理', () => {
     const stats = groupReviewReasons(reviewSession.reviews)
     expect(getReviewReasonOptions().some(item => item.value === category.name)).toBe(false)
     expect(getReviewReasonOptions(category.name)).toContainEqual({ value: category.name, label: '包装不当（已停用）', disabled: true })
-    expect(updateReviewHandling(review, { reason: category.name, owner: '客服03', handlingStatus: 'resolved' }).ok).toBe(true)
-    expect(review).toMatchObject({ reason: category.name, owner: '客服03', handlingStatus: 'resolved' })
+    expect(updateReviewHandling(review, { reason: category.name, handlerIds: ['staff-03'], handlingStatus: 'resolved' }).ok).toBe(true)
+    expect(review).toMatchObject({ reason: category.name, handlerIds: ['staff-03'], handlingStatus: 'resolved' })
     expect(groupReviewReasons(reviewSession.reviews)).toEqual(stats)
     const other = createReviews()[1]!, snapshot = JSON.stringify(other)
-    expect(updateReviewHandling(other, { reason: category.name, owner: '客服02' }).ok).toBe(false)
+    expect(updateReviewHandling(other, { reason: category.name, handlerIds: ['staff-02'] }).ok).toBe(false)
     expect(JSON.stringify(other)).toBe(snapshot)
   })
   it('停用内置分类同样保留历史数据，重新启用后可继续选择', () => {
@@ -91,7 +91,7 @@ describe('原因分类资料管理', () => {
     const review = reviewSession.reviews[0]!
     review.reason = '旧系统历史原因'
     expect(getReviewReasonOptions(review.reason)).toContainEqual({ value: review.reason, label: '旧系统历史原因（历史值）', disabled: true })
-    expect(updateReviewHandling(review, { reason: review.reason, owner: '客服02' }).ok).toBe(true)
+    expect(updateReviewHandling(review, { reason: review.reason, handlerIds: ['staff-02'] }).ok).toBe(true)
     expect(canUseReviewReason(review.reason)).toBe(false)
     expect(groupReviewReasons([review])).toEqual([{ reason: '旧系统历史原因', count: 1 }])
   })

@@ -2,12 +2,13 @@
 import { computed, ref } from 'vue'
 import { ElButton, ElCheckbox, ElInput, ElOption, ElRadio, ElRadioGroup, ElSelect } from 'element-plus'
 import { actionNames, escalationReasons, getReturnDetail, formatReturnTime, type ReturnRecord } from './模型'
-import { formatMinor, moneyText, noLabelReasons, parseMoney, type ReturnAction, type ReturnActionDraft } from './接口契约'
+import { formatMinor, moneyText, noLabelReasons, parseMoney, refundAmountFixed, refundRangeText, type ReturnAction, type ReturnActionDraft } from './接口契约'
 import { beijingWallTimeToISO } from './展示工具'
 import AttachmentUpload from './附件上传.vue'
 const props = defineProps<{ row: ReturnRecord; action: ReturnAction; draft: ReturnActionDraft; error: string }>()
 defineEmits<{ prepare: []; cancel: [] }>()
 const detail = computed(() => getReturnDetail(props.row))
+const refundRows = computed(() => props.draft.refundItems.map(item => ({ item, source: detail.value.refund.items.find(line => line.refundFeeType === item.refundFeeType) })))
 const uploading = ref(false)
 const descriptions: Record<ReturnAction,string> = {
   approve: '接受买家已经提出的退货申请，按平台返回的安排继续处理。', decline: '仅在平台允许时拒绝当前申请；说明会随本次处理提交。',
@@ -41,14 +42,14 @@ const saleAction = computed(() => ['approve', 'offerReturn', 'refund', 'partial'
     </div>
     <template v-if="action === 'refund'">
       <div class="refund-edit-table">
-        <div v-for="(item,index) in draft.refundItems" :key="item.refundFeeType" class="refund-edit-item">
-          <ElCheckbox v-model="item.selected" :disabled="!detail.refund.items[index]?.optional" :aria-label="'退还' + (detail.refund.items[index]?.label || item.refundFeeType)">
-            <span :class="{ 'required-label': !detail.refund.items[index]?.optional }">{{ detail.refund.items[index]?.label || item.refundFeeType }}</span>
+        <div v-for="{ item, source } in refundRows" :key="item.refundFeeType" class="refund-edit-item">
+          <ElCheckbox v-model="item.selected" :disabled="!source?.optional" :aria-label="'退还' + (source?.label || item.refundFeeType)">
+            <span :class="{ 'required-label': !source?.optional }">{{ source?.label || item.refundFeeType }}</span>
           </ElCheckbox>
-          <ElInput v-model="item.value" :disabled="!item.selected" inputmode="decimal" :aria-required="item.selected" :aria-label="'退款金额 ' + item.refundFeeType">
+          <ElInput v-model="item.value" :disabled="!item.selected || !source || refundAmountFixed(source) || source.min == null || source.max == null" inputmode="decimal" :aria-required="item.selected" :aria-label="'退款金额 ' + item.refundFeeType">
             <template #prepend>{{ item.currency }}</template>
           </ElInput>
-          <small>允许范围 {{ detail.refund.items[index]?.min }} ～ {{ detail.refund.items[index]?.max }}</small>
+          <small v-if="source"><template v-if="refundAmountFixed(source)">固定金额 · </template>允许范围 {{ refundRangeText(source) }}</small>
         </div>
       </div>
       <p class="refund-total">本次退款合计 <strong>{{ total }}</strong></p>

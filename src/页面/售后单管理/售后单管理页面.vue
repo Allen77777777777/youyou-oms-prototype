@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import BuyerLink from '@/组件/买家/买家链接.vue'
+import { useBuyerPageActive } from '@/组件/买家/页面活跃'
+import { returnSession } from '../eBay退换货申请/数据'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElDrawer, ElEmpty, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTag } from 'element-plus'
@@ -96,6 +99,8 @@ function returnQuantities(row: AfterSaleRecord) {
   const { approvedReturnQty, receivedQty } = afterSaleFacts(row)
   return '批准退回 ' + (approvedReturnQty != null ? approvedReturnQty + ' 件' : '待确认') + ' · 实收 ' + (receivedQty != null ? receivedQty + ' 件' : '待确认')
 }
+const buyerPageActive = useBuyerPageActive()
+function sourceBuyer(row: AfterSaleRecord) { const sources = returnSession.records.filter(item => item.shopId === row.shopId && item.id === row.returnId && item.orderNo === row.orderNo); return sources.length === 1 ? sources[0]?.buyerId : undefined }
 </script>
 
 <template>
@@ -131,7 +136,7 @@ function returnQuantities(row: AfterSaleRecord) {
         <ElTableColumn label="来源申请 / 来源场景" min-width="143">
           <template #default="{ row }"><button class="number-link" :aria-label="'查看 ' + row.returnId + ' 的全部处理记录'" @click="showReturnRecords(row as AfterSaleRecord)">{{ row.returnId }}</button><span v-if="recordsForReturn(row.shopId, row.returnId).length > 1" class="count">{{ recordsForReturn(row.shopId, row.returnId).length }} 笔</span><div class="sub">eBay退货申请</div></template>
         </ElTableColumn>
-        <ElTableColumn label="店铺" min-width="115" prop="shopName" />
+        <ElTableColumn label="店铺 / 买家" min-width="115"><template #default="{ row }">{{ row.shopName }}<div v-if="sourceBuyer(row as AfterSaleRecord)" class="sub"><BuyerLink :shop-id="row.shopId" :buyer-id="sourceBuyer(row as AfterSaleRecord)" /></div></template></ElTableColumn>
         <ElTableColumn label="平台订单号" min-width="142" prop="orderNo" />
         <ElTableColumn label="商品名称 / 系统 SKU" min-width="176">
           <template #default="{ row }">
@@ -159,7 +164,7 @@ function returnQuantities(row: AfterSaleRecord) {
       </ElTable>
     </div>
     <footer><span>共 {{ results.length }} 张售后单</span><ElPagination v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[10,20,50]" :total="results.length" layout="sizes, prev, pager, next" size="small" background /></footer>
-    <ElDrawer :model-value="!!currentNo" title="售后单详情" size="min(820px, 96vw)" class="after-sale-drawer" :destroy-on-close="true" @update:model-value="value => { if (!value) close() }">
+    <ElDrawer :model-value="buyerPageActive && !!currentNo" title="售后单详情" size="min(820px, 96vw)" class="after-sale-drawer" :destroy-on-close="buyerPageActive" @update:model-value="value => { if (buyerPageActive && !value) close() }">
       <Detail v-if="selected" :key="selected.no" :record="selected" />
       <ElEmpty v-else description="未找到可查看的售后单，请核对单号及店铺权限"><ElButton @click="close">返回列表</ElButton></ElEmpty>
     </ElDrawer>

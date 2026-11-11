@@ -3,13 +3,17 @@ import { createCancellations } from './模型'
 import { resolveCancellationOrder, resolveCancellationOutbound } from './关联导航'
 import { 共享订单, 取消申请OMS样例 } from '../订单处理/演示会话'
 import { 仓库会话单据 } from '../仓配管理/仓配会话'
+import { initializeReturnDemoContext } from '../eBay退换货申请/关联资料'
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 describe('取消申请详情关联身份', () => {
   it('所有明确关联订单可打开共享详情，商品与仓单来源一致', () => {
     const sources = createCancellations()
-    expect(取消申请OMS样例.订单).toHaveLength(sources.filter(source => source.systemOrderNo).length)
+    initializeReturnDemoContext('OMS-DEMO-RET-002')
+    const linkedNumbers = sources.flatMap(source => source.systemOrderNo ? [source.systemOrderNo] : [])
+    expect(取消申请OMS样例.订单.some(row => row.systemOrderNo === 'OMS-DEMO-RET-002')).toBe(false)
+    expect(共享订单.value.filter(order => linkedNumbers.includes(order.systemOrderNo))).toHaveLength(linkedNumbers.length)
     for (const source of sources) {
       const order = resolveCancellationOrder(source, 共享订单.value)
       if (!source.systemOrderNo) { expect(order).toBeUndefined(); continue }

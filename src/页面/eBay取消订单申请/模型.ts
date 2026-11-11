@@ -1,6 +1,9 @@
-import { 命中字段搜索, 读取排序时刻, type 搜索模式 } from '@/组件/筛选/筛选工具'
-import { eBay查询日期, 获取显示时区, 转换eBay时间 } from '@/页面/eBay订单/时间工具'
+import { 命中字段搜索, 命中时间范围, 读取排序时刻, type 搜索模式 } from '@/组件/筛选/筛选工具'
+import { 格式化北京时间 } from '@/页面/订单处理/时间展示工具'
 import { cancelReasonLabel } from './原因映射'
+import { demoMailRecipient, type ApplicationMailRecipient } from '../eBay站内信/申请收件身份'
+import { currentHandlerName } from '@/组件/客服处理人/处理人'
+import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
 
 export type CancelAction = 'approve' | 'reject'
 // 内部提交门禁，不作为平台处理状态或业务列展示。
@@ -16,9 +19,14 @@ export interface CancelActivity {
   activityParty: string; activityType: string; actionDate: string
   stateFrom?: string; stateTo?: string
 }
+export interface CancelNote { at?: string; text: string; author?: string }
+export interface CancelOperationLog extends Partial<CustomerServiceLog> { at: string; text: string; submissionId?: string; submittedBy?: string }
 export interface CancelRecord {
+  /** 明确办结时保存的人员。旧历史若无快照，保留未知。 */
+  closedHandlerIds?: string[]
   cancelId: string; shopId: string; shop: string; site: string; marketplaceId: string
   orderId: string; buyer: string; requestor: 'BUYER' | 'SELLER'
+  mailRecipient?: ApplicationMailRecipient
   products: { title: string; sku: string; quantity: number }[]
   /** reason仅兼容既有会话；页面统一按来源reasonCode实时翻译。 */
   reason: string; reasonCode: string; createdAt: string; dueAt?: string; lastSyncedAt: string
@@ -29,8 +37,19 @@ export interface CancelRecord {
   systemOrderNo?: string; platformOrderStatus?: string; orderChannel?: string
   outbounds?: CancelOutboundContext[] | null
   eligibility: boolean | null; tracking?: string; shippedAt?: string
-  submission: Submission; submissionNote: string; notes: string[]; logs: { at: string; text: string }[]
+  submission: Submission; submissionNote: string; notes: Array<string | CancelNote>; logs: CancelOperationLog[]
+  lastSubmission?: { id: string; operator: string; action: CancelAction }
   pendingSnapshot?: { state: string; status: string; refundStatus?: string; activityHistories: CancelActivity[] }
+}
+export function cancellationOperationEntries(row: CancelRecord): CustomerServiceLog[] {
+  return row.logs.map(log => ({ ...log, action: log.action || '历史记录', content: log.content ?? log.text }))
+}
+function recordCancellationOperation(row: CancelRecord, operator: string, action: string, content: string, result: string, now: string, related = false, deduplicate = false) {
+  const submission = related ? row.lastSubmission : undefined
+  const fullContent = content + (related ? `；原提交人：${submission?.operator || '未记录'}` : '')
+  if (deduplicate && row.logs.some(log => log.submissionId === submission?.id && log.action === action && log.content === fullContent && log.result === result)) return
+  const log = createCustomerServiceLog(operator, action, fullContent, result, now)
+  row.logs.unshift({ ...log, text: `${action}；${fullContent}；${result}`, ...(submission ? { submissionId: submission.id, submittedBy: submission.operator } : {}) })
 }
 export const statusNames: Record<string, string> = {
   CANCEL_REQUESTED: '已申请取消', CANCEL_PENDING: '取消处理中', CANCEL_REJECTED: '已拒绝取消',
@@ -61,12 +80,13 @@ export const activityNames: Record<string, string> = {
 }
 const shopIds = ['shop-us', 'shop-demo-2', 'shop-demo-3']
 export const shops = ['演示店铺-US', 'DEMO 英国二店', 'DEMO 德国三店']
-export const shopOptions = shops.map((label, index) => ({ value: shopIds[index]!, label }))
+export const shopOptions = [...shops.map((label, index) => ({ value: shopIds[index]!, label })), { value: 'demo-outdoor-uk', label: '户外精选店 UK' }]
 export const cancelKey = (r: Pick<CancelRecord, 'shopId' | 'cancelId'>): string => JSON.stringify([r.shopId, r.cancelId])
-export const cancelTimeZone = (r: Pick<CancelRecord, 'marketplaceId'>): string | undefined => 获取显示时区('site', [r.marketplaceId])
-export const formatCancelTime = (value: string | null | undefined, r: Pick<CancelRecord, 'marketplaceId'>): string => 转换eBay时间(value ?? undefined, cancelTimeZone(r))
-export interface CancelFilters { shops: string[]; states: string[]; requestor: string; query: string; field: string; mode: 搜索模式; dates: string[] | null }
-export const createFilters = (): CancelFilters => ({ shops: [], states: [], requestor: '', query: '', field: 'cancelId', mode: 'contains', dates: null })
+/** 来源时刻及期限保持原值；客服显示统一北京时间，不按来源站点切换。 */
+export const cancelTimeZone = (_r?: Pick<CancelRecord, 'marketplaceId'>): string => 'Asia/Shanghai'
+export const formatCancelTime = (value: string | null | undefined, _r?: Pick<CancelRecord, 'marketplaceId'>): string => 格式化北京时间(value ?? undefined)
+export interface CancelFilters { handlers: string[]; shops: string[]; states: string[]; requestor: string; query: string; field: string; mode: 搜索模式; dates: string[] | null }
+export const createFilters = (): CancelFilters => ({ handlers: [], shops: [], states: [], requestor: '', query: '', field: 'cancelId', mode: 'contains', dates: null })
 export function createCancellations(): CancelRecord[] {
   const products = [ ['竹制厨房收纳架', 'HOME-DEMO-01'], ['轻量户外折叠椅', 'OUTDOOR-DEMO-02'], ['宠物慢食碗', 'PET-DEMO-03'], ['汽车后备箱收纳箱', 'AUTO-DEMO-04'], ['桌面阅读灯', 'LIGHT-DEMO-05'], ['瑜伽拉伸带', 'SPORT-DEMO-06'] ]
   return Array.from({ length: 16 }, (_, i) => {
@@ -99,7 +119,7 @@ export function createCancellations(): CancelRecord[] {
       r.shipped = 1; r.omsStatus = '已发货'; r.eligibility = false; r.tracking = 'TRACK-DEMO-0003'; r.shippedAt = '2026-10-27T06:20:00Z'; r.platformOrderStatus = 'IN_PROGRESS'
       r.outbounds = [{ outboundId: 'shared-CK-DEMO-CXL-0003', no: 'CK-DEMO-CXL-0003', externalNo: '4PX-DEMO-CXL-0003', status: '已出库', warehouse: '4PX · 德国仓', account: 'DEMO 4PX账号', channel: '德国标准配送', channelCode: 'DEMO-DE-STD', tracking: r.tracking, shippedAt: r.shippedAt }]
     }
-    if ([3, 4, 10, 11].includes(i)) {
+    if ([3, 4, 11].includes(i)) {
       r.cancelState = 'REFUND_PENDING'; r.cancelStatus = 'CANCEL_PENDING'; r.submission = 'confirmed'; r.refundStatus = 'PENDING'
       r.activityHistories.push(
         { activityParty: 'SELLER', activityType: 'SELLER_APPROVE', actionDate: after(30), stateFrom: 'APPROVAL_PENDING', stateTo: 'REFUND_PENDING' },
@@ -124,9 +144,20 @@ export function createCancellations(): CancelRecord[] {
       r.activityHistories = [{ activityParty: 'SELLER', activityType: 'SELLER_CREATE_CANCEL', actionDate: r.createdAt, stateFrom: 'INITIAL', stateTo: 'CLOSED' }]
     }
     if (i === 9) { r.submission = 'failed'; r.submissionNote = '上次操作已明确未生效，请核对平台当前状态后处理。' }
+    // 与 DEMO-RT-002 共用演示原单。取消范围为整单两行，退货仅涉及折叠椅一行。
+    if (i === 10) Object.assign(r, {
+      shopId: 'demo-outdoor-uk', shop: '户外精选店 UK', orderId: 'DEMO-ORDER-1002', buyer: 'buyer_demo_r02',
+      systemOrderNo: 'OMS-DEMO-RET-002', platformOrderStatus: 'FULFILLED', omsStatus: '已发货',
+      amount: 83.6, shipped: 3, eligibility: false, outbounds: null,
+      createdAt: '2026-11-09T00:30:00Z', lastSyncedAt: '2026-11-09T00:35:00Z', dueAt: '2026-11-12T00:30:00Z',
+      activityHistories: [{ activityParty: 'BUYER', activityType: 'BUYER_CREATE_CANCEL', actionDate: '2026-11-09T00:30:00Z', stateFrom: 'INITIAL', stateTo: 'APPROVAL_PENDING' }],
+      products: [{ title: '露营折叠椅 · 深绿', sku: 'OUT-CHAIR-02', quantity: 2 }, { title: '折叠收纳配件包', sku: 'DEMO-RET-ACCESSORY-2', quantity: 1 }],
+    })
     if (i === 12) { r.cancelState = 'CLOSED'; r.cancelStatus = 'CANCEL_CLOSED_UNKNOWN_REFUND'; r.refundStatus = 'UNKNOWN'; r.dueAt = undefined; r.activityHistories = [] }
     if (i === 13) { r.cancelState = 'OTHER'; r.cancelStatus = 'UNKNOWN_SOURCE_VALUE'; r.eligibility = null; r.submissionNote = '尚未识别平台状态，请刷新数据或核对平台记录。'; r.activityHistories = [] }
     if (i === 15) r.products.push({ title: '可折叠收纳盒', sku: 'HOME-DEMO-EXTRA', quantity: 2 })
+    // 第 14 笔虚构申请缺少跨来源收件身份，可查看申请，待核实后才能发信。
+    if (i !== 13) r.mailRecipient = demoMailRecipient(r.shopId, r.buyer)
     return r
   })
 }
@@ -153,8 +184,7 @@ export function inQueue(r: CancelRecord, queue: string): boolean {
 }
 export function filterCancellations(rows: CancelRecord[], f: CancelFilters): CancelRecord[] {
   return rows.filter(r => {
-    const date = f.dates?.length === 2 ? eBay查询日期(r.createdAt, 'site', [r.marketplaceId]) : null
-    const dateMatches = !f.dates?.length || Boolean(date && date >= f.dates[0]! && date <= f.dates[1]!)
+    const dateMatches = 命中时间范围(r.createdAt, f.dates)
     return (!f.shops.length || f.shops.includes(r.shopId)) && (!f.states.length || f.states.includes(r.cancelState)) && (!f.requestor || f.requestor === r.requestor) && dateMatches && 命中字段搜索(f.field === 'sku' ? r.products.map(p => p.sku) : f.field === 'orderId' ? r.orderId : f.field === 'buyer' ? r.buyer : r.cancelId, f.query, f.mode)
   })
 }
@@ -170,19 +200,28 @@ export function submitCancellation(r: CancelRecord, action: CancelAction, note: 
   r.pendingSnapshot = action === 'approve'
     ? { state: 'REFUND_PENDING', status: 'CANCEL_PENDING', refundStatus: 'PENDING', activityHistories: histories }
     : { state: 'CLOSED', status: 'CANCEL_REJECTED', refundStatus: r.refundStatus, activityHistories: histories }
-  r.logs.unshift({ at: now, text: `${action === 'approve' ? '同意取消' : '拒绝'}｜客服 DEMO-01｜内部说明：${note.trim()}${action === 'reject' && r.tracking ? `｜随请求提供已有跟踪号 ${r.tracking}` : ''}。已提交，等待刷新平台数据。` })
+  const label = action === 'approve' ? '同意取消' : '拒绝取消'
+  r.lastSubmission = { id: crypto.randomUUID(), operator: currentHandlerName.value, action }
+  r.notes.unshift({ at: now, author: currentHandlerName.value, text: `${label}处理说明：${note.trim()}` })
+  recordCancellationOperation(r, currentHandlerName.value, label, `已保存本次内部处理说明（${note.trim().length}字）${action === 'reject' && r.tracking ? '；随请求提供已有发运资料' : ''}`, '已提交，待回查', now, true)
   return { ok: true, message: '已提交，请刷新数据查看平台处理结果。' }
 }
 export function syncCancellation(r: CancelRecord, now = new Date().toISOString()): void {
+  const businessFacts = () => JSON.stringify([r.cancelState, r.cancelStatus, r.refundStatus, r.activityHistories, r.submission, r.submissionNote])
+  const before = businessFacts()
+  const confirming = !!r.pendingSnapshot
   if (r.pendingSnapshot) {
     r.cancelState = r.pendingSnapshot.state; r.cancelStatus = r.pendingSnapshot.status; r.refundStatus = r.pendingSnapshot.refundStatus
     r.activityHistories = r.pendingSnapshot.activityHistories.map(item => ({ ...item }))
     r.submission = 'confirmed'; r.submissionNote = ''; delete r.pendingSnapshot
   }
   r.lastSyncedAt = now
-  r.logs.unshift({ at: now, text: r.submission === 'unknown' ? '已刷新取消申请，尚无足以确认上次操作结果的新证据，继续禁止重复提交。' : '已刷新取消申请信息。' })
+  const result = r.submission === 'unknown' ? '结果待核查' : confirming ? '平台已确认受理' : '读取成功'
+  if (r.submission === 'unknown' || before !== businessFacts()) recordCancellationOperation(r, confirming || r.submission === 'unknown' ? '系统' : currentHandlerName.value, confirming || r.submission === 'unknown' ? '回查处理结果' : '刷新申请', r.submission === 'unknown' ? '已刷新取消申请，尚无足以确认上次操作结果的新证据，继续禁止重复提交。' : confirming ? '已读取本次取消响应的独立平台回执；退款进度按来源结果展示' : '已刷新取消申请信息。', result, now, confirming || r.submission === 'unknown', true)
 }
 export function addNote(r: CancelRecord, text: string, now = new Date().toISOString()): boolean {
   if (!text.trim() || text.trim().length > 500) return false
-  r.notes.unshift(text.trim()); r.logs.unshift({ at: now, text: `客服 DEMO-01 添加内部备注：${text.trim()}` }); return true
+  r.notes.unshift({ at: now, text: text.trim(), author: currentHandlerName.value })
+  recordCancellationOperation(r, currentHandlerName.value, '添加内部备注', `新增内部备注（${text.trim().length}字），内容见内部备注`, '已保存', now)
+  return true
 }

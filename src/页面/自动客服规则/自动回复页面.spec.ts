@@ -47,6 +47,21 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; resetTemplateSession(); resetServiceRules(); vi.restoreAllMocks() })
 
 describe('自动回复规则配置交互', () => {
+  it('旧外地休息时段显示原配置核对入口，固定北京且需要重新配置后确认', async () => {
+    const source = sourceRule(); source.enabled = true; source.autoReply!.timeZone = 'Europe/London'
+    const session = createEditor('autoReply', 'edit', source); await openEditor(session)
+    expect(source.enabled).toBe(false)
+    expect(wrapper!.find('[aria-label="自动回复时区"]').exists()).toBe(false)
+    expect(wrapper!.text()).toContain('原规则已停用')
+    expect(wrapper!.text()).toContain('Europe/London')
+    await button('保存'); expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('核对'))
+    await check('启用每周休息时段', true); await check('周六休息', true)
+    await check('已核对北京时间休息时段', true); await button('保存')
+    const saved = serviceRules.value.find(rule => rule.id === source.id)!
+    expect(saved.autoReply!.legacySchedule!.reviewedAt).toMatch(/Z$/)
+    expect(saved.autoReply!.timeZone).toBe('Asia/Shanghai')
+    expect(saved.enabled).toBe(false)
+  })
   it('多选店铺并禁用已被停用规则占用的全部账号，固定来信触发且不显示多规则排序和订单条件', async () => {
     sourceRule().autoReply!.shopIds = ['shop-us', 'shop-de']
     const session = createEditor('autoReply', 'new'); await openEditor(session)
@@ -145,8 +160,9 @@ describe('自动回复规则配置交互', () => {
     await check('启用特定时间段', false)
     expect(session.draft.autoReply!.specificPeriods[0]).toMatchObject({ start: '2026-12-24 18:00', end: '2026-12-28 09:00' })
     await check('启用特定时间段', true); await check('启用每周休息时段', false)
-    select('自动回复时区').vm.$emit('update:modelValue', 'Europe/London'); await settle(); await button('保存')
-    expect(serviceRules.value.find(rule => rule.name === '英国店铺休息回复')?.autoReply).toMatchObject({ weeklyEnabled: false, specificEnabled: true, timeZone: 'Europe/London', specificPeriods: [{ start: '2026-12-24 18:00', end: '2026-12-28 09:00' }] })
+    expect(wrapper!.find('[aria-label="自动回复时区"]').exists()).toBe(false)
+    expect(wrapper!.text()).toContain('以下休息时段均使用北京时间'); await button('保存')
+    expect(serviceRules.value.find(rule => rule.name === '英国店铺休息回复')?.autoReply).toMatchObject({ weeklyEnabled: false, specificEnabled: true, timeZone: 'Asia/Shanghai', specificPeriods: [{ start: '2026-12-24 18:00', end: '2026-12-28 09:00' }] })
   })
 
   it('多选集合包含并发占用店铺时整条拒绝，移除冲突后才保存全部剩余店铺', async () => {
@@ -177,10 +193,10 @@ describe('自动回复规则配置交互', () => {
   it('模板停用后拒绝保存，前往模板管理再返回仍保留店铺和时间草稿', async () => {
     const source = sourceRule(), before = JSON.stringify(source), session = createEditor('autoReply', 'edit', source), router = await openEditor(session)
     const path = router.currentRoute.value.path
-    select('自动回复时区').vm.$emit('update:modelValue', 'UTC'); await settle(); await button('管理模板')
+    await check('周一休息', true); await button('管理模板')
     templateSession.templates.find(item => item.id === source.templateId)!.enabled = false
     await router.push(path); await settle()
-    expect(session.draft.autoReply!.timeZone).toBe('UTC')
+    expect(session.draft.autoReply!.timeZone).toBe('Asia/Shanghai'); expect(session.draft.autoReply!.weekly[0]!.enabled).toBe(true)
     expect(wrapper!.text()).toContain('模板已停用')
     await button('保存')
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('模板已停用'))

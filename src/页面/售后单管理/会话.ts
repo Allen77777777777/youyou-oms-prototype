@@ -1,4 +1,5 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
 import type { 订单路由, 金额 } from '../全渠道订单/类型'
 import { 创建手工订单, 创建手工订单草稿, 原订单关联阻断原因, 校验手工订单, 手工订单路由, type 手工订单草稿 } from '../手工订单/模型'
 import { 共享订单 } from '../订单处理/演示会话'
@@ -47,6 +48,8 @@ export interface AfterSaleRecord extends AfterSaleInput {
   warehouseReceipts?: Array<{ receiptNo: string; warehouse: string; lineId: string; quantity: number }>
   manualOrderNo?: string
   reshipRoute?: 订单路由
+  /** 仅记录本单真实发生的本地操作及来源结果更新，历史缺失不补造。 */
+  logs?: CustomerServiceLog[]
 }
 export interface AfterSaleActor { id: string; name: string; canApprove: boolean; shopIds: 'all' | string[] }
 export const afterSaleActors: AfterSaleActor[] = [
@@ -56,6 +59,21 @@ export const afterSaleActors: AfterSaleActor[] = [
 ]
 export const activeAfterSaleActor = ref<AfterSaleActor>(afterSaleActors[0]!)
 export const afterSaleRecords = ref<AfterSaleRecord[]>([])
+function addLog(record: AfterSaleRecord, operator: string, action: string, content: string, result: string, at?: string) {
+  ;(record.logs ??= []).push(createCustomerServiceLog(operator, action, content, result, at))
+}
+watch(() => afterSaleRecords.value.filter(record => record.manualOrderNo).map(record => {
+  const order = 共享订单.value.find(item => item.systemOrderNo === record.manualOrderNo)
+  return { no: record.no, orderNo: record.manualOrderNo!, status: order?.processingStatus || '',
+    parcels: order?.fulfillmentOrders.filter(parcel => parcel.isActive).map(parcel => `${parcel.fulfillmentOrderNo}：${parcel.status}`).sort().join('；') || '' }
+}), (rows, previous) => {
+  for (const row of rows) {
+    const before = previous?.find(item => item.no === row.no && item.orderNo === row.orderNo)
+    if (!before || !row.status || before.status === row.status && before.parcels === row.parcels) continue
+    const record = afterSaleRecords.value.find(item => item.no === row.no)
+    if (record) addLog(record, '系统', '重发执行结果更新', `手工订单 ${row.orderNo}；OMS 处理状态：${before.status || '未取得'} → ${row.status}${row.parcels ? `；履约进展：${row.parcels}` : ''}`, '已更新')
+  }
+}, { flush: 'sync' })
 export interface AfterSaleResult { ok: boolean; message: string; record?: AfterSaleRecord; reused?: boolean }
 
 export function canViewAfterSale(input: Pick<AfterSaleInput, 'shopId'>, actor = activeAfterSaleActor.value): boolean {
@@ -185,6 +203,7 @@ function makeRecord(input: AfterSaleInput, source: AfterSaleRecord['source'], ac
     approval: input.kind === '重发' ? '待审核' : null,
     executionResult: input.kind === '重发' ? '等待重发审核' : '已登记，待核实执行结果',
     ...(route && { reshipRoute: { ...route } }),
+    logs: [createCustomerServiceLog(source === '平台同步' ? '系统 · eBay同步' : actorName, '创建售后单', `类型：${input.kind}；来源申请：${input.returnId}；${input.kind === '重发' ? '待审核，尚未创建手工订单' : '登记本次办理，不代表执行或退款成功'}`, '成功', now)],
   }
   afterSaleRecords.value.unshift(record)
   return { ok: true, message: input.kind === '重发' ? '重发售后单已提交审核' : '售后单已创建', record: afterSaleRecords.value[0]! }
@@ -202,9 +221,12 @@ export function createPlatformAfterSale(input: AfterSaleInput): AfterSaleResult 
 export function updateAfterSaleResult(no: string, result: string, actualAmount?: 金额 | null): void {
   const record = afterSaleRecords.value.find(r => r.no === no)
   if (!record || record.kind === '重发' || !result.trim()) return
+  const previous = JSON.stringify([record.executionResult, record.actualAmount])
+  const before = record.executionResult
   record.executionResult = result
   if (actualAmount === null) delete record.actualAmount
   if (actualAmount && (record.kind === '全额退款' || record.kind === '部分退款') && parseMoney(actualAmount.value, actualAmount.currency) !== null) record.actualAmount = { ...actualAmount }
+  if (JSON.stringify([record.executionResult, record.actualAmount]) !== previous) addLog(record, '系统', '执行结果更新', `办理结果：${before || '未取得'} → ${record.executionResult}${actualAmount !== undefined ? `；本笔实退：${record.actualAmount ? record.actualAmount.value + ' ' + record.actualAmount.currency : '未确认金额'}` : ''}`, '已更新')
 }
 /** 审核弹窗才准备发货草稿，生成或修改草稿本身不会建手工单。 */
 export function getReshipReviewDraft(record: AfterSaleRecord): 手工订单草稿 {
@@ -252,8 +274,12 @@ export function approveReship(no: string, actor = activeAfterSaleActor.value, re
   const errors = 校验手工订单(draft)
   if (errors.length) return { ok: false, message: errors.join('；'), record }
   const order = 创建手工订单(draft, record.no)
-  if (!order.成功 || !order.订单) return { ok: false, message: order.信息, record }
+  if (!order.成功 || !order.订单) {
+    addLog(record, actor.name, '审核重发', '手工订单未创建成功，请核实后再办理', '失败')
+    return { ok: false, message: order.信息, record }
+  }
   Object.assign(record, { approval: '已审核', reviewedBy: actor.name, reviewedAt: new Date().toISOString(),
     reshipDraft: draft, reshipRoute: order.订单.defaultRoute && { ...order.订单.defaultRoute }, manualOrderNo: order.订单.systemOrderNo, executionResult: '已创建手工订单' })
+  addLog(record, actor.name, '审核重发', `审核状态：待审核 → 已审核；关联手工订单：${record.manualOrderNo}；OMS 待审核，尚未发货`, '成功', record.reviewedAt)
   return { ok: true, message: '重发审核通过，手工订单已进入待审核', record }
 }

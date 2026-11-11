@@ -1,12 +1,18 @@
 /** Post-Order v2 合同形状；只构造/解析本地资料，不包含网络或授权。 */
+import { 读取排序时刻 } from '@/组件/筛选/筛选工具'
 import { actionNames, actionOptions, escalationReasons, getReturnBlockedReason, getReturnDetail, isEscalated, isReturnClosed, knownReturnStates, knownReturnStatuses, returnKey, type ReturnRecord } from './模型'
+import { recordReturnOperation, startReturnSubmission } from './操作日志'
 export type ReturnAction = 'approve' | 'decline' | 'offerReturn' | 'partial' | 'refund' | 'message' | 'escalate' | 'provideRma' | 'receive' | 'label'
 export interface ReturnMoney { value: string; currency: string; convertedFromValue?: string; convertedFromCurrency?: string; exchangeRate?: string }
 export interface ReturnAddress { name: string; addressLine1: string; addressLine2?: string; city: string; stateOrProvince: string; postalCode: string; country: string }
 export interface ReturnAttachment { fileId: string; fileName: string; fileFormat: string; filePurpose: string; fileStatus: string; submitter: string; creationDate: string; secureUrl?: string; fileData?: string; resizedFileData?: string; previewUrl?: string; demo?: boolean }
 export interface ReturnScan { at: string; description: string; location: string; eventCode?: string; eventStatus?: string; eventCity?: string; eventPostalCode?: string; eventStateOrProvince?: string }
 export interface ReturnShipment { shipmentId: string; carrierEnum: string; carrierName: string; trackingNumber: string; deliveryStatus: string; actualShipDate: string | null; actualDeliveryDate: string | null; markAsReceived: boolean; originAddress: ReturnAddress | null; destinationAddress: ReturnAddress | null; labelFileId?: string; scans: ReturnScan[]; readStatus: 'success' | 'failed' | 'unknown'; carrierUsed?: string; minDeliveryEstimate?: string | null; maxDeliveryEstimate?: string | null; errorCode?: string; shippingMethod?: string; shippedBy?: string; labelDate?: string | null; labelAvailableUntilDate?: string; labelId?: string; labelPrintExpired?: boolean | null; labelVoidExpired?: boolean | null; active?: boolean | null; trackingRead?: ReturnReadResult; trackingStatus?: string; rawTracking?: Record<string, unknown> }
-export interface ReturnRefundItem { refundFeeType: string; label: string; currency: string; estimated: string; min: string; max: string; optional: boolean }
+export interface ReturnRefundItem {
+  refundFeeType: string; label: string; currency: string; estimated: string; optional: boolean
+  min: string | null; max: string | null; minCurrency?: string; maxCurrency?: string
+  amountEditable?: boolean | null; overwritableBySeller?: boolean | null
+}
 export interface ReturnFunding { amount: ReturnMoney | null; at: string | null; fundingStatus: string; fundingSource: { type: string; brand: string; memo: string } | null }
 export interface ReturnHistoryAttributes { keepOriginalItem: boolean | null; partialRefundAmount: ReturnMoney | null; refundDeductionType: { amount: ReturnMoney | null; percentage: number | null } | null; rmaNumber: string; sellerReturnAddress: ReturnAddress | null; updatedTrackingNumber: string; moneyMovementRef: string; escalateReason: string; rlspType: string; toEmailAddress: string }
 export interface ReturnHistoryEntry { at: string; text: string; author: string; activity?: string; fromState?: string; toState?: string; attributes?: Record<string, unknown>; parsedAttributes?: ReturnHistoryAttributes }
@@ -32,6 +38,7 @@ export interface ReturnDetailData {
   holdInfo: { status: string; reason: string; until: string | null; createdAt?: string | null; referenceId?: string; transactionId?: string } | null; contentOnHold: boolean;
   caseUrl: string | null; caseClosed: boolean; caseDecision: string | null;
   readStatus: { summary: ReturnReadResult; detail: ReturnReadResult; files: ReturnReadResult; tracking: ReturnReadResult };
+  identityConflicts?: Partial<Record<'summary' | 'detail', boolean>>
   eligibilityVersion: number; attemptedAt: string | null;
 }
 export interface ReturnActionDraft {
@@ -47,7 +54,8 @@ export interface ReturnMockScenario { submit?: 'accepted' | 'failed' | 'unknown'
 const currencyDigits: Record<string, number> = { USD: 2, GBP: 2, EUR: 2, AUD: 2, CAD: 2, CNY: 2, HKD: 2, TWD: 2, NZD: 2, CHF: 2, SGD: 2, PLN: 2, SEK: 2, NOK: 2, DKK: 2, CZK: 2, HUF: 2, ILS: 2, MYR: 2, PHP: 2, MXN: 2, BRL: 2, INR: 2, JPY: 0, KRW: 0 }
 export function moneyDigits(currency: string): number | null { return currencyDigits[currency] ?? null }
 /** 所有比较与合计以最小货币单位计算；未知币种拒绝猜精度。 */
-export function parseMoney(value: string, currency: string): bigint | null {
+export function parseMoney(value: string | null | undefined, currency: string): bigint | null {
+  if (typeof value !== 'string') return null
   const digits = moneyDigits(currency), clean = value.trim()
   if (digits === null || !/^\d+(?:\.\d+)?$/.test(clean)) return null
   const [whole = '', fraction = ''] = clean.split('.')
@@ -75,6 +83,29 @@ export const noLabelReasons = [
   { value: 'RETURN_TO_STORE', label: '退回门店' }, { value: 'WORK_WITH_BUYER', label: '与买家协商退回方式' },
 ]
 export const refundFeeNames: Record<string, string> = { PURCHASE_PRICE: '商品价款', ORIGINAL_SHIPPING: '原发货运费', RETURN_SHIPPING: '退回运费', ITEM_TAX: '商品税费', ITEM_IMPORT_TAX: '进口税费', OTHER: '其他费用' }
+
+export function refundRangeText(item: ReturnRefundItem): string {
+  const min = item.min == null ? '' : `${item.minCurrency || item.currency} ${item.min}`
+  const max = item.max == null ? '' : `${item.maxCurrency || item.currency} ${item.max}`
+  if (min && max) return `${min} ～ ${max}`
+  if (min) return `下限 ${min}`
+  if (max) return `上限 ${max}`
+  return '未提供'
+}
+export function refundAmountFixed(item: ReturnRefundItem): boolean {
+  if (item.amountEditable === false || item.overwritableBySeller === false) return true
+  return item.min != null && item.min === item.max && (item.minCurrency || item.currency) === (item.maxCurrency || item.currency)
+}
+export function refundSubmissionBlock(refund: ReturnRefundInfo): string {
+  for (const item of refund.items) {
+    if (item.min == null || item.max == null) return `${item.label}的可提交金额范围尚未核实，暂不能提交退款`
+    const min = parseMoney(item.min, item.currency), max = parseMoney(item.max, item.currency)
+    if ((item.minCurrency || item.currency) !== item.currency || (item.maxCurrency || item.currency) !== item.currency || min === null || max === null || min > max) {
+      return `${item.label}的金额范围或币种不一致，请核实后再提交`
+    }
+  }
+  return refund.itemsComplete && refund.items.length ? '' : '本次退款费用明细与金额尚未确认'
+}
 /** ReturnReasonEnum 的现行及废弃历史码；不把本地演示名称当平台枚举。 */
 export const returnReasonNames: Record<string, string> = {
   ARRIVED_DAMAGED: '到货破损', ARRIVED_LATE: '到货晚于预计时间', CUSTOMIZED: '商品经过定制', DEFECTIVE_ITEM: '商品无法正常使用',
@@ -103,6 +134,15 @@ const string = (value: unknown): string => typeof value === 'string' ? value : '
 const date = (value: unknown): string | null => string(object(value).value) || null
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : []
 const nullableBoolean = (value: unknown): boolean | null => typeof value === 'boolean' ? value : null
+function readRmaPolicy(value: unknown): boolean | null {
+  const policy = object(value)
+  const documented = nullableBoolean(policy.rmaRequired)
+  const observed = nullableBoolean(policy.rmarequired)
+  if ('rmaRequired' in policy && 'rmarequired' in policy) {
+    return documented === observed ? documented : null
+  }
+  return documented ?? observed
+}
 const nullableNumber = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null
 const quantity = (value: unknown): number | null => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null
 const scalarText = (value: unknown): string => typeof value === 'number' && Number.isFinite(value) ? String(value) : string(value)
@@ -142,7 +182,7 @@ export function parseReturnSummary(payload: unknown) {
     returnType: string(creation.type), currentType: string(summary.currentType), buyerComment: string(object(creation.comments).content),
     itemId: string(item.itemId), transactionId: string(item.transactionId), quantity: quantity(item.returnQuantity), reason: string(creation.reason), reasonType: string(creation.reasonType),
     createdAt: date(creation.creationDate), sellerDue: readDue(summary.sellerResponseDue), buyerDue: readDue(summary.buyerResponseDue), timeoutAt: date(summary.timeoutDate),
-    rmaRequired: nullableBoolean(object(summary.returnPolicy).rmaRequired),
+    rmaRequired: readRmaPolicy(summary.returnPolicy),
     availableActions: array(summary.sellerAvailableOptions).map(raw => { const option = object(raw); return { actionType: string(option.actionType), actionURL: safePlatformUrl(string(option.actionURL)) || undefined } }),
     sellerEstimated: readMoney(object(summary.sellerTotalRefund).estimatedRefundAmount), buyerEstimated: readMoney(object(summary.buyerTotalRefund).estimatedRefundAmount),
     sellerActual: readMoney(object(summary.sellerTotalRefund).actualRefundAmount), buyerActual: readMoney(object(summary.buyerTotalRefund).actualRefundAmount),
@@ -167,7 +207,16 @@ export function parseReturnFull(payload: unknown) {
   const detail = object(root.detail), refund = object(detail.refundInfo), estimated = object(refund.estimatedRefundDetail), actual = object(refund.actualRefundDetail), actualRefund = object(actual.actualRefund), shipmentInfo = object(detail.returnShipmentInfo), close = object(detail.closeInfo), hold = object(detail.holdInfo), item = object(detail.itemDetail)
   const items: ReturnRefundItem[] = []; let itemsComplete = Array.isArray(estimated.itemizedRefundDetails) && estimated.itemizedRefundDetails.length > 0
   for (const [values, optional] of [[estimated.itemizedRefundDetails, false], [estimated.optionalRefundLineItems, true]] as const) {
-    for (const raw of array(values)) { const line = object(raw), amount = readMoney(line.estimatedAmount), min = readMoney(line.minAmount), max = readMoney(line.maxAmount), fee = string(line.refundFeeType); if (fee && amount && min && max && amount.currency === min.currency && min.currency === max.currency) items.push({ refundFeeType: fee, label: refundFeeNames[fee] || fee, currency: amount.currency, estimated: amount.value, min: min.value, max: max.value, optional }); else itemsComplete = false }
+    for (const raw of array(values)) {
+      const line = object(raw), fee = string(line.refundFeeType), amount = readMoney(line.estimatedAmount)
+      if (!fee || !amount) { itemsComplete = false; continue }
+      const min = readMoney(line.minAmount), max = readMoney(line.maxAmount)
+      // itemsComplete 供退款和当前售后单办理使用。只读列表始终保留已经取得的费用及预计额。
+      if (!min || !max || min.currency !== amount.currency || max.currency !== amount.currency) itemsComplete = false
+      items.push({ refundFeeType: fee, label: refundFeeNames[fee] || fee, optional, currency: amount.currency, estimated: amount.value,
+        min: min?.value ?? null, max: max?.value ?? null, minCurrency: min?.currency, maxCurrency: max?.currency,
+        amountEditable: nullableBoolean(line.amountEditable), overwritableBySeller: nullableBoolean(line.overwritableBySeller) })
+    }
   }
   const shipmentValues = [...array(shipmentInfo.allShipmentTrackings), ...(shipmentInfo.shipmentTracking ? [shipmentInfo.shipmentTracking] : [])]
   const shipments: ReturnShipment[] = [], seen = new Set<string>()
@@ -236,7 +285,9 @@ export function buildReturnRequest(row: ReturnRecord, action: ReturnAction, draf
   else if (action === 'receive') path = `${base}/mark_as_received`
   else if (action === 'refund') {
     path = `${base}/issue_refund`
-    if (!detail.refund.itemsComplete || !detail.refund.items.length || draft.refundItems.length !== detail.refund.items.length) return { error: '退款费用明细不完整或已变化，请重新核对' }
+    const sourceBlock = refundSubmissionBlock(detail.refund)
+    if (sourceBlock) return { error: sourceBlock }
+    if (draft.refundItems.length !== detail.refund.items.length) return { error: '退款费用明细已变化，请重新核对' }
     const selected: Array<{ refundFeeType: string; refundAmount: { value: number; currency: string } }> = [], seen = new Set<string>(); let total = 0n, currency = ''
     for (const source of detail.refund.items) {
       const matches = draft.refundItems.filter(item => item.refundFeeType === source.refundFeeType)
@@ -247,6 +298,7 @@ export function buildReturnRequest(row: ReturnRecord, action: ReturnAction, draf
       currency = item.currency
       const minor = parseMoney(item.value, currency), min = parseMoney(source.min, currency), max = parseMoney(source.max, currency), amount = apiMoney(item.value, currency)
       if (minor === null || min === null || max === null || !amount || min > max || minor < min || minor > max) return { error: `${source.label}金额不符合来源上下限或币种精度` }
+      if (refundAmountFixed(source) && minor !== parseMoney(source.estimated, currency)) return { error: `${source.label}为固定金额，请使用来源金额` }
       total += minor; selected.push({ refundFeeType: source.refundFeeType, refundAmount: amount })
     }
     const amount = apiMoney(formatMinor(total, currency), currency)
@@ -262,7 +314,11 @@ export function buildReturnRequest(row: ReturnRecord, action: ReturnAction, draf
       body.fileId = label.fileId
     }
     if (label.labelAction === 'NO_LABEL') { if (!noLabelReasons.some(item => item.value === label.noLabelReason)) return { error: '请选择不提供面单的原因' }; body.noLabelReason = label.noLabelReason }
-    if (label.labelAction === 'MARK_AS_SENT') { if (!label.labelSentDate || !Number.isFinite(Date.parse(label.labelSentDate))) return { error: '请填写已提供面单的实际时间' }; body.forwardShippingLabelProvided = true; body.labelSentDate = { value: new Date(label.labelSentDate).toISOString() } }
+    if (label.labelAction === 'MARK_AS_SENT') {
+      const sentAt = 读取排序时刻(label.labelSentDate)
+      if (sentAt === undefined) return { error: '请填写已提供面单的实际时间' }
+      body.forwardShippingLabelProvided = true; body.labelSentDate = { value: new Date(sentAt).toISOString() }
+    }
     if (label.labelAction !== 'NO_LABEL' && label.trackingNumber.trim()) { if (!label.carrierEnum.trim()) return { error: '退回跟踪号须同时填写平台承运商代码' }; body.trackingNumber = label.trackingNumber.trim(); body.carrierEnum = label.carrierEnum.trim() }
     if (label.returnLabelCost.trim()) { const amount = apiMoney(label.returnLabelCost, row.currency); if (!amount) return { error: '面单费用或币种精度不正确' }; body.returnLabelCost = amount }
   } else {
@@ -309,7 +365,8 @@ export function submitPreparedReturnAction(row: ReturnRecord, prepared: Prepared
   row.pendingAction = prepared.action; row.pendingText = prepared.draft.text.trim(); row.pendingAmount = prepared.action === 'partial' ? Number(prepared.draft.partialAmount) : null; row.pendingRequest = clone(prepared.request); row.pendingDraft = clone(prepared.draft); row.submissionError = ''
   row.outcome = row.mock?.submit === 'failed' ? 'failed' : row.mock?.submit === 'unknown' ? 'unknown' : 'pending'
   if (row.outcome === 'failed') { row.submissionError = row.mock?.error || '平台明确拒绝：当前申请资格发生变化，请刷新后核对'; row.pendingAction = null; if (row.mock) row.mock.submit = 'accepted' }
-  row.logs.push({ at: now, text: `客服01 提交${actionNames[prepared.action]}；${prepared.action === 'message' ? '退货留言' : '对外处理说明'}${prepared.draft.text.trim() ? '：' + prepared.draft.text.trim() : ''}；${row.outcome === 'failed' ? row.submissionError : row.outcome === 'unknown' ? '响应超时，结果待核查，禁止重提' : '等待平台回查'}；请求快照已保存` })
+  startReturnSubmission(row, actionNames[prepared.action])
+  recordReturnOperation(row, '提交' + actionNames[prepared.action], `本次请求快照已保存${prepared.draft.text.trim() ? `；含${prepared.action === 'message' ? '退货留言' : '对外处理说明'}（${prepared.draft.text.trim().length}字）` : ''}`, row.outcome === 'failed' ? '明确失败' : row.outcome === 'unknown' ? '结果待核查，禁止重提' : '已提交，待回查', now, row.lastSubmission!.operator, true)
   return ''
 }
 export function uploadReturnAttachment(row: ReturnRecord, input: { fileName: string; filePurpose: 'ITEM_RELATED' | 'LABEL_RELATED' | 'REFUND_RELATED'; data: string; fileFormat: string }, now = new Date().toISOString()): { error: string; file?: ReturnAttachment; request?: ReturnApiRequest } {
@@ -324,12 +381,15 @@ export function uploadReturnAttachment(row: ReturnRecord, input: { fileName: str
   if (!signatures[format]?.test(data)) return { error: '文件内容与声明格式不一致，请重新选择' }
   const detail = getReturnDetail(row), fileId = `DEMO-FILE-${row.id}-${detail.files.length + 1}`
   const file: ReturnAttachment = { fileId, fileName: input.fileName.trim(), fileFormat: format, filePurpose: input.filePurpose, fileStatus: 'CREATED', submitter: 'SELLER', creationDate: now, fileData: data, previewUrl: format === 'PDF' ? undefined : `data:image/${format === 'JPG' ? 'jpeg' : format.toLowerCase()};base64,${data}`, demo: true }
-  detail.files.push(file); row.logs.push({ at: now, text: `客服01 上传${file.fileName}；已取得文件回执，尚未关联发布；不代表留言已发送` })
+  detail.files.push(file)
+  recordReturnOperation(row, '上传申请附件', `用途：${file.filePurpose}；格式：${format}；已取得文件回执，尚未关联发布；不代表留言已发送`, '文件已上传', now)
   return { error: '', file, request: { method: 'POST', path: `/post-order/v2/return/${encodeURIComponent(row.id)}/file/upload`, body: { data, fileName: file.fileName, filePurpose: file.filePurpose } } }
 }
 function rejectSource(row: ReturnRecord, group: 'summary' | 'detail', error: string, now: string): never {
   row.eligibilityKnown = false
-  const read = getReturnDetail(row).readStatus[group]; read.status = 'failed'; read.error = error; read.attemptedAt = now
+  const detail = getReturnDetail(row)
+  ;(detail.identityConflicts ??= {})[group] = true
+  const read = detail.readStatus[group]; read.status = 'failed'; read.error = error; read.attemptedAt = now
   throw new Error(error)
 }
 function verifyItemIdentity(row: ReturnRecord, source: { itemId: string; transactionId: string }, group: 'summary' | 'detail', now: string): void {
@@ -345,9 +405,12 @@ function reconcileReturnQuantity(row: ReturnRecord): void {
 /** 只读事实投影，不从历史授予任何当前操作资格。 */
 export function updateReturnKeepItemInfo(row: ReturnRecord): void {
   const detail = getReturnDetail(row), returningStates = new Set(['ITEM_READY_TO_SHIP', 'ITEM_SHIPPED', 'ITEM_DELIVERED', 'RETURN_LABEL_PENDING', 'RETURN_LABEL_REQUESTED', 'RMA_PENDING'])
-  const evidence = row.history.filter(entry => ['SELLER_APPROVE_REQUEST', 'SELLER_OFFER_RETURNS'].includes(entry.activity || '') && entry.author === 'SELLER' && typeof entry.parsedAttributes?.keepOriginalItem === 'boolean' && !!entry.toState && Number.isFinite(Date.parse(entry.at)) && /(?:Z|[+-]\d{2}:\d{2})$/.test(entry.at))
-  const latestAt = evidence.length ? Math.max(...evidence.map(entry => Date.parse(entry.at))) : null
-  const latest = latestAt === null ? [] : evidence.filter(entry => Date.parse(entry.at) === latestAt)
+  const evidence = row.history
+    .filter(entry => ['SELLER_APPROVE_REQUEST', 'SELLER_OFFER_RETURNS'].includes(entry.activity || '') && entry.author === 'SELLER' && typeof entry.parsedAttributes?.keepOriginalItem === 'boolean' && !!entry.toState)
+    .map(entry => ({ entry, instant: 读取排序时刻(entry.at) }))
+    .filter((value): value is { entry: ReturnHistoryEntry; instant: number } => value.instant !== undefined)
+  const latestAt = evidence.length ? Math.max(...evidence.map(value => value.instant)) : null
+  const latest = evidence.filter(value => value.instant === latestAt).map(value => value.entry)
   const values = new Set(latest.map(entry => entry.parsedAttributes!.keepOriginalItem))
   const historical = values.size === 1 ? latest[0]!.parsedAttributes!.keepOriginalItem : null
   const conflict = values.size > 1 || (row.state === 'ITEM_KEPT' && historical === false) || (returningStates.has(row.state) && historical === true)
@@ -371,6 +434,7 @@ export function applyReturnSummary(row: ReturnRecord, payload: unknown, now = ne
   row.estimatedRefund = source.sellerEstimated ? Number(source.sellerEstimated.value) : null; row.actualRefund = source.sellerActual ? Number(source.sellerActual.value) : null
   row.deadline = source.sellerDue?.at || null; row.eligibilityKnown = knownReturnStates.has(row.state) && knownReturnStatuses.has(row.status); detail.eligibilityVersion++
   detail.readStatus.summary = { status: 'success', succeededAt: now, attemptedAt: now, error: '' }
+  if (source.itemId && source.transactionId) delete detail.identityConflicts?.summary
 }
 export function applyReturnFull(row: ReturnRecord, payload: unknown, now = new Date().toISOString(), requestContext?: { shopId: string; returnId: string }): void {
   if (requestContext && (requestContext.shopId !== row.shopId || requestContext.returnId !== row.id)) rejectSource(row, 'detail', 'FULL请求上下文与当前申请身份不一致，拒绝合并', now)
@@ -395,6 +459,7 @@ export function applyReturnFull(row: ReturnRecord, payload: unknown, now = new D
   if (source.marketplaceId) row.marketplaceId = source.marketplaceId
   row.history = source.history; reconcileReturnQuantity(row); updateReturnKeepItemInfo(row)
   detail.readStatus.detail = { status: 'success', succeededAt: now, attemptedAt: now, error: '' }
+  if (source.itemId && source.transactionId) delete detail.identityConflicts?.detail
 }
 
 export interface ReturnTrackingContext { shopId: string; returnId: string; carrierUsed: string; trackingNumber: string; shipmentId?: string }

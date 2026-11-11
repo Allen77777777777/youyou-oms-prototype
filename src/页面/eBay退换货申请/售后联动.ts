@@ -2,7 +2,8 @@ import { 共享订单 } from '../订单处理/演示会话'
 import { afterSaleRecords, createAfterSale, createPlatformAfterSale, updateAfterSaleResult, validateAfterSale, type AfterSaleInput } from '../售后单管理/会话'
 import { resolveReturnItem, resolveReturnOrder } from './关联导航'
 import { formatMinor, parseMoney, type PreparedReturnAction, type ReturnAction, type ReturnActionDraft, type ReturnMoney } from './接口契约'
-import { syncReturn, submitPreparedReturnAction, validatePreparedReturnAction, type ReturnRecord } from './模型'
+import { captureReturnHandlers } from './处理人'
+import { isReturnClosed, syncReturn, submitPreparedReturnAction, validatePreparedReturnAction, type ReturnRecord } from './模型'
 
 export interface ReturnSaleDraft {
   requestId: string
@@ -136,7 +137,9 @@ export function syncReturnWithSales(row: ReturnRecord, now = new Date().toISOStr
   const event = row.mock?.externalEvent
   const eventPreviouslyRead = row.mock?.consumed
   const previouslyRead = row.mock?.refundResultConsumed
+  const wasOpen = !isReturnClosed(row)
   const result = syncReturn(row, now)
+  if (wasOpen && isReturnClosed(row)) captureReturnHandlers(row)
   if (result.status !== 'success') return result
   const submission = row.afterSaleSubmission
   if (submission && pending === submission.action && (oldOutcome === 'pending' || oldOutcome === 'unknown')) {

@@ -1,6 +1,8 @@
 import { reactive } from 'vue'
 import { mailSession } from './会话'
 import type { Conversation } from './类型'
+import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
+import { recordMailOperation } from './操作日志'
 
 export interface MailTagDefinition {
   id: string
@@ -28,6 +30,7 @@ function definition(tag: { id: string; label: string; color: string }): MailTagD
 
 /** 浏览器会话内的统一字典；重命名与换色不改变引用 ID，刷新恢复样例。 */
 export const mailTagDefinitions = reactive<MailTagDefinition[]>(initialTags.map(definition))
+export const mailTagOperationLogs = reactive<CustomerServiceLog[]>([])
 
 export function validateMailTag(draft: MailTagDraft, editingId?: string): string | undefined {
   const label = draft.label.trim()
@@ -47,11 +50,15 @@ export function saveMailTag(draft: MailTagDraft, editingId?: string): { ok: true
   const values = { label: draft.label.trim(), color: draft.color.trim().toUpperCase() }
   if (editingId) {
     const tag = mailTagDefinitions.find(item => item.id === editingId)!
+    if (tag.label === values.label && tag.color === values.color) return { ok: true, tag }
+    const before = `${tag.label}（${tag.color}）`
     Object.assign(tag, values)
+    mailTagOperationLogs.push(createCustomerServiceLog('客服01', '编辑业务标签', `${editingId}：${before} → ${tag.label}（${tag.color}）`, '已完成'))
     return { ok: true, tag }
   }
   const id = `tag-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
   mailTagDefinitions.push(definition({ id, ...values }))
+  mailTagOperationLogs.push(createCustomerServiceLog('客服01', '新增业务标签', `${id}：${values.label}（${values.color}）`, '已完成'))
   return { ok: true, tag: mailTagDefinitions[mailTagDefinitions.length - 1]! }
 }
 
@@ -65,10 +72,12 @@ export function deleteMailTag(id: string, expectedAffected: number, conversation
   if (index < 0) return { ok: false, error: '标签已不存在' }
   const affected = countMailTagReferences(id, conversations)
   if (affected !== expectedAffected) return { ok: false, error: '关联会话数量已变化，请重新确认删除' }
+  const tag = mailTagDefinitions[index]!
   for (const conversation of conversations) {
-    if (conversation.tags?.includes(id)) conversation.tags = conversation.tags.filter(tagId => tagId !== id)
+    if (conversation.tags?.includes(id)) { conversation.tags = conversation.tags.filter(tagId => tagId !== id); recordMailOperation(conversation, '客服01', '移除已删除业务标签', `移除标签：${tag.label}（${id}）`) }
   }
   mailTagDefinitions.splice(index, 1)
+  mailTagOperationLogs.push(createCustomerServiceLog('客服01', '删除业务标签', `${tag.label}（${id}）；移除 ${affected} 个会话引用`, '已完成'))
   return { ok: true, affected }
 }
 
@@ -88,4 +97,4 @@ export function tagStyle(id: string): { color: string; backgroundColor: string; 
 }
 
 /** 测试及本地演示重置入口，不改变外部系统。 */
-export function resetMailTagDefinitions(): void { mailTagDefinitions.splice(0, mailTagDefinitions.length, ...initialTags.map(definition)) }
+export function resetMailTagDefinitions(): void { mailTagDefinitions.splice(0, mailTagDefinitions.length, ...initialTags.map(definition)); mailTagOperationLogs.splice(0) }

@@ -3,6 +3,7 @@ import { replyTemplates } from '../eBay站内信/数据'
 import { MAX_REPLY_BODY_LENGTH, validateDraft } from '../eBay站内信/模型'
 import type { MessageAttachment } from '../eBay站内信/类型'
 import { plainTextToHtml, richHtmlToSendText, richHtmlToText, sanitizeRichHtml } from './富文本'
+import { recordTemplateChange, resetTemplateChanges } from './变更记录'
 
 export type TemplateKind = 'message' | 'phrase'
 export interface MessageTemplate {
@@ -42,7 +43,7 @@ function initialTemplates(): MessageTemplate[] {
 const state = reactive({ templates: initialTemplates() })
 /** 变量由产研维护，页面无法替换字典或改变任何定义；模板仅保留本次浏览器会话。 */
 export const templateSession = Object.defineProperty(state, 'variables', { enumerable: true, configurable: false, get: () => builtinVariables }) as typeof state & { readonly variables: readonly TemplateVariable[] }
-export function resetTemplateSession() { templateSession.templates = initialTemplates() }
+export function resetTemplateSession() { templateSession.templates = initialTemplates(); resetTemplateChanges(['message', 'phrase']) }
 const tokenPattern = /{{([^{}]*?)}}/g
 const makeId = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
 
@@ -146,7 +147,7 @@ export function validateTemplate(input: TemplateInput, id?: string): string | un
   return undefined
 }
 
-export function saveTemplate(input: TemplateInput, id?: string): { template?: MessageTemplate; error?: string } {
+export function saveTemplate(input: TemplateInput, id?: string, copiedFrom?: string): { template?: MessageTemplate; error?: string } {
   const error = validateTemplate(input, id)
   if (error) return { error }
   const existing = id ? templateSession.templates.find(item => item.id === id) : undefined
@@ -154,10 +155,23 @@ export function saveTemplate(input: TemplateInput, id?: string): { template?: Me
   const bodyHtml = sanitizeRichHtml(input.bodyHtml ?? plainTextToHtml(input.body.trim()))
   const value: MessageTemplate = { id: id ?? makeId('template'), kind: input.kind, title: input.title.trim(), body: richHtmlToText(bodyHtml), bodyHtml, enabled: input.enabled, updatedAt: new Date().toISOString() }
   if (input.kind === 'message') { value.subject = input.subject?.trim() ?? ''; value.attachments = (input.attachments ?? []).map(attachment => ({ ...attachment })) }
+  const changes: string[] = []
+  if (existing) {
+    if (existing.title !== value.title) changes.push(`名称：${existing.title} → ${value.title}`)
+    if (existing.body !== value.body || sanitizeRichHtml(existing.bodyHtml ?? plainTextToHtml(existing.body)) !== value.bodyHtml) changes.push(`正文已修改（${existing.body.length} → ${value.body.length} 字符）`)
+    if ((existing.subject || '') !== (value.subject || '')) changes.push('内部参考标题已修改')
+    const beforeVariables = getTemplateVariables(`${existing.subject || ''}\n${existing.body}`).map(variable => variable.label).join('、') || '无'
+    const afterVariables = getTemplateVariables(`${value.subject || ''}\n${value.body}`).map(variable => variable.label).join('、') || '无'
+    if (beforeVariables !== afterVariables) changes.push(`使用变量：${beforeVariables} → ${afterVariables}`)
+    if (JSON.stringify(existing.attachments || []) !== JSON.stringify(value.attachments || [])) changes.push(`附件已修改（${existing.attachments?.length || 0} → ${value.attachments?.length || 0} 个）`)
+    if (existing.enabled !== value.enabled) changes.push(`状态：${existing.enabled ? '启用' : '停用'} → ${value.enabled ? '启用' : '停用'}`)
+    if (!changes.length) return { template: existing }
+  }
   if (existing) {
     Object.assign(existing, value)
     if (input.kind === 'phrase') { delete existing.subject; delete existing.attachments }
   } else templateSession.templates.unshift(value)
+  recordTemplateChange(value.kind, value.id, value.title, existing ? '编辑模板' : copiedFrom ? '复制模板' : '新增模板', existing ? changes.join('；') : `${copiedFrom ? `来源模板：${copiedFrom}；` : ''}创建${value.kind === 'message' ? '站内信模板' : '常用语'}，状态：${value.enabled ? '启用' : '停用'}`)
   return { template: existing ?? templateSession.templates[0] }
 }
 export function copyTemplate(id: string): { template?: MessageTemplate; error?: string } {
@@ -165,18 +179,22 @@ export function copyTemplate(id: string): { template?: MessageTemplate; error?: 
   if (!source) return { error: '该模板已不存在' }
   let suffix = 1, title = `${source.title.slice(0, 65)}（副本）`
   while (templateSession.templates.some(item => item.kind === source.kind && item.title === title)) title = `${source.title.slice(0, 65)}（副本 ${++suffix}）`
-  return saveTemplate({ ...source, title, enabled: false })
+  return saveTemplate({ ...source, title, enabled: false }, undefined, source.id)
 }
 export function setTemplateEnabled(id: string, enabled: boolean): string | undefined {
   const item = templateSession.templates.find(template => template.id === id)
   if (!item) return '该模板已不存在'
   if (enabled) { const error = validateTemplate(item, id); if (error) return error }
+  if (item.enabled === enabled) return undefined
+  recordTemplateChange(item.kind, item.id, item.title, enabled ? '启用模板' : '停用模板', `状态：${item.enabled ? '启用' : '停用'} → ${enabled ? '启用' : '停用'}`)
   item.enabled = enabled; item.updatedAt = new Date().toISOString()
   return undefined
 }
 export function deleteTemplate(id: string): string | undefined {
   const index = templateSession.templates.findIndex(item => item.id === id)
   if (index < 0) return '该模板已不存在'
+  const item = templateSession.templates[index]!
+  recordTemplateChange(item.kind, item.id, item.title, '删除模板', '已删除；历史变更记录保留', true)
   templateSession.templates.splice(index, 1)
   return undefined
 }

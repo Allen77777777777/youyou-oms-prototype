@@ -1,9 +1,18 @@
 <script setup lang="ts">
+import { handlerNames } from '@/组件/客服处理人/处理人'
+import { getReturnHandlerIds, getReturnSystemSkus } from './处理人'
+import { useBuyerPageActive } from '@/组件/买家/页面活跃'
+import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
 import { ElAlert, ElButton, ElDialog, ElInput, ElMessage, ElTable, ElTableColumn, ElTag, ElTooltip } from 'element-plus'
 import CopyNumber from '@/组件/单号复制.vue'
+import OperationLogs from '@/组件/客服日志/日志列表.vue'
+import { returnOperationEntries } from './操作日志'
+import TicketSourceActions from '@/页面/工单管理/来源工单操作.vue'
+import { findRecord as findDispute } from '../eBay纠纷/模型'
+import { disputeLocation } from '../eBay纠纷/导航'
 import BuyerMail from '../eBay取消订单申请/买家站内信.vue'
 import { 共享订单 } from '../订单处理/演示会话'
 import { 仓库会话单据 } from '../仓配管理/仓配会话'
@@ -26,6 +35,11 @@ import ReturnActionForm from './处理表单.vue'
 import { returnAnnotation as annotation } from './标注'
 const props = defineProps<{ row: ReturnRecord }>()
 const router = useRouter(), route = useRoute(), active = computed(() => props.row)
+const linkedCase = computed(() => {
+  const row = active.value
+  const found = row.caseId ? findDispute(row.shopId, 'EBAY_CASE', row.caseId) : undefined
+  return found?.links.some(source => source.kind === 'RETURN' && source.shopId === row.shopId && source.id === row.id) ? found : undefined
+})
 const view = readReturnDetailView(returnKey(props.row))
 const { note, action, actionDraft, actionError, confirmation, prepared, refreshFeedback } = toRefs(view)
 watch([() => view.saleDraft, actionDraft], () => { actionError.value = '' }, { deep: true })
@@ -37,6 +51,8 @@ onBeforeUnmount(() => { view.readScroll = readingPane.value?.scrollTop || 0; vie
 const now = ref(new Date().toISOString()), clock = setInterval(() => { now.value = new Date().toISOString() }, 30_000)
 onBeforeUnmount(() => clearInterval(clock))
 const time = (value: string | null | undefined, row: ReturnRecord) => formatReturnTime(value, row)
+const noteTime = (value: string | undefined) => value?.trim() ? formatReturnTime(value, active.value) : '未记录'
+const orderedNotes = computed(() => [...active.value.notes].reverse())
 const buyerMailTime = (value: string) => formatReturnTime(value, active.value)
 const closed = (row: ReturnRecord) => row.state === 'CLOSED' || row.status === 'CLOSED'
 const linkedItem = computed(() => resolveReturnItem(active.value, 共享订单.value))
@@ -132,14 +148,17 @@ function openReship() {
   void nextTick(() => { if (operationPane.value) operationPane.value.scrollTop = 0 })
 }
 const confirmationTotal = computed(() => { const items = prepared.value?.draft.refundItems.filter(item => item.selected) || [], currency = items[0]?.currency; if (!currency) return '—'; let total = 0n; for (const item of items) { const value = parseMoney(item.value,currency); if (value === null || item.currency !== currency) return '—'; total += value }; return currency + ' ' + formatMinor(total,currency) })
+const buyerPageActive = useBuyerPageActive()
 </script>
 <template>
 <section class="return-workbench">
-<header class="return-workbench-header"><div class="workbench-title"><h1>退货退款申请详情</h1></div><div class="return-detail-toolbar"><div v-prototype="annotation('detail-sync')" class="sync-actions detail-refresh"><ElTooltip content="获取当前退货申请的最新进度、退款信息及上次处理结果。刷新不会再次提交退货、退款、消息或介入请求。" placement="bottom" :trigger="['hover','focus']"><ElButton class="detail-refresh-action" :icon="Refresh" @click="syncOne">刷新数据</ElButton></ElTooltip></div></div></header>
+<header class="return-workbench-header"><div class="workbench-title"><h1>退货退款申请详情</h1></div><div class="return-detail-toolbar">
+  <TicketSourceActions :source="{ kind: 'return', id: active.id, shopId: active.shopId, shopName: active.shopName, summary: active.title }" />
+  <div v-prototype="annotation('detail-sync')" class="sync-actions detail-refresh"><ElTooltip content="获取当前退货申请的最新进度、退款信息及上次处理结果。刷新不会再次提交退货、退款、消息或介入请求。" placement="bottom" :trigger="['hover','focus']"><ElButton class="detail-refresh-action" :icon="Refresh" @click="syncOne">刷新数据</ElButton></ElTooltip></div></div></header>
 <div v-if="active" v-prototype="annotation('detail')" class="return-detail">
 <div class="return-reading" ref="readingPane">
-        <header class="detail-heading"><div><div class="detail-id"><span>ReturnID</span><strong><CopyNumber :value="active.id" label="ReturnID" /></strong></div><p class="muted">{{ active.shopName }} · {{ active.site }} · {{ active.buyerId }}</p></div><div class="detail-heading-status"><PlatformStatus :row="active" /></div></header>
-        <div class="detail-meta"><span>{{ active.site }}</span><span>最近完整刷新 {{ time(active.lastSyncedAt, active) }}</span></div>
+        <header class="detail-heading"><div><div class="detail-id"><span>ReturnID</span><strong><CopyNumber :value="active.id" label="ReturnID" /></strong></div><p class="muted">{{ active.shopName }} · {{ active.site }} · <BuyerLink :shop-id="active.shopId" :buyer-id="active.buyerId" /></p></div><div class="detail-heading-status"><PlatformStatus :row="active" /></div></header>
+        <div class="detail-meta"><span>处理人 {{ handlerNames(getReturnHandlerIds(active)) }}</span><span>{{ active.site }}</span><span>最近完整刷新 {{ time(active.lastSyncedAt, active) }}</span></div>
         <p v-if="internalHint(active)" class="business-hint" role="status">{{ internalHint(active) }}</p>
         <section v-if="active.submissionError" v-prototype="annotation('execution')" class="execution-panel"><ElAlert :title="active.outcome === 'unknown' ? '处理结果待核实' : '上次处理未成功'" :description="active.submissionError" :type="active.outcome === 'unknown' ? 'warning' : 'error'" :closable="false" show-icon /></section><ReturnData :row="active" area="status" />
         <div class="detail-workspace">
@@ -150,12 +169,17 @@ const confirmationTotal = computed(() => { const items = prepared.value?.draft.r
             <section v-if="linkedOrder?.items.length" class="detail-panel order-products"><h3>订单商品</h3><ElTable :data="linkedOrder.items" border><ElTableColumn label="商品" prop="platformItemTitle" min-width="160" /><ElTableColumn label="平台 SKU" prop="platformSku" min-width="130" /><ElTableColumn label="系统 SKU" prop="systemSku" min-width="130" /><ElTableColumn label="订单数量" prop="orderedQuantity" width="85" /></ElTable></section>
             <section v-prototype="annotation('outbound')" class="detail-panel outbound-panel"><h3>原发货出库单</h3><ElTable v-if="active.outbounds?.length" :data="active.outbounds" row-key="no" border class="outbound-context-table"><ElTableColumn label="三方仓出库单号" min-width="175"><template #default="{ row }"><CopyNumber :value="row.externalNo" label="三方仓出库单号"><button v-if="row.externalNo && linkedOutbounds.has(row.outboundId)" type="button" class="link-button" @click="openOutbound(active, row as CancelOutboundContext)">{{ row.externalNo }}</button><span v-else>{{ row.externalNo || '—' }}</span></CopyNumber><div class="muted">OMS出库单号<br /><CopyNumber :value="row.no" label="OMS出库单号"><button v-if="row.no && linkedOutbounds.has(row.outboundId)" type="button" class="link-button" @click="openOutbound(active, row as CancelOutboundContext)">{{ row.no }}</button><span v-else>{{ row.no || '—' }}</span></CopyNumber></div></template></ElTableColumn><ElTableColumn label="发货仓库 / 账号" min-width="135"><template #default="{ row }"><div>{{ row.warehouse || '—' }}</div><div class="muted">{{ row.account || '—' }}</div></template></ElTableColumn><ElTableColumn label="物流渠道" min-width="125"><template #default="{ row }"><div>{{ row.channel || '—' }}</div><div class="muted">{{ row.channelCode || '—' }}</div></template></ElTableColumn><ElTableColumn label="出库状态" min-width="95"><template #default="{ row }"><ElTag size="small" :type="row.status === '已出库' ? 'success' : row.status === '已取消' ? 'info' : 'warning'">{{ row.status || '—' }}</ElTag></template></ElTableColumn><ElTableColumn label="原发货跟踪号 / 时间" min-width="170"><template #default="{ row }"><CopyNumber :value="row.tracking" label="原发货跟踪号" /><div class="muted">{{ time(row.shippedAt, active) }}</div></template></ElTableColumn></ElTable><div v-else class="empty-inline">{{ active.outbounds ? '暂无关联三方仓出库单' : '三方仓出库单关联信息待核实' }}</div></section>
             <ReturnData :row="active" area="shipping" />
-            <section v-if="isEscalated(active)" v-prototype="annotation('escalation')" class="detail-panel case-panel"><h3>关联纠纷</h3><dl class="detail-grid"><dt>纠纷编号</dt><dd><CopyNumber :value="active.caseId" label="纠纷编号"><span>{{ active.caseId || '关联编号待刷新' }}</span></CopyNumber></dd><dt>纠纷处理</dt><dd>{{ active.caseStatus || '待刷新' }}</dd><dt>原申请状态</dt><dd>{{ stateNames[active.state] || '状态待核实' }}</dd><dt>原申请编号</dt><dd><CopyNumber :value="active.id" label="原申请编号" /></dd></dl><p v-if="activeDetail?.caseDecision" class="case-decision">{{ activeDetail.caseDecision }}</p><p class="muted">{{ activeDetail?.caseClosed ? '关联案件已结束，退货申请记录继续保留。' : '案件处理与退货记录分别跟进。' }}</p></section>
+            <section v-if="isEscalated(active)" v-prototype="annotation('escalation')" class="detail-panel case-panel"><h3>关联纠纷</h3><dl class="detail-grid"><dt>纠纷编号</dt><dd><CopyNumber :value="active.caseId" label="纠纷编号"><ElButton v-if="linkedCase" link type="primary" @click="router.push(disputeLocation(linkedCase.shopId, linkedCase.kind, linkedCase.id))">{{ linkedCase.id }}</ElButton><span v-else>{{ active.caseId || '关联编号待刷新' }}</span></CopyNumber></dd><dt>纠纷处理</dt><dd>{{ active.caseStatus || '待刷新' }}</dd><dt>原申请状态</dt><dd>{{ stateNames[active.state] || '状态待核实' }}</dd><dt>原申请编号</dt><dd><CopyNumber :value="active.id" label="原申请编号" /></dd></dl><p v-if="activeDetail?.caseDecision" class="case-decision">{{ activeDetail.caseDecision }}</p><p class="muted">{{ activeDetail?.caseClosed ? '关联案件已结束，退货申请记录继续保留。' : '案件处理与退货记录分别跟进。' }}</p></section>
           </main>
           <aside class="detail-aside">
         <section v-prototype="annotation('history')" class="detail-panel return-history-panel"><h3>处理过程</h3><div v-for="(entry,index) in active.history" :key="index" class="history-entry" :class="{ seller: entry.author === '卖家' }"><header><strong>{{ ({ BUYER: '买家', SELLER: '卖家', EBAY: 'eBay', SYSTEM: '平台系统' } as Record<string,string>)[entry.author] || entry.author }}</strong><time>{{ time(entry.at, active) }}</time></header><p v-if="entry.activity" class="activity-kind">{{ activityNames[entry.activity] || entry.activity }}</p><p v-if="entry.text">{{ activeDetail?.contentOnHold ? '平台已隐藏沟通内容' : entry.text }}</p><small v-if="entry.fromState || entry.toState">{{ entry.fromState ? stateNames[entry.fromState] || entry.fromState : '—' }} → {{ entry.toState ? stateNames[entry.toState] || entry.toState : '—' }}</small><ReturnHistoryAttributes :entry="entry" :content-on-hold="activeDetail?.contentOnHold" /></div><div v-if="!active.history.length" class="empty-inline">暂无处理过程</div></section>
             <ReturnData :row="active" area="aside" :order-address="orderAddress">
-            <template #before-addresses><section v-prototype="annotation('buyer-mail')" class="detail-panel buyer-mail-panel"><BuyerMail :key="returnKey(active)" :shop-id="active.shopId" :buyer-id="active.buyerId" :format-time="buyerMailTime" /></section></template>
+            <template #before-addresses>
+              <section v-prototype="annotation('buyer-mail')" class="detail-panel buyer-mail-panel">
+                <BuyerMail :key="returnKey(active)" :shop-id="active.shopId" :buyer-id="active.buyerId" :format-time="buyerMailTime"
+                  :application="{ kind: 'return', applicationId: active.id, shopName: active.shopName, orderNo: active.orderNo, recipient: active.mailRecipient, systemSkus: getReturnSystemSkus(active) }" />
+              </section>
+            </template>
           </ReturnData>
           </aside>
         </div>
@@ -196,11 +220,12 @@ const confirmationTotal = computed(() => { const items = prepared.value?.draft.r
   </div>
   <p v-if="!linkedSales.length" class="muted">暂无关联售后单</p>
 </section>
-<section v-prototype="annotation('notes')" class="detail-panel internal-notes-panel"><h3>内部备注</h3><div class="note-form"><ElInput v-model="note" type="textarea" :rows="3" placeholder="添加内部跟进记录，不发送给买家" :maxlength="500" show-word-limit aria-label="退货退款内部备注" /><div class="note-actions"><ElButton @click="saveNote">添加备注</ElButton></div></div><div v-for="(entry,index) in active.notes" :key="index" class="note-entry"><p>{{ entry.text }}</p><small>{{ entry.author }} · {{ time(entry.at, active) }}</small></div><details class="internal-records"><summary>内部操作记录（{{ active.logs.length }}）</summary><div v-for="(entry,index) in [...active.logs].reverse()" :key="index" class="log-entry"><time>{{ time(entry.at, active) }}</time><p>{{ entry.text }}</p></div></details></section>
+<section v-prototype="annotation('notes')" class="detail-panel internal-notes-panel"><h3>内部备注</h3><div class="note-form"><ElInput v-model="note" type="textarea" :rows="3" placeholder="添加内部跟进记录，不发送给买家" :maxlength="500" show-word-limit aria-label="退货退款内部备注" /><div class="note-actions"><ElButton @click="saveNote">添加备注</ElButton></div></div><div v-for="(entry,index) in orderedNotes" :key="index" class="note-entry"><p>{{ entry.text }}</p><small>操作人：{{ entry.author?.trim() || '未记录' }} · 时间：{{ noteTime(entry.at) }}</small></div></section>
+<section v-prototype="annotation('logs')" class="detail-panel operation-logs-panel"><OperationLogs :key="returnKey(active)" class="internal-records" :entries="returnOperationEntries(active)" :format-time="buyerMailTime" /></section>
 </aside>
 </div>
-    <ElDialog v-model="confirmation" :title="action ? `确认${actionNames[action]}` : '确认操作'" width="500px" append-to-body destroy-on-close>
-      <div v-if="active && prepared" class="return-confirm"><p>退货申请：<strong>{{ active.id }}</strong></p><p>店铺：{{ active.shopName }} · 买家：{{ active.buyerId }}</p><p>操作：<strong>{{ actionNames[prepared.action] }}</strong></p>
+    <ElDialog :model-value="buyerPageActive && confirmation" @update:model-value="value => { if (buyerPageActive) confirmation = value }" :title="action ? `确认${actionNames[action]}` : '确认操作'" width="500px" append-to-body :destroy-on-close="buyerPageActive">
+      <div v-if="active && prepared" class="return-confirm"><p>退货申请：<strong>{{ active.id }}</strong></p><p>店铺：{{ active.shopName }} · 买家：<BuyerLink :shop-id="active.shopId" :buyer-id="active.buyerId" /></p><p>操作：<strong>{{ actionNames[prepared.action] }}</strong></p>
         <p v-if="prepared.action === 'partial'">报价金额：<strong>{{ active.currency }} {{ prepared.draft.partialAmount }}</strong>，需等待买家决定。</p>
         <template v-if="prepared.action === 'refund'"><div v-for="item in prepared.draft.refundItems.filter(item => item.selected)" :key="item.refundFeeType" class="confirm-refund-item"><span>{{ activeDetail?.refund.items.find(line => line.refundFeeType === item.refundFeeType)?.label || item.refundFeeType }}</span><strong>{{ item.currency }} {{ item.value }}</strong></div><p>本次退款合计：<strong>{{ confirmationTotal }}</strong></p></template>
         <p v-if="['approve','offerReturn'].includes(prepared.action)">商品安排：{{ prepared.draft.keepOriginalItem ? '允许买家保留，无需寄回' : '按退货安排寄回' }}</p><p v-if="prepared.request.body.RMANumber">退货授权编号：{{ prepared.draft.rmaNumber }}</p>

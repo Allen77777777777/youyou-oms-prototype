@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, ref } from 'vue'
 import {
   CopyDocument,
@@ -349,7 +350,7 @@ async function 前往标发中心() {
             </div>
             <div class="订单副标题">
               <span>销售记录号 {{ order.salesRecordReference || '—' }}</span>
-              <span>{{ order.store }}</span>
+              <span>{{ order.store }}</span><span>买家 <BuyerLink :shop-id="order.sellerId" :buyer-id="order.buyerUsername" /></span>
               <ElTooltip :content="order.purchaseMarketplaces.join(' / ')" placement="top">
                 <span>站点 {{ order.purchaseMarketplaces.map(格式化eBay站点).join(' / ') }}</span>
               </ElTooltip>

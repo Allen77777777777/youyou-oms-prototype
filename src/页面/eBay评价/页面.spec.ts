@@ -12,6 +12,7 @@ import type { BuyerFeedbackRecord, ReviewRecord } from './类型'
 import { buyerFeedbackTemplates } from './数据'
 import { deleteFeedbackTemplate, feedbackTemplateSession, resetFeedbackTemplateSession, saveFeedbackTemplate, setFeedbackTemplateEnabled } from '../消息模板管理/评价模板模型'
 import { resetReviewContactSession } from './联系买家模型'
+import { relatedTickets, tickets } from '../工单管理/会话'
 
 const { route, push } = vi.hoisted(() => ({
   route: { path: '/oms/ebay-service/reviews', fullPath: '/oms/ebay-service/reviews', query: {} as Record<string, string> },
@@ -37,7 +38,7 @@ async function click(label: string, scope?: string | Pick<DOMWrapper<Element>, '
   if (!button) throw new Error(`未找到按钮 ${label}`)
   await button.trigger('click'); await flushPromises()
 }
-async function choose(label: string, value: string) {
+async function choose(label: string, value: string | string[]) {
   const select = wrapper.findAllComponents(ElSelect).find(item => item.props('ariaLabel') === label || item.attributes('aria-label') === label || item.find(`[aria-label="${label}"]`).exists())
   if (!select) throw new Error(`未找到选择项 ${label}`)
   select.vm.$emit('update:modelValue', value); await flushPromises()
@@ -148,6 +149,55 @@ describe('eBay评价查询与统计下钻', () => {
 })
 
 describe('评价详情处理和关联', () => {
+  it('常规评价行可就地创建，绑定所点店铺及评价，返回详情可查看关联', async () => {
+    const record = getRecord('REV-DEMO-01')
+    const source = { kind: 'review' as const, id: record.id, shopId: record.shopId, shopName: record.shopName, summary: '' }
+    const original = tickets.value.slice()
+    const originalStatus = record.handlingStatus
+    const count = relatedTickets(source).length
+    try {
+      await click('创建工单', rowFor(record.buyerId))
+      expect(wrapper.find('[data-title="评价详情"]').exists()).toBe(false)
+      const form = wrapper.get('[data-title="创建工单"]')
+      expect(form.text()).toContain(record.id)
+      await form.get('input[aria-label="工单事项"]').setValue('核实本条评价的物流经过')
+      await click('创建', form)
+      expect(relatedTickets(source)).toHaveLength(count + 1)
+      expect(record.handlingStatus).toBe(originalStatus)
+      await openDetail(record.buyerId)
+      expect(wrapper.get('.review-followup-actions').text()).toContain('关联工单（' + (count + 1) + '）')
+    } finally { tickets.value = original }
+  }, 20000)
+  it('从工单精确打开同店评价，在评价详情创建关联工单', async () => {
+    wrapper.unmount()
+    const original = getRecord('REV-DEMO-01')
+    const other = { ...original, shopId: 'shop-uk', shopName: '演示店铺-UK', buyerId: 'buyer_other_shop' }
+    reviewSession.reviews.push(other)
+    route.query = { shopId: other.shopId, reviewId: other.id }
+    route.fullPath = route.path + '?shopId=shop-uk&reviewId=REV-DEMO-01'
+    wrapper = renderPage(); await flushPromises()
+    const scope = '[data-title="评价详情"]'
+    expect(wrapper.get(scope).text()).toContain(other.buyerId)
+    const source = { kind: 'review' as const, id: other.id, shopId: other.shopId, shopName: other.shopName, summary: '' }
+    const count = relatedTickets(source).length
+    const before = tickets.value.slice()
+    try {
+      await click('创建工单', scope)
+      await wrapper.get('input[aria-label="工单事项"]').setValue('核查英店评价中的适配情况')
+      await click('创建', '[data-title="创建工单"]')
+      expect(relatedTickets(source)).toHaveLength(count + 1)
+      expect(relatedTickets(source)[0]!.title).toBe('核查英店评价中的适配情况')
+      expect(wrapper.get(scope).text()).toContain('关联工单（' + (count + 1) + '）')
+    } finally { tickets.value = before }
+  })
+  it('工单来源店铺与评价ID不匹配时提示核对，不能打开同号评价', async () => {
+    wrapper.unmount()
+    route.query = { shopId: 'shop-missing', reviewId: 'REV-DEMO-01' }
+    route.fullPath = route.path + '?shopId=shop-missing&reviewId=REV-DEMO-01'
+    wrapper = renderPage(); await flushPromises()
+    expect(wrapper.find('[data-title="评价详情"]').exists()).toBe(false)
+    expect(wrapper.get('[role="alert"]').text()).toContain('未找到唯一对应的评价')
+  })
   it('没有手动同步入口，自定义原因可从列表维护并用于详情，停用不丢历史', async () => {
     expect(wrapper.findAll('button').some(item => item.text().trim() === '同步评价')).toBe(false)
     await click('原因分类')
@@ -179,13 +229,23 @@ describe('评价详情处理和关联', () => {
     expect(target.content).toBe('PRIVATE-ORIGINAL')
     expect(target.reply?.text).toBe('PRIVATE-REPLY')
   })
+  it('详情实际交接后可恢复本行 SKU 处理人', async () => {
+    const target = getRecord('REV-DEMO-01')
+    await openDetail()
+    await choose('详情处理人', ['staff-03'])
+    await click('保存处理信息', '[data-title="评价详情"]')
+    await click('恢复自动分配', '[data-title="评价详情"]')
+    expect(target.handlerIds).toBeUndefined()
+    expect(rowFor(target.buyerId).text()).toContain('客服01')
+    expect(target.logs[target.logs.length - 1]?.detail).toContain('恢复自动分配：客服03 → 客服01')
+  })
   it('处理草稿不立即保存，保存仅更新内部信息，备注按次追加', async () => {
     const target = getRecord('REV-DEMO-01'), platformFact = { type: target.commentType, content: target.content, state: target.platformState }
     await openDetail()
-    await choose('详情处理状态', 'resolved'); await choose('详情负责人', '客服03'); await choose('详情原因分类', '商品质量')
+    await choose('详情处理状态', 'resolved'); await choose('详情处理人', ['staff-02', 'staff-03']); await choose('详情原因分类', '商品质量')
     expect(target.handlingStatus).toBe('pending')
     await click('保存处理信息', '[data-title="评价详情"]')
-    expect(target).toMatchObject({ handlingStatus: 'resolved', owner: '客服03', reason: '商品质量' })
+    expect(target).toMatchObject({ handlingStatus: 'resolved', handlerIds: ['staff-02', 'staff-03'], reason: '商品质量' })
     expect({ type: target.commentType, content: target.content, state: target.platformState }).toEqual(platformFact)
     expect(target.reply).toBeUndefined()
     await wrapper.get('textarea[aria-label="新增内部备注"]').setValue('已联系买家核查车型。'); await click('添加备注')
@@ -201,10 +261,13 @@ describe('评价详情处理和关联', () => {
     await openDetail(); await click('订单与售后'); await click('打开关联站内信', '[data-title="评价详情"]')
     expect(push).toHaveBeenLastCalledWith('/oms/ebay-service/messages')
     expect(mailSession.activeId).toBe('conv-01')
-    getRecord('REV-DEMO-01').shopId = 'shop-uk'; await flushPromises()
+    const linked = mailSession.conversations.find(c => c.id === 'conv-01')!
+    linked.shopId = 'shop-uk'; await flushPromises()
     const button = wrapper.findAll('button').find(item => item.text().trim() === '打开关联站内信')!
     expect(button.attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('暂无准确关联的站内信会话')
+    getRecord('REV-DEMO-01').shopId = 'shop-uk'; await flushPromises()
+    expect(wrapper.find('[data-title="评价详情"]').exists()).toBe(false)
   })
   it('批量处理按实际更新与未变更分别计数，未变更不新增记录', async () => {
     const pending = getRecord('REV-DEMO-01'), resolved = getRecord('REV-GOOD')
@@ -585,5 +648,19 @@ describe('给买家好评', () => {
     const row = rowFor(reviewSession.buyerFeedback[0]!.buyerId)
     expect(row.text()).toContain('平台资格尚未确认')
     expect(row.findAll('button').find(item => item.text().trim() === '给买家好评')!.attributes('disabled')).toBeDefined()
+  })
+})
+
+
+describe('买家详情回到好评记录', () => {
+  it('按店铺和 feedbackId 打开给买家好评原详情，不创建评价或提交动作', async () => {
+    const record = reviewSession.buyerFeedback[0]!
+    const before = JSON.stringify(record)
+    wrapper.unmount()
+    route.query = { shopId: record.shopId, feedbackId: record.id }; route.fullPath = route.path + '?feedbackId=' + record.id
+    wrapper = renderPage(); await flushPromises()
+    expect(wrapper.find('[data-title="给买家好评"]').exists()).toBe(true)
+    expect(wrapper.get('[data-title="给买家好评"]').text()).toContain(record.buyerId)
+    expect(JSON.stringify(record)).toBe(before)
   })
 })

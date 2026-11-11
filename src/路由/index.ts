@@ -6,6 +6,9 @@ import eBay订单页面 from '@/页面/eBay订单/eBay订单页面.vue'
 import 全渠道订单详情路由页 from '@/页面/全渠道订单/全渠道订单详情路由页.vue'
 import 全渠道订单页面 from '@/页面/全渠道订单/全渠道订单页面.vue'
 import { returnDetailRoute } from '@/页面/eBay退换货申请/详情路由'
+import { disputeDetailRoute, disputeLocation } from '@/页面/eBay纠纷/导航'
+import { buyerDetailRoute } from '@/页面/eBay买家详情/导航'
+import { retainBuyerSourcePage } from '@/布局/买家浏览保留'
 import 占位页面 from '@/页面/占位页面.vue'
 
 const 已实现页面: Record<string, RouteRecordRaw['component']> = {
@@ -16,18 +19,23 @@ const 已实现页面: Record<string, RouteRecordRaw['component']> = {
   'oms-manual-orders': () => import('@/页面/手工订单/手工订单页面.vue'),
   'oms-outbound-orders': () => import('@/页面/仓配管理/三方仓出库单页面.vue'),
   'oms-logistics-orders': () => import('@/页面/仓配管理/物流下单页面.vue'),
+  'oms-tracking': () => import('@/页面/物流轨迹/物流轨迹页面.vue'),
   'oms-order-rules': () => import('@/页面/订单规则/订单规则页面.vue'),
   'oms-business-settings': () => import('@/页面/业务配置/业务配置页面.vue'),
   'oms-logistics-channels': () => import('@/页面/仓配管理/物流渠道管理页面.vue'),
   'oms-warehouse-inventory': () => import('@/页面/三方仓库存/三方仓库存页面.vue'),
   'oms-inventory-aging': () => import('@/页面/三方仓库龄/三方仓库龄页面.vue'),
   'oms-ebay-messages': () => import('@/页面/eBay站内信/eBay站内信页面.vue'),
+  'oms-tickets': () => import('@/页面/工单管理/工单管理页面.vue'),
+  'oms-ebay-disputes': () => import('@/页面/eBay纠纷/eBay纠纷页面.vue'),
   'oms-message-templates': () => import('@/页面/消息模板管理/消息模板管理页面.vue'),
   'oms-ebay-reviews': () => import('@/页面/eBay评价/eBay评价页面.vue'),
   'oms-ebay-review-statistics': () => import('@/页面/eBay评价统计/eBay评价统计页面.vue'),
+  'oms-service-kpi': () => import('@/页面/客服KPI统计/客服KPI统计页面.vue'),
   'oms-ebay-cancellations': () => import('@/页面/eBay取消订单申请/eBay取消订单申请页面.vue'),
   'oms-ebay-returns': () => import('@/页面/eBay退换货申请/eBay退换货申请页面.vue'),
   'oms-ebay-after-sale-orders': () => import('@/页面/售后单管理/售后单管理页面.vue'),
+  'oms-after-sale-statistics': () => import('@/页面/售后统计/售后统计页面.vue'),
   'oms-auto-service-rules': () => import('@/页面/自动客服规则/自动客服规则页面.vue'),
 }
 
@@ -75,7 +83,7 @@ export const router = createRouter({
       component: 中台布局,
       redirect: '/index',
       children: [...页面路由, 全渠道订单详情路由, eBay订单详情路由,
-        returnDetailRoute,
+        returnDetailRoute, disputeDetailRoute, buyerDetailRoute,
         { path: '/oms/ebay-service/negative-reviews', redirect: to => ({ path: '/oms/ebay-service/review-statistics', query: to.query }) },
         { path: '/oms/ebay-service/after-sales', redirect: '/oms/ebay-service/cancellations' },
         ...(['new', 'edit', 'copy'] as const).map(mode => ({
@@ -94,4 +102,24 @@ export const router = createRouter({
     },
     { path: '/:pathMatch(.*)*', redirect: '/index' },
   ],
+})
+
+router.beforeEach(async (to, from) => {
+  if (to.name !== 'oms-ebay-buyer-detail') return
+  const shopId = String(to.params.shopId || ''), buyerId = String(to.params.buyerId || '')
+  const { getBuyerProfile } = await import('@/页面/eBay买家详情/聚合')
+  const profile = getBuyerProfile(shopId, buyerId)
+  if (profile.found && (profile.canonicalShopId !== shopId || profile.canonicalBuyerId !== buyerId)) {
+    return { name: 'oms-ebay-buyer-detail', params: { shopId: profile.canonicalShopId, buyerId: profile.canonicalBuyerId }, replace: true }
+  }
+  retainBuyerSourcePage(from.path)
+  retainBuyerSourcePage(to.path)
+})
+
+// 原有纠纷工单、书签使用 ?shopId=...&caseId=...。保留原身份并进入正式详情。
+router.beforeEach(to => {
+  if (to.name !== 'oms-ebay-disputes' || (to.query.shopId === undefined && to.query.caseId === undefined)) return
+  const { shopId, caseId: id } = to.query
+  if (typeof shopId !== 'string' || !shopId || typeof id !== 'string' || !id) return
+  return { ...disputeLocation(shopId, 'EBAY_CASE', id), replace: true }
 })

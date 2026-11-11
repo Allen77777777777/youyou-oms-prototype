@@ -65,3 +65,22 @@
 .mail-v2 .mail-row-subject-line>.mail-row-subject{display:block;flex:1;min-width:0}
 .mail-row-status{flex:none;white-space:nowrap;font-size:10px;font-weight:400;line-height:14px;padding:0 3px;border:1px solid #dce8f8;border-radius:3px;color:#587ba8;background:#f3f7fd}
 .mail-row-status.status-processed{color:#62866e;border-color:#dfebe2;background:#f5f9f6}.mail-row-status.status-ignored{color:#9098a5;border-color:#e6e9ee;background:#f7f8fa}
+.mail-source-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+}
+.mail-source-actions .mail-translate-button { padding-top: 0; }
+.mail-header-primary { height: auto; min-height: 26px; flex-wrap: wrap; row-gap: 3px; }
+.mail-header-primary .mail-reader-identity { flex-basis: 150px; }
+.mail-header-primary .mail-reader-actions { margin-left: auto; }
+.mail-ticket-select-label { font-size: 13px; color: var(--el-text-color-primary); }
+.mail-ticket-select-list { list-style: none; margin: 6px 0 0; padding: 0; overflow: auto; max-height: 300px; }
+.mail-ticket-select-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
+.mail-ticket-select-list li + li { border-top: 1px solid var(--el-border-color-lighter); }
+.mail-ticket-select-list li > div { min-width: 0; }
+.mail-ticket-select-list b { font-size: 11px; font-weight: 500; color: var(--el-text-color-secondary); }
+.mail-ticket-select-list p { margin: 3px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.mail-ticket-select-list .ticket-source-actions { flex: none; }

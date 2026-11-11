@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ElButton, ElCheckbox, ElDatePicker, ElOption, ElSelect, ElTimePicker } from 'element-plus'
-import { autoReplyTimeZones, autoReplyWeekdays, type AutoReplyConfig } from './规则模型'
+import { ElButton, ElCheckbox, ElDatePicker, ElTimePicker } from 'element-plus'
+import { autoReplyScheduleSummary, defaultAutoReplyConfig, autoReplyWeekdays, type AutoReplyConfig } from './规则模型'
 
 const props = defineProps<{ config: AutoReplyConfig }>()
 function dayLabel(day: number) { return autoReplyWeekdays.find(item => item.value === day)?.label ?? '' }
@@ -13,8 +13,12 @@ function toggleSpecific(enabled: boolean) {
 
 <template>
   <div class="service-auto-reply-schedule">
-    <div class="service-form-row service-auto-reply-zone"><label class="required">时间所属时区</label><ElSelect v-model="config.timeZone" aria-label="自动回复时区"><ElOption v-for="zone in autoReplyTimeZones" :key="zone.value" :value="zone.value" :label="zone.label" /></ElSelect></div>
-    <p class="service-schedule-help">以下时间均按所选时区设置。</p>
+    <p class="service-schedule-help">以下休息时段均使用北京时间。</p>
+    <section v-if="config.legacySchedule && !config.legacySchedule.reviewedAt" class="service-schedule-block">
+      <p class="service-validation-error">原规则已停用。请核对原配置，并重新设置北京时间休息时段。</p>
+      <details><summary>查看原休息时段（{{ config.legacySchedule.timeZone || '时区未记录' }}）</summary><p v-for="line in autoReplyScheduleSummary({ ...defaultAutoReplyConfig(), ...config.legacySchedule })" :key="line">{{ line }}</p></details>
+      <ElCheckbox :model-value="config.timeZoneReviewRequired === false" aria-label="已核对北京时间休息时段" @change="config.timeZoneReviewRequired = $event !== true">已核对原配置，并按北京时间重新设置休息时段</ElCheckbox>
+    </section>
     <div class="service-schedule-block">
       <div class="service-schedule-heading"><ElCheckbox v-model="config.weeklyEnabled" aria-label="启用每周休息时段">每周休息时段</ElCheckbox><span>每周循环</span></div>
       <div class="service-weekly-schedule" :class="{ 'is-disabled': !config.weeklyEnabled }">

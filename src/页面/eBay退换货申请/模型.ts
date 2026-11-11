@@ -1,10 +1,16 @@
 import { 命中字段搜索, 命中多选, 命中时间范围, 读取排序时刻, type 搜索模式 } from '@/组件/筛选/筛选工具'
 import type { CancelOutboundContext } from '../eBay取消订单申请/模型'
+import type { ApplicationMailRecipient } from '../eBay站内信/申请收件身份'
 import { activityNames, emptyReturnDetail, parseMoney, parseReturnHistoryAttributes, updateReturnKeepItemInfo, createReturnActionDraft, prepareReturnAction, submitPreparedReturnAction, type ReturnAction, type ReturnDetailData, type ReturnApiRequest, type ReturnActionDraft, type ReturnMockScenario, type ReturnHistoryEntry } from './接口契约'
 export * from './接口契约'
+import { refundSubmissionBlock } from './接口契约'
+import { currentHandlerName } from '@/组件/客服处理人/处理人'
+import { recordReturnOperation, type ReturnOperationLog, type ReturnSubmission } from './操作日志'
 
 export type ReturnQueue = 'all' | 'response' | 'processing' | 'case' | 'closed'
 export interface ReturnRecord {
+  /** 明确办结时保存的人员。旧历史若无快照，保留未知。 */
+  closedHandlerIds?: string[]
   afterSaleSubmission?: { no: string; requestId: string; action: ReturnAction }
   afterSaleOfferNo?: string
   afterSaleRefundNo?: string
@@ -12,6 +18,7 @@ export interface ReturnRecord {
   /** 内部按单次平台来源事件核实的售后原因，独立于买家填写的 eBay 原因。 */
   afterSaleEventReasons?: Record<string, string>
   id: string; shopId: string; shopName: string; site: string; marketplaceId: string; orderNo: string; buyerId: string
+  mailRecipient?: ApplicationMailRecipient
   title: string; sku: string; quantity: number | null; category: string; reason: string; reasonCode: string; reasonType?: string
   state: string; status: string; currency: string; estimatedRefund: number | null; actualRefund: number | null
   createdAt: string; deadline: string | null; options: string[]; eligibilityKnown: boolean
@@ -24,12 +31,13 @@ export interface ReturnRecord {
   orderProducts?: Array<{ title: string; sku: string; quantity: number }> | null
   /** 原订单发货仓单；tracking仍只表示买家退回的物流单号。 */
   outbounds?: CancelOutboundContext[] | null
-  notes: Array<{ at: string; text: string; author: string }>; history: ReturnHistoryEntry[]
-  logs: Array<{ at: string; text: string }>
+  notes: Array<{ at?: string; text: string; author?: string }>; history: ReturnHistoryEntry[]
+  logs: ReturnOperationLog[]
+  lastSubmission?: ReturnSubmission
   detail?: ReturnDetailData; pendingRequest?: ReturnApiRequest | null; pendingDraft?: ReturnActionDraft | null; submissionError?: string; mock?: ReturnMockScenario
 }
-export interface ReturnFilters { shops: string[]; reasons: string[]; states: string[]; /** 旧配置兼容字段，不再作为业务筛选。 */ outcomes: string[]; field: string; query: string; mode: 搜索模式; dates: string[] | null }
-export const createReturnFilters = (): ReturnFilters => ({ shops: [], reasons: [], states: [], outcomes: [], field: 'id', query: '', mode: 'contains', dates: null })
+export interface ReturnFilters { handlers: string[]; shops: string[]; reasons: string[]; states: string[]; /** 旧配置兼容字段，不再作为业务筛选。 */ outcomes: string[]; field: string; query: string; mode: 搜索模式; dates: string[] | null }
+export const createReturnFilters = (): ReturnFilters => ({ handlers: [], shops: [], reasons: [], states: [], outcomes: [], field: 'id', query: '', mode: 'contains', dates: null })
 export const returnKey = (row: Pick<ReturnRecord, 'shopId' | 'id'>): string => JSON.stringify([row.shopId, row.id])
 export const returnTimeZone = (_row?: Pick<ReturnRecord, 'marketplaceId'>): string => 'Asia/Shanghai'
 const returnTimeFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: returnTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
@@ -41,6 +49,10 @@ export function formatReturnTime(value: string | null | undefined, _row?: Pick<R
   const parts = returnTimeFormatter.formatToParts(new Date(instant))
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? ''
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`
+}
+export function isReturnTimePast(value: string | null | undefined, now = Date.now()): boolean {
+  const instant = 读取排序时刻(value ?? undefined)
+  return instant !== undefined && Number.isFinite(now) && instant < now
 }
 export function findReturnRecord(records: readonly ReturnRecord[], key: string): ReturnRecord | undefined {
   const matches = records.filter(row => returnKey(row) === key)
@@ -126,13 +138,13 @@ export function getReturnBlockedReason(row: ReturnRecord, action: ReturnAction, 
   if (!row.eligibilityKnown || !knownReturnStates.has(row.state) || !knownReturnStatuses.has(row.status) || detail.readStatus.summary.status !== 'success') return '当前可执行操作尚未核实，请先刷新数据'
   if (!row.options.includes(actionOptions[action])) return action === 'refund' && row.options.includes('SELLER_RETRY_REFUND') ? '平台要求退款重试，请通过来源平台入口核实处理' : '当前申请不支持此操作'
   if (['refund', 'partial', 'label', 'provideRma', 'approve', 'offerReturn'].includes(action) && detail.readStatus.detail.status !== 'success') return '详情资料尚未完整刷新，请先核实后处理'
-  if (action === 'refund' && (!detail.refund.itemsComplete || !detail.refund.items.length || detail.refund.items.some(item => { const min = parseMoney(item.min, item.currency), max = parseMoney(item.max, item.currency); return min === null || max === null || min > max }))) return '本次退款费用明细与金额尚未确认'
+  if (action === 'refund') { const block = refundSubmissionBlock(detail.refund); if (block) return block }
   if (['refund', 'partial'].includes(action) && detail.refund.integrityIssues?.length) return '实际退款资料存在不一致，请先核实资金结果'
   if (action === 'partial' && (!detail.refund.partialOfferLimitVerified || !detail.refund.partialOfferLimit || (parseMoney(detail.refund.partialOfferLimit.value, detail.refund.partialOfferLimit.currency) ?? 0n) <= 0n)) return '部分退款报价额度尚未核实'
   if (action === 'escalate') {
-    const time = Date.parse(now), start = Date.parse(row.escalation.start ?? ''), end = Date.parse(row.escalation.end ?? '')
+    const time = 读取排序时刻(now), start = 读取排序时刻(row.escalation.start ?? undefined), end = 读取排序时刻(row.escalation.end ?? undefined)
     if (!row.escalation.eligible) return '平台当前未授予卖家请求介入资格'
-    if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(time)) return '卖家介入时间窗资料不完整，请先刷新核实'
+    if (start === undefined || end === undefined || time === undefined) return '卖家介入时间窗资料不完整，请先刷新核实'
     if (time < start) return '尚未到卖家允许请求介入的时间'
     if (time > end) return '已超过卖家允许请求介入的时间'
   }
@@ -193,7 +205,7 @@ function applyAccepted(row: ReturnRecord, action: ReturnAction, now: string) {
   if (typeof body.reason === 'string' && action === 'escalate') attributes.escalateReason = body.reason
   addActivity(row, actionOptions[action], action === 'message' ? row.pendingText : `${actionNames[action]}已获平台回执${draft?.text.trim() ? '；' + draft.text.trim() : ''}`, now, 'SELLER', attributes, fromState)
   updateReturnKeepItemInfo(row)
-  row.logs.push({ at: now, text: `回查确认${actionNames[action]}已受理${action === 'partial' ? '；等待买家决定，尚未退款' : action === 'refund' ? '；退款处理中，尚未确认到账' : ''}` })
+  recordReturnOperation(row, '回查' + actionNames[action], `回查确认${actionNames[action]}已受理${action === 'partial' ? '；等待买家决定，尚未退款' : action === 'refund' ? '；退款处理中，尚未确认到账' : ''}`, '平台已确认受理', now, '系统', true)
   row.pendingAction = null; row.outcome = 'confirmed'; row.submissionError = ''
 }
 function applyRefundResult(row: ReturnRecord, now: string): boolean {
@@ -219,6 +231,7 @@ function applyRefundResult(row: ReturnRecord, now: string): boolean {
   else setOptions(row, [])
   setTasks(row, null, null); row.mock!.refundResultConsumed = true
   addActivity(row, 'NOTIFY_UPDATE_REFUND_STATUS', result.status === 'SUCCESS' ? '已取得退款成功及实际金额回执' : result.status === 'FAILED' ? '已取得退款失败回执，未把预计金额当成已退款' : '平台资金仍在处理中', now)
+  recordReturnOperation(row, '回查退款结果', '已读取独立资金回执，未使用预计金额或草稿补造实际金额', result.status === 'SUCCESS' ? '退款成功' : result.status === 'FAILED' ? '退款失败' : '退款处理中', now, '系统', !!row.lastSubmission)
   return true
 }
 function applyExternal(row: ReturnRecord, event: NonNullable<ReturnMockScenario['externalEvent']>, now: string) {
@@ -242,28 +255,41 @@ function applyExternal(row: ReturnRecord, event: NonNullable<ReturnMockScenario[
   if (event === 'caseClose') { detail.caseClosed = true; detail.caseDecision = '平台已结束案件'; row.caseStatus = '已结束'; addActivity(row, 'CASE_UPDATED', '已取得独立Case的结束结果，原Return继续保留', now) }
 }
 export interface ReturnSyncResult { status: 'success' | 'partial' | 'failed'; message: string }
+/** 只比较业务及读取结果；技术尝试／成功时间和本地资格版本不产生业务日志。 */
+function returnSyncBusinessFacts(row: ReturnRecord): string {
+  return JSON.stringify({ state: row.state, status: row.status, outcome: row.outcome, pendingAction: row.pendingAction,
+    submissionError: row.submissionError, eligibilityKnown: row.eligibilityKnown, options: row.options,
+    deadline: row.deadline, escalation: row.escalation, caseId: row.caseId, caseStatus: row.caseStatus,
+    shipping: row.shipping, tracking: row.tracking, keepItem: row.keepItem, received: row.received,
+    actualRefund: row.actualRefund, detail: row.detail, history: row.history,
+  }, (key, value) => ['attemptedAt', 'succeededAt', 'eligibilityVersion', 'lastSyncedAt', 'updatedAt', 'keepItemInfo'].includes(key) ? undefined : value)
+}
 /** 仅回放固定虚构回执，无人工改成功入口；读取成功不等于操作成功。 */
 export function syncReturn(row: ReturnRecord, now = new Date().toISOString()): ReturnSyncResult {
-  const detail = getReturnDetail(row), failure = row.mock?.readFailure; detail.attemptedAt = now
+  const detail = getReturnDetail(row), failure = row.mock?.readFailure, before = returnSyncBusinessFacts(row); detail.attemptedAt = now
   for (const key of ['summary', 'detail', 'files', 'tracking'] as const) { const read = detail.readStatus[key]; read.attemptedAt = now; if (failure === key || failure === 'all') { read.status = 'failed'; read.error = `${key.toUpperCase()}读取失败` } else { read.status = 'success'; read.succeededAt = now; read.error = '' } }
-  if (failure === 'all' || failure === 'summary') { row.eligibilityKnown = false; return { status: failure === 'all' ? 'failed' : 'partial', message: '申请资格读取失败，保留原资料并暂停处理' } }
+  if (failure === 'all' || failure === 'summary') { row.eligibilityKnown = false; recordReturnOperation(row, '刷新申请', '申请资格读取失败，保留原资料并暂停处理', failure === 'all' ? '读取失败' : '部分读取失败', now, row.outcome === 'pending' || row.outcome === 'unknown' ? '系统' : currentHandlerName.value, row.outcome === 'pending' || row.outcome === 'unknown', before === returnSyncBusinessFacts(row)); return { status: failure === 'all' ? 'failed' : 'partial', message: '申请资格读取失败，保留原资料并暂停处理' } }
   row.eligibilityKnown = knownReturnStates.has(row.state) && knownReturnStatuses.has(row.status); detail.eligibilityVersion++
   if (!failure) row.lastSyncedAt = now
-  if (failure) return { status: 'partial', message: '部分资料刷新失败，已保留上次资料；请查看对应区域' }
+  if (failure) { recordReturnOperation(row, '刷新申请', '部分资料刷新失败，已保留上次资料；请查看对应区域', '部分读取失败', now, row.outcome === 'pending' || row.outcome === 'unknown' ? '系统' : currentHandlerName.value, row.outcome === 'pending' || row.outcome === 'unknown', before === returnSyncBusinessFacts(row)); return { status: 'partial', message: '部分资料刷新失败，已保留上次资料；请查看对应区域' } }
+  const previousLogCount = row.logs.length
   if (row.outcome === 'unknown') {
-    if (!row.mock?.resolve || row.mock.resolve === 'unknown') { row.logs.push({ at: now, text: '查询后仍未确认上次操作结果；继续禁止重复提交' }); return { status: 'success', message: '读取成功，上次操作结果仍待核查' } }
-    if (row.mock.resolve === 'failed') { row.outcome = 'failed'; row.pendingAction = null; row.submissionError = '已取得明确失败回执，未执行成功；可按最新资格重新处理'; row.logs.push({ at: now, text: row.submissionError }); return { status: 'success', message: row.submissionError } }
+    if (!row.mock?.resolve || row.mock.resolve === 'unknown') { recordReturnOperation(row, '回查处理结果', '查询后仍未确认上次操作结果；继续禁止重复提交', '结果待核查', now, '系统', true, true); return { status: 'success', message: '读取成功，上次操作结果仍待核查' } }
+    if (row.mock.resolve === 'failed') { row.outcome = 'failed'; row.pendingAction = null; row.submissionError = '已取得明确失败回执，未执行成功；可按最新资格重新处理'; recordReturnOperation(row, '回查处理结果', '已取得本次操作的明确失败回执；未执行成功', '明确失败', now, '系统', true); return { status: 'success', message: row.submissionError } }
     if (row.pendingAction) applyAccepted(row, row.pendingAction, now)
   } else if (row.outcome === 'pending' && row.pendingAction) {
-    if (row.mock?.resolve === 'failed') { row.outcome = 'failed'; row.pendingAction = null; row.submissionError = row.mock.error || '平台明确拒绝本次操作，请核对后重新处理'; row.logs.push({ at: now, text: row.submissionError }) }
+    if (row.mock?.resolve === 'failed') { row.outcome = 'failed'; row.pendingAction = null; row.submissionError = row.mock.error || '平台明确拒绝本次操作，请核对后重新处理'; recordReturnOperation(row, '回查处理结果', '已取得本次操作的明确失败回执；请按最新资格重新核对', '明确失败', now, '系统', true) }
     else applyAccepted(row, row.pendingAction, now)
   } else if (row.mock?.externalEvent && !row.mock.consumed) { applyExternal(row, row.mock.externalEvent, now); row.mock.consumed = true }
   else if (row.mock?.externalEvent === 'autoRefund' && row.mock.consumed && row.mock.refundResult && !row.mock.refundResultConsumed) applyRefundResult(row, now)
   else if (row.detail?.refund.status === 'PENDING' && (row.pendingRequest?.path.endsWith('/issue_refund') || row.state === 'PARTIAL_REFUND_INITIATED')) applyRefundResult(row, now)
   updateReturnKeepItemInfo(row)
+  if (row.logs.length === previousLogCount && before !== returnSyncBusinessFacts(row)) recordReturnOperation(row, '刷新申请', '申请业务资料或读取结果已更新；退款和关闭结果分别按来源展示', '资料已更新', now, '系统')
   return { status: 'success', message: row.outcome === 'failed' ? row.submissionError || '已取得明确失败结果' : '申请资料已刷新' }
 }
 export function addReturnNote(row: ReturnRecord, text: string, now = new Date().toISOString()): string {
   if (!text.trim() || text.trim().length > 500) return '内部备注须为 1～500 字'
-  row.notes.push({ at: now, text: text.trim(), author: '客服01' }); return ''
+  row.notes.push({ at: now, text: text.trim(), author: currentHandlerName.value })
+  recordReturnOperation(row, '添加内部备注', `新增内部备注（${text.trim().length}字），内容见内部备注`, '已保存', now)
+  return ''
 }

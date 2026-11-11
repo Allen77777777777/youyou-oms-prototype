@@ -34,7 +34,7 @@ describe('取消申请关联买家站内信', () => {
     const output = getBuyerIncomingMail([row], 'shop-us', row.buyerId)
     expect(output.map(item => item.messageId)).toEqual(['newest', 'message-1', 'uncertain'])
     expect(output[0]!.at).toBe('2026-10-29T04:00:00+00:00')
-    expect(formatBuyerMailTime(output[2]!.at, 'America/Los_Angeles')).toContain('时间格式待核查')
+    expect(formatBuyerMailTime(output[2]!.at)).toBe('时间待核实')
   })
   it('正文安全提取纯文本，附件仅暴露名称，不触发已读或其他源数据变更', () => {
     const row = conversation()
@@ -47,10 +47,11 @@ describe('取消申请关联买家站内信', () => {
     expect(JSON.stringify(output)).not.toContain('invalid.example')
     expect(JSON.stringify(row)).toBe(before)
   })
-  it('按站点timezone转换并带UTC偏移，缺失或无效时区不默认为北京', () => {
-    expect(formatBuyerMailTime('2026-10-29T00:00:00Z', 'America/Los_Angeles')).toBe('2026-10-28 17:00:00 UTC-7')
-    expect(formatBuyerMailTime('2026-10-29T00:00:00Z')).toContain('站点时区待配置')
-    expect(formatBuyerMailTime('2026-10-29T00:00:00Z', 'invalid/zone')).toContain('站点时区待配置')
+  it('统一北京时间，明确偏移转换到同一时刻，缺失或无偏移不猜', () => {
+    expect(formatBuyerMailTime('2026-10-29T00:00:00Z')).toBe('2026-10-29 08:00:00')
+    expect(formatBuyerMailTime('2026-10-28T17:00:00-07:00')).toBe('2026-10-29 08:00:00')
+    expect(formatBuyerMailTime('')).toBe('—')
+    expect(formatBuyerMailTime('2026-10-29T00:00:00')).toBe('时间待核实')
   })
 })
 
@@ -60,8 +61,10 @@ describe('取消申请买家来信组件', () => {
     const row = conversation()
     row.messages = Array.from({ length: 5 }, (_, index) => ({ id: `incoming-${index}`, kind: 'incoming' as const, sender: row.buyerId, body: index === 4 ? 'Long buyer message '.repeat(30) : `message-${index}`, at: `2026-10-29T0${index}:00:00Z` }))
     mailSession.conversations = [row]
-    const wrapper = mount(BuyerMail, { props: { shopId: row.shopId, buyerId: row.buyerId, timeZone: 'America/Los_Angeles' } })
+    const wrapper = mount(BuyerMail, { props: { shopId: row.shopId, buyerId: row.buyerId } })
     expect(wrapper.findAll('.buyer-mail-card')).toHaveLength(3)
+    expect(wrapper.get('.buyer-mail-card time').text()).toBe('2026-10-29 12:00:00')
+    expect(wrapper.get('.buyer-mail-card time').attributes('title')).toBeUndefined()
     expect(wrapper.get('.buyer-mail-body').classes()).toContain('collapsed')
     await wrapper.findAll('.buyer-mail-link').find(button => button.text() === '展开正文')!.trigger('click')
     expect(wrapper.get('.buyer-mail-body').classes()).not.toContain('collapsed')

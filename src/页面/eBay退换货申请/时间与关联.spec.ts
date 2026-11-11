@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createReturnData } from './数据'
 import * as ReturnData from './数据'
-import { addReturnNote, createReturnFilters, filterReturns, findReturnRecord, formatReturnTime, getReturnBlockedReason, inReturnQueue, returnKey, returnTimeZone, submitReturnAction, syncReturn } from './模型'
+import { addReturnNote, createReturnFilters, filterReturns, findReturnRecord, formatReturnTime, getReturnBlockedReason, inReturnQueue, isReturnTimePast, returnKey, returnTimeZone, submitReturnAction, syncReturn } from './模型'
 import { initializeReturnDemoContext } from './关联资料'
 import { resolveReturnOrder, resolveReturnOutbound } from './关联导航'
 import { 共享订单, 仓库执行记录 } from '../订单处理/演示会话'
@@ -16,6 +16,15 @@ const baseline = { orders: copy(共享订单.value), executions: copy(仓库执�
 afterEach(async () => { vi.restoreAllMocks(); 共享订单.value = copy(baseline.orders); 仓库执行记录.value = copy(baseline.executions); 仓库会话单据.value = copy(baseline.rows); await nextTick() })
 
 describe('退货申请身份、北京时间及只读关联', () => {
+  it('列表与详情逾期只比较可信绝对时刻，到期相等不算已过期', () => {
+    const deadline = '2026-11-06T00:00:00+08:00', instant = Date.parse('2026-11-05T16:00:00Z')
+    expect(isReturnTimePast(deadline, instant)).toBe(false)
+    expect(isReturnTimePast(deadline, instant + 1)).toBe(true)
+    for (const value of [null, undefined, '', '2026-11-05', '2026-11-05T16:00:00', '2026-11-05T16:00:00-00:00', '2026-02-30T16:00:00Z']) {
+      expect(isReturnTimePast(value, instant + 1)).toBe(false)
+    }
+    expect(isReturnTimePast(deadline, NaN)).toBe(false)
+  })
   it('相同Return ID按店铺隔离，缺失或重复同店身份不取第一条', () => {
     const row = createReturnData()[0]!, other = { ...copy(row), shopId: 'other-shop', shopName: '另一虚构店铺' }
     expect(returnKey(row)).not.toBe(returnKey(other))

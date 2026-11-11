@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { Close, HomeFilled, RefreshRight } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { 业务页签关闭请求, 清理业务页签 } from './页签操作'
+import { markBuyerSourcePageOpen } from './买家浏览保留'
 
 interface 页签 {
   路径: string
@@ -35,6 +36,7 @@ function 获取当前页签标题() {
 watch(
   () => route.fullPath,
   () => {
+    markBuyerSourcePageOpen(route.path)
     const 标题 = 获取当前页签标题()
     if (!标题 || route.path === '/index' || 已打开页签.value.some((页签) => 页签.路径 === route.path)) return
     已打开页签.value.push({ 路径: route.path, 标题 })

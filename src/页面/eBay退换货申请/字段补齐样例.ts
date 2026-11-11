@@ -32,6 +32,10 @@ export function completeReturnFieldSamples(records: ReturnRecord[]): void {
     }
   }
   const first = records[0]!
+  const rmaRow = records.find(row => row.id === 'DEMO-RT-010')!
+  const purchasePrice = rmaRow.detail!.refund.items.find(item => item.refundFeeType === 'PURCHASE_PRICE')!
+  rmaRow.detail!.refund.items = [{ ...purchasePrice, min: null, max: null, amountEditable: false, overwritableBySeller: false }]
+  rmaRow.detail!.refund.itemsComplete = false
   first.detail!.itemPicture = `${import.meta.env.BASE_URL}退货申请商品示意.svg`
   first.detail!.itemPrice = { value: '44.90', currency: 'USD' }
   const returned = records[2]!

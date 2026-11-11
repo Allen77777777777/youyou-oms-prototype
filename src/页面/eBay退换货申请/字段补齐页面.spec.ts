@@ -6,7 +6,7 @@ import { ElIcon, ElMessage, ElTooltip } from 'element-plus'
 import ReturnData from './退货资料.vue'
 import Workbench from './退货详情工作台.vue'
 import { createReturnData } from './数据'
-import { applyReturnFull, getReturnDetail, parseReturnHistoryAttributes, submitReturnAction, syncReturn, type ReturnRecord } from './模型'
+import { applyReturnFull, formatReturnTime, getReturnDetail, parseReturnHistoryAttributes, submitReturnAction, syncReturn, type ReturnRecord } from './模型'
 import { resetReturnViews } from './视图会话'
 
 const wrappers: VueWrapper[] = []
@@ -28,6 +28,22 @@ async function workbench(row: ReturnRecord) {
 afterEach(() => { for (const wrapper of wrappers.splice(0)) wrapper.unmount(); ElMessage.closeAll() })
 
 describe('退货字段补齐的业务展示', () => {
+  it('保留固定预计金额及单端边界，有平台退款选项时公开未能提交的原因', async () => {
+    const row = createReturnData()[2]!, money = (value: number) => ({ currency: 'USD', value })
+    applyReturnFull(row, { detail: { refundInfo: { estimatedRefundDetail: { itemizedRefundDetails: [
+      { refundFeeType: 'PURCHASE_PRICE', estimatedAmount: money(16), amountEditable: false, overwritableBySeller: false },
+      { refundFeeType: 'ORIGINAL_SHIPPING', estimatedAmount: money(3), minAmount: money(0) },
+      { refundFeeType: 'RETURN_SHIPPING', estimatedAmount: money(4), maxAmount: money(8) },
+    ] } } } })
+    const wrapper = data(row, 'refund')
+    await flushPromises()
+    const rows = wrapper.findAll('.refund-items .el-table__body tr')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]!.text()).toMatch(/商品价款.*USD 16\.00.*固定金额.*未提供/)
+    expect(rows[1]!.text()).toContain('下限 USD 0.00')
+    expect(rows[2]!.text()).toContain('上限 USD 8.00')
+    expect(wrapper.text()).toContain('平台提供退款选项。商品价款的可提交金额范围尚未核实')
+  })
   it('共享会话的报价与资金回查能保存独立来源对象，并与后续草稿隔离', () => {
     const now = '2026-11-03T03:00:00Z', offer = reactive(createReturnData()[0]!)
     expect(submitReturnAction(offer, 'partial', 'Offer ten dollars.', 10, '', now)).toBe('')
@@ -83,6 +99,23 @@ describe('退货字段补齐的业务展示', () => {
     expect(wrapper.text()).toContain('2026-10-28 08:00:00')
     expect(wrapper.text()).toContain('2026-11-21 07:59:59')
     expect(row.escalation.start).toBe('2026-10-28T00:00:00Z')
+  })
+
+  it('在办申请保留双方来源期限，关闭原因占位和关联 Case 结束都不能生成申请关闭结果', async () => {
+    const row = createReturnData()[9]!, detail = getReturnDetail(row)
+    detail.buyerDue = { activity: 'OTHER', at: '2026-11-18T22:59:59Z' }
+    detail.timeoutAt = '2026-12-07T22:59:59Z'
+    detail.closeInfo = { reason: 'OTHER', buyerReason: 'UNKNOWN', at: null, buyerComment: '' }
+    const wrapper = data(row, 'status')
+    expect(wrapper.find('.close-panel').exists()).toBe(false)
+    expect(wrapper.get('.responsibility-panel').text()).toContain(formatReturnTime(detail.sellerDue!.at))
+    expect(wrapper.get('.responsibility-panel').text()).toContain('2026-11-19 06:59:59')
+    expect(wrapper.get('.responsibility-panel').text()).toContain('2026-12-08 06:59:59')
+    await wrapper.setProps({ row: { ...row, status: 'ESCALATED', detail: { ...detail, caseClosed: true } } })
+    expect(wrapper.find('.close-panel').exists()).toBe(false)
+    await wrapper.setProps({ row: { ...row, status: 'CLOSED', detail: { ...detail, closeInfo: { ...detail.closeInfo, reason: 'REQUEST_DECLINED' } } } })
+    expect(wrapper.get('.close-panel [title="REQUEST_DECLINED"]').text()).toBe('退货申请被拒绝')
+    expect(wrapper.find('.responsibility-panel').exists()).toBe(false)
   })
 
   it('退回运费、两端地址、预计到达与来源错误各自呈现，不改送达事实', async () => {

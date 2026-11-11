@@ -5,9 +5,13 @@ import MultiFilter from '@/组件/筛选/多选筛选.vue'
 import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import { 命中字段搜索, 校验字段搜索 } from '@/组件/筛选/筛选工具'
 import { formatMailTime } from '../eBay站内信/模型'
+import { 格式化北京时间 } from '../订单处理/时间展示工具'
 import { copyFeedbackTemplate, deleteFeedbackTemplate, feedbackTemplateSession, feedbackTemplateTypes, saveFeedbackTemplate, setFeedbackTemplateEnabled, type FeedbackTemplate, type FeedbackTemplateInput } from './评价模板模型'
 import { templateAnnotation as annotation } from './标注'
+import TemplateChangeHistory from './模板变更记录.vue'
 
+const historyOpen = ref(false), historyId = ref('')
+function openChanges(id = '', type = '') { historyId.value = id ? JSON.stringify([type, id]) : ''; historyOpen.value = true }
 const filters = reactive({ types: [] as string[], statuses: [] as string[], query: '', field: 'name', mode: 'contains' as 'contains' | 'exact' })
 const applied = reactive({ ...filters, types: [] as string[], statuses: [] as string[] }), page = ref(1), queryError = ref('')
 const fields = [{ value: 'name', label: '名称', kind: 'text' as const }, { value: 'text', label: '正文', kind: 'text' as const }]
@@ -57,17 +61,18 @@ const previewOpen = computed({ get: () => !!preview.value, set: (value: boolean)
       <ElButton type="primary" @click="query">查询</ElButton><ElButton @click="reset">重置</ElButton>
     </div>
     <p v-if="queryError" class="feedback-error" role="alert">{{ queryError }}</p>
-    <div class="feedback-tools"><ElButton type="primary" @click="edit()">新增评价模板</ElButton></div>
+    <div class="feedback-tools"><ElButton type="primary" @click="edit()">新增评价模板</ElButton><ElButton @click="openChanges()">变更记录</ElButton></div>
     <div class="feedback-table"><ElTable :data="rows" row-key="id" height="100%" stripe>
       <ElTableColumn label="名称" min-width="160"><template #default="{ row }"><button class="feedback-name" @click="edit(row as FeedbackTemplate)">{{ row.name }}</button></template></ElTableColumn>
       <ElTableColumn label="模板类型" width="140"><template #default="{ row }">{{ typeLabel(row.type) }}</template></ElTableColumn>
       <ElTableColumn label="正文摘要" min-width="260"><template #default="{ row }"><p class="feedback-summary" :title="row.text">{{ row.text }}</p></template></ElTableColumn>
       <ElTableColumn label="状态" width="85"><template #default="{ row }"><ElTag :type="row.enabled ? 'success' : 'info'" size="small" effect="plain">{{ row.enabled ? '已启用' : '已停用' }}</ElTag></template></ElTableColumn>
-      <ElTableColumn label="更新时间" width="132"><template #default="{ row }"><span :title="`${row.updatedAt}（显示为北京时间）`">{{ formatMailTime(row.updatedAt) }}</span></template></ElTableColumn>
-      <ElTableColumn label="操作" width="230" fixed="right"><template #default="{ row }"><div class="feedback-actions"><ElButton link type="primary" @click="preview = { name: row.name, type: row.type, text: row.text }">预览</ElButton><ElButton link type="primary" @click="edit(row as FeedbackTemplate)">编辑</ElButton><ElButton link type="primary" @click="duplicate(row as FeedbackTemplate)">复制</ElButton><ElButton link :type="row.enabled ? 'warning' : 'primary'" @click="toggle(row as FeedbackTemplate)">{{ row.enabled ? '停用' : '启用' }}</ElButton><ElButton link type="danger" @click="remove(row as FeedbackTemplate)">删除</ElButton></div></template></ElTableColumn>
+      <ElTableColumn label="更新时间" width="132"><template #default="{ row }"><span :title="格式化北京时间(row.updatedAt)">{{ formatMailTime(row.updatedAt) }}</span></template></ElTableColumn>
+      <ElTableColumn label="操作" width="300" fixed="right"><template #default="{ row }"><div class="feedback-actions"><ElButton link type="primary" @click="preview = { name: row.name, type: row.type, text: row.text }">预览</ElButton><ElButton link type="primary" @click="edit(row as FeedbackTemplate)">编辑</ElButton><ElButton link type="primary" @click="duplicate(row as FeedbackTemplate)">复制</ElButton><ElButton link :type="row.enabled ? 'warning' : 'primary'" @click="toggle(row as FeedbackTemplate)">{{ row.enabled ? '停用' : '启用' }}</ElButton><ElButton link type="primary" @click="openChanges(row.id, row.type)">变更记录</ElButton><ElButton link type="danger" @click="remove(row as FeedbackTemplate)">删除</ElButton></div></template></ElTableColumn>
       <template #empty><ElEmpty description="没有匹配的评价模板" :image-size="64" /></template>
     </ElTable></div>
     <footer class="feedback-pagination"><span>共 {{ results.length }} 条</span><ElPagination v-model:current-page="page" :page-size="20" :total="results.length" layout="prev, pager, next" size="small" :pager-count="5" /></footer>
+    <TemplateChangeHistory v-if="historyOpen" :kinds="['buyer-positive', 'review-reply']" :template-id="historyId" @close="historyOpen = false" />
     <ElDialog v-model="editorOpen" :title="`${editId ? '编辑' : '新增'}评价模板`" width="min(680px, 94vw)" align-center :close-on-click-modal="false" destroy-on-close>
       <div class="feedback-form" v-prototype="annotation('feedbackEditor', '评价模板编辑')">
         <label><span>模板类型 <i>*</i></span><ElSelect v-model="draft.type" aria-label="评价模板类型" :disabled="!!editId"><ElOption v-for="item in feedbackTemplateTypes" :key="item.value" :value="item.value" :label="item.label" /></ElSelect></label>

@@ -3,6 +3,8 @@ import { createRelatedOrders } from './数据'
 import { getMessageBodyText, validateAttachmentUrl } from './邮箱模型'
 import { richHtmlToText, sanitizeRichHtml } from '../消息模板管理/富文本'
 import type { ContextDataset, Conversation, MailFilters, MessageSource, RelatedOrder, ReplyDraft } from './类型'
+import { getConversationHandlerIds } from './会话处理人'
+import { handlerIdFromLegacy, matchesHandlerFilter } from '@/组件/客服处理人/处理人'
 
 export function getRelatedOrders(conversation: Conversation, orders: RelatedOrder[]): RelatedOrder[] {
   if (conversation.association !== 'confirmed' || !conversation.buyerId) return []
@@ -34,8 +36,9 @@ export function filterConversations(items: Conversation[], source: MessageSource
   const kind = filters.field === 'subject' || filters.field === 'body' ? 'text' : 'identifier'
   if (校验字段搜索(filters.query, filters.mode, kind)) return []
   if (!['buyerId', 'subject', 'body', 'orderNo'].includes(filters.field)) return []
+  const handlerIds = filters.assignees.map(id => handlerIdFromLegacy(id) || id)
   return items.filter(item => {
-    if (item.source !== source || !命中多选(filters.shopIds, item.shopId) || !命中多选(filters.assignees, item.assignee)) return false
+    if (item.source !== source || !命中多选(filters.shopIds, item.shopId) || !matchesHandlerFilter(getConversationHandlerIds(item), handlerIds)) return false
     if (filters.onlyUnread && !item.unread || filters.onlyFlagged && !item.flagged) return false
     if (source === 'buyer' && queue !== 'all' && item.status !== queue) return false
     if (source === 'ebay' && ((queue === 'unread' && !item.unread) || (queue === 'read' && item.unread))) return false

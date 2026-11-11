@@ -4,7 +4,7 @@ import type { ReviewSession } from './类型'
 import { resetReviewViewSession } from './评价视图会话'
 
 function initialSession(): ReviewSession {
-  return { reviews: createReviews(), reasonCategories: createReviewReasons(), buyerFeedback: createBuyerFeedback(), replyDrafts: {}, lastSyncedAt: '2026-10-29T09:00:00+08:00', syncing: false }
+  return { reviews: createReviews(), reasonCategories: createReviewReasons(), reasonOperationLogs: [], buyerFeedback: createBuyerFeedback(), replyDrafts: {}, lastSyncedAt: '2026-10-29T09:00:00+08:00', syncing: false }
 }
 
 /** 同一浏览器会话内两页面共用，路由切换保持、刷新重置；无API或持久化。 */

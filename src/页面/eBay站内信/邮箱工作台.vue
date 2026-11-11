@@ -1,16 +1,25 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import BuyerLink from '@/组件/买家/买家链接.vue'
+import { useBuyerPageActive } from '@/组件/买家/页面活跃'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { routeLocationKey } from 'vue-router'
 import { ArrowLeft, ArrowRight, Document, Link, Lock, Message, MoreFilled, Star, StarFilled, User, FolderOpened, Promotion, EditPen, Warning, Hide, Bell, CollectionTag, Setting } from '@element-plus/icons-vue'
-import { ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElIcon, ElInput, ElMessage, ElMessageBox, ElOption, ElSelect, ElTag, ElTooltip, ElPagination } from 'element-plus'
+import { ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElIcon, ElInput, ElMessage, ElMessageBox, ElOption, ElPopover, ElSelect, ElTag, ElTooltip, ElPagination } from 'element-plus'
 import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import MultiFilter from '@/组件/筛选/多选筛选.vue'
 import { 校验字段搜索, type 搜索字段 } from '@/组件/筛选/筛选工具'
+import { 解析来源时刻 } from '@/页面/订单处理/时间展示工具'
 import RelatedPanel from './相关资料栏.vue'
+import { getOrderAfterSalesContext } from './关联办理资料'
 import ReplyEditor from './回复编辑器.vue'
 import PanelToggle from './面板切换.vue'
 import MailSettings from './站内信设置.vue'
+import TicketSourceActions from '@/页面/工单管理/来源工单操作.vue'
+import CustomerServiceLogList from '@/组件/客服日志/日志列表.vue'
+import { changeMailProperty, recordMailOperation } from './操作日志'
+import type { TicketSource } from '@/页面/工单管理/会话'
 import { tagStyle } from './设置模型'
-import { mailSession as session, draftKey } from './会话'
+import { mailSession as session, draftKey, businessMessages, findBusinessMessage } from './会话'
 import { templateSession, renderReplyTemplate, type TemplateContext } from '../消息模板管理/模型'
 import { richHtmlToSendText, sanitizeRichHtml } from '../消息模板管理/富文本'
 import { filterConversations, formatMailTime, getContextCount, getPreview, getRelatedOrders, validateDraft, MAX_REPLY_BODY_LENGTH } from './模型'
@@ -20,7 +29,16 @@ import type { ContextTab, Conversation, MailFilters, MailMessage, MessageAttachm
 import './站内信样式.css'
 import './邮箱工作台样式.css'
 
-const me = '客服01'
+import { currentHandlerId, currentHandlerName, handlerNames, handlerOptions, handlerIdFromLegacy } from '@/组件/客服处理人/处理人'
+import { getConversationHandlerIds, applyManualHandlers } from './会话处理人'
+import { collectNextMail } from './收取来信'
+const handlerText = (c: Conversation) => handlerNames(getConversationHandlerIds(c))
+const logConversationId = ref('')
+const logOpen = ref(false)
+const logConversation = computed(() => session.conversations.find(item => item.id === logConversationId.value))
+function openOperationLogs(c: Conversation) { logConversationId.value = c.id; logOpen.value = true }
+const route = inject(routeLocationKey, undefined)
+const sourceError = ref('')
 const settingsOpen = ref(false)
 const replyTemplates = computed(() => templateSession.templates.filter(t => t.enabled && t.kind === 'message'))
 const panelCount = computed(() => Number(session.listOpen) + Number(session.readerOpen) + Number(session.contextOpen))
@@ -42,9 +60,10 @@ onMounted(() => { for (const event of ['click', 'input', 'keydown']) document.ad
 onBeforeUnmount(() => { for (const event of ['click', 'input', 'keydown']) document.removeEventListener(event, noteInteraction, true) })
 const defaults = (): MailFilters => ({ shopIds: [], assignees: [], field: 'buyerId', mode: 'contains', query: '', onlyUnread: false, onlyFlagged: false })
 const filters = reactive(defaults()), applied = reactive(defaults())
+const mineApplied = ref(false)
 const fields: 搜索字段[] = [{ value: 'buyerId', label: '买家ID' }, { value: 'subject', label: '消息主题', kind: 'text' }, { value: 'body', label: '消息内容', kind: 'text' }, { value: 'orderNo', label: '关联订单号' }]
 const shops = computed(() => [...new Map(session.conversations.map(c => [c.shopId, { value: c.shopId, label: c.shopName }])).values()])
-const assignees = [{ value: me, label: `${me}（我）` }, { value: '客服02', label: '客服02' }, { value: '客服03', label: '客服03' }, { value: '', label: '未指派' }]
+const assignees = computed(() => handlerOptions.map(item => ({ value: item.value, label: item.value === currentHandlerId.value ? `${item.label}（我）` : item.label })).concat([{ value: '', label: '未分配' }]))
 const queue = ref('all'), page = ref(1), selected = ref<string[]>([]), filterError = ref('')
 const processingFilter = ref<'all' | 'pending' | 'processed'>('all')
 const priorities = ref<string[]>([]), appliedPriorities = ref<string[]>([]), tagsFilter = ref<string[]>([]), appliedTags = ref<string[]>([]), sorting = ref('recent')
@@ -62,7 +81,7 @@ const results = computed(() => {
     .filter(entry => !showProcessingFilters.value || processingFilter.value === 'all' || (entry.conversation.source === 'buyer' && entry.conversation.status === processingFilter.value))
   const rank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
   return rows.sort((a, b) => (sorting.value === 'priority' ? (rank[a.conversation.priority ?? 'normal'] ?? 2) - (rank[b.conversation.priority ?? 'normal'] ?? 2) : 0)
-    || Date.parse(b.message?.at ?? b.conversation.updatedAt) - Date.parse(a.message?.at ?? a.conversation.updatedAt) || a.id.localeCompare(b.id))
+    || (解析来源时刻(b.message?.at ?? b.conversation.updatedAt) ?? -Infinity) - (解析来源时刻(a.message?.at ?? a.conversation.updatedAt) ?? -Infinity) || a.id.localeCompare(b.id))
 })
 const pageRows = computed(() => results.value.slice((page.value - 1) * session.pageSize, page.value * session.pageSize))
 const selectedEntries = computed(() => pageRows.value.filter(entry => selected.value.includes(entry.id)))
@@ -73,6 +92,15 @@ const currentEntry = computed<MailboxEntry | undefined>(() => current.value ? { 
 const readingTitle = computed(() => currentEntry.value?.message?.subject?.trim() || current.value?.subject || '')
 const currentNoticeMessage = computed(() => targetMessageId.value ? currentEntry.value?.message : current.value?.messages.filter(m => m.kind === 'incoming').slice(-1)[0])
 const currentNotice = computed(() => currentNoticeMessage.value?.notice)
+const ticketSources = computed(() => {
+  const conversation = current.value
+  const sources = new Map<string, TicketSource>()
+  if (!conversation?.id?.trim() || !conversation.shopId?.trim() || session.conversations.filter(item => item.id === conversation.id).length !== 1) return sources
+  for (const message of businessMessages(conversation).values()) {
+    sources.set(message.id, { kind: 'message', id: message.id, contextId: conversation.id, shopId: conversation.shopId, shopName: conversation.shopName, summary: message.subject || conversation.subject })
+  }
+  return sources
+})
 function entrySubject(entry: MailboxEntry) { return entry.message?.subject?.trim() || entry.conversation.subject }
 function automationLabel(message?: MailMessage) { return message?.sendSource === 'automation' ? `自动客服规则：${message.automationRuleName?.trim() || '规则名称未提供'}` : '' }
 const related = computed(() => current.value ? getRelatedOrders(current.value, session.orders) : [])
@@ -94,6 +122,11 @@ const handlerSummary = computed(() => current.value?.lastHandledBy ? `${current.
 const folderIcons: Record<string, typeof Message> = { inbox: Message, starred: Star, drafts: EditPen, outbox: Promotion, automated: Setting, failed: Warning, ebay: Bell, ignored: Hide }
 const folderRows = computed(() => mailboxFolders.map(f => { const entries = entriesForFolder(f.id); return { ...f, count: entries.length, pending: entries.filter(isEntryPending).length } }).filter(f => !session.onlyPendingFolders || f.pending > 0 || f.id === session.folder))
 const thread = ref<HTMLElement>(), translations = ref<string[]>([]), notesOnly = ref(false)
+const headerTicketMessages = computed(() => {
+  if (!current.value || notesOnly.value || session.folder === 'drafts') return []
+  const displayedId = targetMessageId.value || (currentNotice.value && currentNoticeMessage.value?.id)
+  return current.value.messages.filter(message => (!displayedId || message.id === displayedId) && ticketSources.value.has(message.id))
+})
 const notes = computed(() => current.value?.messages.filter(m => m.kind === 'note') ?? [])
 const latestNote = computed(() => notes.value[notes.value.length - 1])
 const emptyDraft: ReplyDraft = { body: '', attachments: [] }
@@ -109,6 +142,7 @@ function priorityLabel(c: Conversation) { return priorityOptions.find(p => p.val
 function tagLabel(t: string) { return tagOptions.find(o => o.value === t)?.label ?? t }
 function selectEntry(entry: MailboxEntry, markRead = true) {
   const c = entry.conversation
+  sourceError.value = ''
   session.activeId = c.id; session.activeSource = c.source; activeEntryId.value = entry.id; targetMessageId.value = entry.message?.id ?? ''
   if (markRead) setConversationUnread(c, false)
   session.selectedOrderId = ''; translations.value = []; notesOnly.value = false
@@ -122,10 +156,16 @@ function changeProcessingFilter(value: 'all' | 'pending' | 'processed') { proces
 function applyFilters() {
   filterError.value = 校验字段搜索(filters.query, filters.mode, fields.find(f => f.value === filters.field)?.kind) ?? (fields.some(f => f.value === filters.field) ? '' : '请选择搜索字段')
   if (filterError.value) return
+  mineApplied.value = false
   Object.assign(applied, { ...filters, shopIds: [...filters.shopIds], assignees: [...filters.assignees] }); appliedPriorities.value = [...priorities.value]; appliedTags.value = [...tagsFilter.value]; page.value = 1; selected.value = []; ensureSelection()
 }
 function resetFilters() { Object.assign(filters, defaults()); priorities.value = []; tagsFilter.value = []; queue.value = 'all'; processingFilter.value = 'all'; applyFilters() }
-function showMine() { filters.assignees = [me]; applyFilters() }
+function showMine() { filters.assignees = [currentHandlerId.value]; applyFilters(); mineApplied.value = !filterError.value }
+watch(currentHandlerId, id => {
+  if (!mineApplied.value) return
+  filters.assignees = [id]; applied.assignees = [id]
+  page.value = 1; selected.value = []; ensureSelection()
+})
 function setSelected(entry: MailboxEntry, value: boolean) { selected.value = value ? [...new Set([...selected.value, entry.id])] : selected.value.filter(v => v !== entry.id) }
 function selectPage(value: boolean) { selected.value = value ? pageRows.value.map(c => c.id) : [] }
 function changePage(value: number) { page.value = Math.min(totalPages.value, Math.max(1, Number.isFinite(value) ? Math.floor(value) : 1)); selected.value = [] }
@@ -149,33 +189,56 @@ watch(() => tagOptions.map(t => t.value).join('|'), () => {
 })
 const initialEntry = results.value.find(entry => entry.conversation.id === session.activeId) ?? results.value[0]
 if (initialEntry) selectEntry(initialEntry, false)
-watch(() => session.navigationTarget, target => {
-  if (!target) return
-  const matches = session.conversations.filter(c => c.id === target.conversationId)
-  const c = matches.length === 1 ? matches[0] : undefined
-  if (!c || c.source !== 'buyer' || c.shopId !== target.shopId || c.buyerId !== target.buyerId || c.messages.filter(m => m.id === target.messageId && m.kind === 'incoming' && !m.notice).length !== 1) {
-    delete session.navigationTarget; ElMessage.warning('来信关联已变化，请核对来源消息'); return
-  }
-  session.folder = c.status === 'ignored' ? 'ignored' : 'inbox'; session.activeSource = 'buyer'
+function openSourceMessage(c: Conversation, message: MailMessage) {
+  session.folder = c.status === 'ignored' ? 'ignored' : c.source === 'ebay' ? 'ebay' : message.kind === 'outgoing' ? 'outbox' : 'inbox'
+  session.activeSource = c.source
   session.onlyPendingFolders = false; session.listOpen = true; session.readerOpen = true
   resetFilters()
-  const entry = results.value.find(item => item.conversation.id === c.id && (!item.message || item.message.id === target.messageId))
-  if (entry) { page.value = Math.floor(results.value.indexOf(entry) / session.pageSize) + 1; selectEntry({ ...entry, message: c.messages.find(message => message.id === target.messageId)! }) }
-  else ElMessage.warning('当前来信不可查看，请核对来源消息')
+  const index = results.value.findIndex(item => item.conversation.id === c.id && (!item.message || item.message.id === message.id))
+  if (index < 0) return false
+  page.value = Math.floor(index / session.pageSize) + 1
+  selectEntry({ ...results.value[index]!, message }, message.kind === 'incoming')
+  return true
+}
+watch(() => session.navigationTarget, target => {
+  if (!target) return
+  const source = findBusinessMessage(target.shopId, target.conversationId, target.messageId)
+  if (!source || source.conversation.source !== 'buyer' || source.conversation.buyerId !== target.buyerId || source.message.kind !== 'incoming' || source.message.notice || !openSourceMessage(source.conversation, source.message)) {
+    ElMessage.warning('来信关联已变化，请核对来源消息')
+  }
   delete session.navigationTarget
 }, { immediate: true })
-function recordHandler(c: Conversation, action: string) { c.lastHandledBy = me; c.lastHandledAt = now(); c.lastHandledAction = action }
+if (route) {
+  watch(() => [route.path, route.query.shopId, route.query.conversationId, route.query.messageId], () => {
+    if (route.path !== '/oms/ebay-service/messages') return
+    const { shopId, conversationId, messageId } = route.query
+    if (shopId === undefined && conversationId === undefined && messageId === undefined) {
+      if (sourceError.value) { sourceError.value = ''; ensureSelection() }
+      return
+    }
+    const source = typeof shopId === 'string' && typeof conversationId === 'string' && typeof messageId === 'string' ? findBusinessMessage(shopId, conversationId, messageId) : undefined
+    if (source && openSourceMessage(source.conversation, source.message)) return
+    delete session.navigationTarget
+    session.activeId = ''; activeEntryId.value = ''; targetMessageId.value = ''
+    session.readerOpen = true
+    sourceError.value = '该来源消息无法定位，请核对店铺和消息'
+  }, { immediate: true })
+}
+function recordHandler(c: Conversation, action: string, operator = currentHandlerName.value) { c.lastHandledBy = operator; c.lastHandledAt = now(); c.lastHandledAction = action }
 function statusActionLabel(status: WorkStatus) { return status === 'ignored' ? '忽略会话' : status === 'processed' ? '标注已处理' : '标注待处理' }
 function setStatus(c: Conversation, status: WorkStatus) {
   if (c.status === status || (status !== 'ignored' && (c.source !== 'buyer' || c.status === 'ignored'))) return false
-  c.status = status; c.statusRevision = (c.statusRevision ?? 0) + 1; recordHandler(c, statusActionLabel(status)); return true
+  const previous = c.status
+  c.status = status; c.statusRevision = (c.statusRevision ?? 0) + 1; recordHandler(c, statusActionLabel(status))
+  recordMailOperation(c, currentHandlerName.value, statusActionLabel(status), `${statusActionLabel(previous)} → ${statusActionLabel(status)}`)
+  return true
 }
 function markCurrentStatus() {
   const c = current.value; if (!c || c.source !== 'buyer' || c.status === 'ignored') return
   const status = c.status === 'processed' ? 'pending' : 'processed'
   if (setStatus(c, status)) ElMessage.success(`已完成“${statusActionLabel(status)}”`)
 }
-function restoreConversation(c: Conversation) { if (c.status !== 'ignored') return; c.status = c.source === 'ebay' ? 'processed' : 'pending'; c.statusRevision = (c.statusRevision ?? 0) + 1; recordHandler(c, '取消忽略') }
+function restoreConversation(c: Conversation) { if (c.status !== 'ignored') return; c.status = c.source === 'ebay' ? 'processed' : 'pending'; c.statusRevision = (c.statusRevision ?? 0) + 1; recordHandler(c, '取消忽略'); recordMailOperation(c, currentHandlerName.value, '取消忽略', `已忽略 → ${c.status === 'pending' ? '待处理' : '已处理'}`) }
 async function markBatch(action: string) {
   const entries = [...selectedEntries.value], ids = [...currentSelected.value]; if (!ids.length) return
   const labels: Record<string, string> = { read: '标记已读', unread: '标记未读', flag: '加星关注', unflag: '取消星标', processed: '标注已处理', pending: '标注待处理', ignored: '忽略会话', restore: '取消忽略' }
@@ -194,7 +257,7 @@ async function markBatch(action: string) {
   try { await ElMessageBox.confirm(`对本页已勾选的 ${entries.length} 条记录（${ids.length} 个会话）执行“${labels[action]}”？${skippedText}${action === 'ignored' ? '忽略保留收发记录和草稿，不发送消息。' : ''}`, '批量操作', { confirmButtonText: '确定', cancelButtonText: '取消' }) } catch { return }
   if (action === 'read' || action === 'unread') targets.forEach(c => setConversationUnread(c, action === 'unread'))
   let changed = 0
-  for (const c of targets) { if (action === 'flag' || action === 'unflag') c.flagged = action === 'flag'; if (statusAction && setStatus(c, action as WorkStatus)) changed += 1; if (action === 'restore') restoreConversation(c) }
+  for (const c of targets) { if (action === 'flag' || action === 'unflag') setFlag(c, action === 'flag'); if (statusAction && setStatus(c, action as WorkStatus)) changed += 1; if (action === 'restore') restoreConversation(c) }
   selected.value = []; ElMessage.success(action === 'read' || action === 'unread' ? `已更新 ${targets.length} 个会话的阅读状态` : buyerOnlyAction ? `已对 ${changed} 个会话执行“${labels[action]}”${skipped ? `，跳过 ${skipReasons}` : ''}` : `已更新 ${targets.length} 个会话${skipped ? `，跳过 ${skipReasons}` : ''}`)
 }
 async function ignoreCurrent() { if (!current.value) return; const c = current.value; if (c.status === 'ignored') return restoreConversation(c); try { await ElMessageBox.confirm('忽略后可在“已忽略”查看，收发记录与草稿保留，不发送消息，可取消忽略。', '忽略会话', { confirmButtonText: '忽略', cancelButtonText: '取消' }) } catch { return }; setStatus(c, 'ignored') }
@@ -206,14 +269,52 @@ async function allRead() {
   try { await ElMessageBox.confirm(`将当前店铺、指派客服及搜索条件范围内的 ${targets.length} 个 eBay 通知会话全部标记已读？包含其他分页，同会话全部来信一并更新，不限当前文件夹和已读/未读页签。`, '所有标记为已读', { confirmButtonText: '全部标记已读', cancelButtonText: '取消' }) } catch { return }
   targets.forEach(c => setConversationUnread(c, false)); ElMessage.success(`已将 ${targets.length} 个会话标记已读`)
 }
-const assignmentOpen = ref(false), assignmentIds = ref<string[]>([]), assignmentValue = ref(me)
-function openAssignment(ids: string[]) { assignmentIds.value = [...ids]; assignmentValue.value = current.value?.assignee || me; assignmentOpen.value = true }
-function saveAssignment() { session.conversations.filter(c => assignmentIds.value.includes(c.id)).forEach(c => { c.assignee = assignmentValue.value }); assignmentOpen.value = false; selected.value = []; ElMessage.success('指派客服已更新，实际处理记录保持不变') }
-function assignMe() { if (current.value) { current.value.assignee = me; ElMessage.success('已指派给我') } }
+const assignmentOpen = ref(false), assignmentIds = ref<string[]>([]), assignmentValue = ref<string[]>([])
+const assignmentEdited = ref(false)
+function openAssignment(ids: string[]) {
+  assignmentIds.value = [...ids]
+  const single = ids.length === 1 ? session.conversations.find(c => c.id === ids[0]) : undefined
+  assignmentValue.value = single ? [...getConversationHandlerIds(single)] : []
+  assignmentEdited.value = false
+  assignmentOpen.value = true
+}
+function changeAssignment(value: string[] | string) {
+  assignmentValue.value = (Array.isArray(value) ? value : [value]).map(id => handlerIdFromLegacy(id) || id).filter(Boolean)
+  assignmentEdited.value = true
+}
+function saveAssignment(restore = false) {
+  if (!restore && assignmentIds.value.length > 1 && !assignmentEdited.value) {
+    ElMessage.info('请先选择要指派的客服'); return
+  }
+  const targets = session.conversations.filter(c => assignmentIds.value.includes(c.id))
+  if (targets.length !== assignmentIds.value.length || new Set(targets.map(c => c.id)).size !== targets.length) {
+    ElMessage.warning('目标会话已变化，请关闭并重新选择'); return
+  }
+  if (restore || assignmentEdited.value) {
+    for (const c of targets) applyManualHandlers(c, restore ? null : assignmentValue.value, currentHandlerName.value)
+  }
+  assignmentOpen.value = false
+  selected.value = []
+}
+function assignMe() {
+  if (current.value) applyManualHandlers(current.value, [currentHandlerId.value], currentHandlerName.value)
+}
+function collectMail() {
+  const c = collectNextMail(session.conversations)
+  if (!c) { ElMessage.info('暂无新来信'); return }
+  changeFolder('inbox')
+  resetFilters()
+  const message = c.messages[c.messages.length - 1]!
+  const entry = results.value.find(row => row.conversation.id === c.id && row.message?.id === message.id)
+  if (entry) selectEntry(entry, false)
+  ElMessage.success('已收取一封新来信')
+}
+function setFlag(c: Conversation, value: boolean) { changeMailProperty(c, 'flagged', value, currentHandlerName.value, value ? '加星关注' : '取消星标', value ? '未星标 → 已星标' : '已星标 → 未星标') }
+function setPriority(c: Conversation, value: string) { if (!priorityOptions.some(item => item.value === value)) return; changeMailProperty(c, 'priority', value as Conversation['priority'], currentHandlerName.value, '设置优先级', `${priorityLabel(c)} → ${priorityOptions.find(item => item.value === value)!.label}`) }
 const tagDialog = ref(false), tagIds = ref<string[]>([]), tagDraft = ref<string[]>([])
 function editTags(ids: string[]) { tagIds.value = [...ids]; tagDraft.value = ids.length === 1 ? [...(session.conversations.find(c => c.id === ids[0])?.tags ?? [])] : []; tagDialog.value = true }
-function saveTags() { session.conversations.filter(c => tagIds.value.includes(c.id)).forEach(c => { c.tags = tagDraft.value.filter(id => tagOptions.some(t => t.value === id)) }); tagDialog.value = false; ElMessage.success('业务标签已更新') }
-function batchPriority(value: string) { const ids = [...currentSelected.value]; session.conversations.filter(c => ids.includes(c.id)).forEach(c => { c.priority = value as Conversation['priority'] }); ElMessage.success('已更新所选会话优先级') }
+function saveTags() { session.conversations.filter(c => tagIds.value.includes(c.id)).forEach(c => { const tags = [...new Set(tagDraft.value.filter(id => tagOptions.some(t => t.value === id)))]; changeMailProperty(c, 'tags', tags, currentHandlerName.value, '设置业务标签', `${(c.tags ?? []).map(tagLabel).join('、') || '无标签'} → ${tags.map(tagLabel).join('、') || '无标签'}`) }); tagDialog.value = false; ElMessage.success('业务标签已更新') }
+function batchPriority(value: string) { const ids = [...currentSelected.value]; session.conversations.filter(c => ids.includes(c.id)).forEach(c => setPriority(c, value)); ElMessage.success('已更新所选会话优先级') }
 function saveDraft() { if (!current.value) return; composer.value.savedAt = now(); ElMessage.success('草稿已保留在本次会话中') }
 function attachmentInfo(a: MessageAttachment) { ElMessage.info(`${a.name} · ${a.source === 'url' ? '链接附件待获取' : `${(a.size / 1024).toFixed(0)} KB`}`) }
 function toggleTranslation(m: MailMessage) { if (!m.translation) return void ElMessage.info('此条消息暂无译文'); translations.value = translations.value.includes(m.id) ? translations.value.filter(v => v !== m.id) : [...translations.value, m.id] }
@@ -223,26 +324,29 @@ function viewKey() { return JSON.stringify([session.folder, queue.value, process
 function prepareSend() {
   if (!current.value) return
   const error = validateDraft(composer.value, session.composeMode); if (error) return void ElMessage.warning(error)
-  if (session.composeMode === 'note') { current.value.messages.push({ ...copyDraft(composer.value), id: id(), kind: 'note', sender: me, body: composer.value.body.trim(), at: now() }); recordHandler(current.value, '添加内部备注'); session.drafts[draftKey(current.value.id, 'note')] = { body: '', attachments: [] }; ElMessage.success('内部备注已添加，不发送给买家'); return }
+  if (session.composeMode === 'note') { const messageId = id(); current.value.messages.push({ ...copyDraft(composer.value), id: messageId, kind: 'note', sender: currentHandlerName.value, body: composer.value.body.trim(), at: now() }); recordHandler(current.value, '添加内部备注'); recordMailOperation(current.value, currentHandlerName.value, '添加内部备注', `备注记录：${messageId}`); session.drafts[draftKey(current.value.id, 'note')] = { body: '', attachments: [] }; ElMessage.success('内部备注已添加，不发送给买家'); return }
   const reason = ineligible(current.value); if (reason) return void ElMessage.warning(reason)
   if (/{{|}}/.test(composer.value.body)) return void ElMessage.warning('正文还有未填写的变量，请补齐后再发送')
   const at = results.value.findIndex(entry => entry.id === activeEntryId.value), nextIds = [...new Set([...results.value.slice(at + 1), ...results.value.slice(0, Math.max(at, 0))].filter(entry => entry.conversation.id !== current.value!.id).map(entry => entry.conversation.id))]
   const snapshot: SendSnapshot = { conversationId: current.value.id, buyerId: current.value.buyerId, shopName: current.value.shopName, draft: { body: composer.value.body, attachments: composer.value.attachments.map(a => ({ ...a })) }, draftSignature: signature(composer.value), markProcessedOnSend: session.markProcessedOnSend, statusRevision: current.value.statusRevision ?? 0, nextIds, viewKey: viewKey(), autoNext: session.autoNext, interactionRevision }
   const c = current.value, messageId = id()
-  c.messages.push({ ...snapshot.draft, id: messageId, kind: 'outgoing', sendSource: 'manual', markProcessedOnSuccess: snapshot.markProcessedOnSend, sender: me, body: snapshot.draft.body, at: now(), delivery: 'sending' }); c.updatedAt = now(); targetMessageId.value = messageId
+  c.messages.push({ ...snapshot.draft, id: messageId, kind: 'outgoing', sendSource: 'manual', markProcessedOnSuccess: snapshot.markProcessedOnSend, sender: currentHandlerName.value, body: snapshot.draft.body, at: now(), delivery: 'sending' }); c.updatedAt = now(); targetMessageId.value = messageId
+  recordMailOperation(c, currentHandlerName.value, '发送站内信', `消息记录：${messageId}`, '发送中')
   void finishDelivery(c, messageId, c.sendScenario, snapshot)
 }
-async function finishDelivery(c: Conversation, messageId: string, outcome: Conversation['sendScenario'], snapshot?: SendSnapshot) {
+async function finishDelivery(c: Conversation, messageId: string, outcome: Conversation['sendScenario'], snapshot?: SendSnapshot, attemptOperator?: string) {
+  const operator = attemptOperator ?? c.messages.find(message => message.id === messageId)?.sender ?? ''
   const statusRevision = snapshot?.statusRevision ?? c.statusRevision ?? 0
   const markProcessedOnSuccess = snapshot?.markProcessedOnSend ?? c.messages.find(m => m.id === messageId)?.markProcessedOnSuccess ?? true
   await new Promise(resolve => setTimeout(resolve, 900))
   const stored = session.conversations.find(v => v.id === c.id), message = stored?.messages.find(m => m.id === messageId)
   if (!stored || !message || message.delivery !== 'sending') return
   message.delivery = outcome
+  recordMailOperation(stored, operator, '站内信发送结果', `消息记录：${messageId}`, outcome === 'success' ? '发送成功' : outcome === 'unknown' ? '结果待核查' : '发送失败')
   if (outcome === 'success') {
     if ((stored.statusRevision ?? 0) === statusRevision) {
-      if (markProcessedOnSuccess && stored.status !== 'ignored') stored.status = 'processed'
-      recordHandler(stored, '回复成功')
+      if (markProcessedOnSuccess && stored.status !== 'ignored' && stored.status !== 'processed') { stored.status = 'processed'; recordMailOperation(stored, '系统', '发送成功后标注已处理', `消息记录：${messageId}；依照本次发送选项更新`) }
+      recordHandler(stored, '回复成功', operator)
     }
     if (snapshot && signature(session.drafts[draftKey(c.id, 'reply')] ?? emptyDraft) === snapshot.draftSignature) session.drafts[draftKey(c.id, 'reply')] = { body: '', attachments: [] }
     if (snapshot?.autoNext && session.autoNext && session.activeId === c.id && snapshot.viewKey === viewKey() && snapshot.interactionRevision === interactionRevision) {
@@ -259,9 +363,10 @@ async function retryMessage(c: Conversation, m: MailMessage) {
   if (/{{|}}/.test(retryBody)) return void ElMessage.warning('正文还有未填写的变量，请补齐后再发送')
   m.body = retryBody; delete m.bodyHtml
   m.delivery = 'sending'; m.failureReason = undefined
+  recordMailOperation(c, currentHandlerName.value, '重试站内信', `消息记录：${m.id}`, '发送中')
   const d = session.drafts[draftKey(c.id, 'reply')], same = d && signature({ ...d, body: d.body.trim() }) === signature({ body: m.body, bodyHtml: m.bodyHtml, attachments: m.attachments ?? [] })
   const snapshot = same ? { conversationId: c.id, buyerId: c.buyerId, shopName: c.shopName, draft: copyDraft(d), draftSignature: signature(d), markProcessedOnSend: m.markProcessedOnSuccess ?? true, statusRevision: c.statusRevision ?? 0 } : undefined
-  void finishDelivery(c, m.id, 'success', snapshot)
+  void finishDelivery(c, m.id, 'success', snapshot, currentHandlerName.value)
 }
 const deliveryText = { sending: '发送中', success: '已发送', failed: '发信失败', unknown: '发信失败 · 待核查' }
 
@@ -317,7 +422,8 @@ async function confirmBatch() {
   const jobs = batchRows.value.map(async c => {
     const reason = batchIssue(c); if (reason) { batchResults.value[c.id] = `未发送：${reason}`; return }
     const draft = batchSentDrafts.value[c.id]; if (!draft?.body.trim()) { batchResults.value[c.id] = '未发送：请填写正文'; return }
-    const messageId = id(); c.messages.push({ ...draft, id: messageId, kind: 'outgoing', sendSource: 'manual', markProcessedOnSuccess: true, sender: me, body: draft.body, at: now(), delivery: 'sending' }); c.updatedAt = now(); batchResults.value[c.id] = '发送中'
+    const messageId = id(); c.messages.push({ ...draft, id: messageId, kind: 'outgoing', sendSource: 'manual', markProcessedOnSuccess: true, sender: currentHandlerName.value, body: draft.body, at: now(), delivery: 'sending' }); c.updatedAt = now(); batchResults.value[c.id] = '发送中'
+    recordMailOperation(c, currentHandlerName.value, '批量发送站内信', `消息记录：${messageId}`, '发送中')
     const outcome = c.sendScenario
     await finishDelivery(c, messageId, outcome); batchResults.value[c.id] = outcome === 'success' ? '已发送' : outcome === 'failed' ? '发信失败，可单条重试' : '发信失败 · 待核查'
   })
@@ -331,7 +437,8 @@ const forwardBody = computed(() => {
 })
 function openForward() { if (!current.value) return; forwardId.value = current.value.id; forwardEmail.value = ''; forwardComment.value = ''; forwardReview.value = false; forwardError.value = ''; forwardOpen.value = true }
 function reviewForward() { forwardError.value = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(forwardEmail.value.trim()) ? '' : '请输入一个有效的收件邮箱'; if (!forwardError.value) forwardReview.value = true }
-function confirmForward() { const c = forwardConversation.value; if (!c || !forwardReview.value) return; c.messages.push({ id: id(), kind: 'note', sender: me, at: now(), body: `转发记录\n收件人：${forwardEmail.value.trim()}\n${forwardComment.value.trim() || '未添加附言'}\n仅转发公开会话文字，不包含内部备注、附件文件与关联订单资料。`, forwardedTo: forwardEmail.value.trim() }); recordHandler(c, '转发'); forwardOpen.value = false; ElMessage.success('转发完成') }
+function confirmForward() { const c = forwardConversation.value; if (!c || !forwardReview.value) return; const messageId = id(); c.messages.push({ id: messageId, kind: 'note', sender: currentHandlerName.value, at: now(), body: `转发记录\n收件人：${forwardEmail.value.trim()}\n${forwardComment.value.trim() || '未添加附言'}\n仅转发公开会话文字，不包含内部备注、附件文件与关联订单资料。`, forwardedTo: forwardEmail.value.trim() }); recordHandler(c, '转发'); recordMailOperation(c, currentHandlerName.value, '转发站内信', `转发记录：${messageId}`, '已记录本地结果'); forwardOpen.value = false; ElMessage.success('转发完成') }
+const buyerPageActive = useBuyerPageActive()
 </script>
 
 <template>
@@ -339,14 +446,15 @@ function confirmForward() { const c = forwardConversation.value; if (!c || !forw
     <header class="mail-toolbar" aria-label="站内信筛选" v-prototype="annotation('filters', '站内信筛选')">
       <div class="mail-filter-controls">
         <MultiFilter v-model="filters.shopIds" :options="shops" placeholder="全部店铺" :width="132" />
-        <MultiFilter v-model="filters.assignees" :options="assignees" placeholder="指派客服" :width="136" />
-        <ElButton :class="{ 'is-applied': applied.assignees.length === 1 && applied.assignees[0] === me }" @click="showMine">只看我的</ElButton>
+        <MultiFilter v-model="filters.assignees" :options="assignees" placeholder="处理人" :width="136" />
+        <ElButton :class="{ 'is-applied': applied.assignees.length === 1 && applied.assignees[0] === currentHandlerId }" @click="showMine">只看我的</ElButton>
         <MultiFilter v-model="priorities" :options="priorityOptions" placeholder="全部优先级" :width="132" />
         <MultiFilter v-model="tagsFilter" :options="tagOptions" placeholder="全部标签" :width="132" />
         <ElCheckbox v-model="filters.onlyFlagged">仅星标</ElCheckbox>
         <div class="mail-search-actions"><FieldSearch v-model="filters.query" v-model:field="filters.field" v-model:mode="filters.mode" :fields="fields" aria-prefix="站内信" :width="365" @search="applyFilters" /><ElButton type="primary" @click="applyFilters">查询</ElButton><ElButton @click="resetFilters">重置</ElButton></div>
       </div>
       <div class="mail-toolbar-actions">
+        <ElButton class="mail-collect-trigger" v-prototype="annotation('collect', '收取来信')" @click="collectMail">收取来信</ElButton>
         <ElButton class="mail-settings-trigger" v-prototype="annotation('settings', '站内信设置')" @click="settingsOpen = true"><ElIcon><Setting /></ElIcon>站内信设置</ElButton>
         <div class="mail-panel-switches" role="group" aria-label="窗口布局" v-prototype="annotation('layout', '窗口组合布局')">
           <PanelToggle label="信件列表" side="left" :active="session.listOpen" :disabled="session.listOpen && panelCount === 1" @toggle="togglePanel('listOpen')" />
@@ -377,14 +485,14 @@ function confirmForward() { const c = forwardConversation.value; if (!c || !forw
         </div>
         <div class="mail-list-scroll"><ElEmpty v-if="!pageRows.length" description="没有匹配的信件" :image-size="62"><ElButton text type="primary" @click="resetFilters">重置筛选</ElButton></ElEmpty>
           <article v-for="entry in pageRows" :key="entry.id" class="mail-list-row" :data-entry-id="entry.id" :data-message-id="entry.message?.id" :class="{ selected: activeEntryId === entry.id, unread: isEntryUnread(entry) }">
-            <div class="mail-row-select"><ElCheckbox :model-value="selected.includes(entry.id)" :aria-label="`勾选${entrySubject(entry)} ${entry.conversation.buyerId || 'eBay'}`" @change="setSelected(entry, $event === true)" /><button class="mail-star" :class="{ active: entry.conversation.flagged }" :aria-label="`${entry.conversation.flagged ? '取消星标' : '加星关注'} ${entry.conversation.buyerId || entry.conversation.subject}`" @click="entry.conversation.flagged = !entry.conversation.flagged"><ElIcon><component :is="entry.conversation.flagged ? StarFilled : Star" /></ElIcon></button></div>
-            <button class="mail-row-content" :aria-label="`打开${entrySubject(entry)} ${entry.conversation.buyerId || 'eBay'}`" :aria-pressed="activeEntryId === entry.id" @click="selectEntry(entry)">
-              <span class="mail-row-top"><span class="mail-row-name"><i v-if="isEntryUnread(entry)" class="mail-unread-dot" />{{ entry.conversation.source === 'ebay' ? 'eBay' : entry.conversation.buyerId }}</span><time>{{ formatMailTime(entry.message?.at ?? entry.conversation.updatedAt) }}</time></span>
+            <div class="mail-row-select"><ElCheckbox :model-value="selected.includes(entry.id)" :aria-label="`勾选${entrySubject(entry)} ${entry.conversation.buyerId || 'eBay'}`" @change="setSelected(entry, $event === true)" /><button class="mail-star" :class="{ active: entry.conversation.flagged }" :aria-label="`${entry.conversation.flagged ? '取消星标' : '加星关注'} ${entry.conversation.buyerId || entry.conversation.subject}`" @click="setFlag(entry.conversation, !entry.conversation.flagged)"><ElIcon><component :is="entry.conversation.flagged ? StarFilled : Star" /></ElIcon></button></div>
+            <div class="mail-row-content" role="button" tabindex="0" @keydown.enter.self.prevent="selectEntry(entry)" @keydown.space.self.prevent="selectEntry(entry)" :aria-label="`打开${entrySubject(entry)} ${entry.conversation.buyerId || 'eBay'}`" :aria-pressed="activeEntryId === entry.id" @click="selectEntry(entry)">
+              <span class="mail-row-top"><span class="mail-row-name"><i v-if="isEntryUnread(entry)" class="mail-unread-dot" /><template v-if="entry.conversation.source === 'ebay'">eBay</template><BuyerLink v-else :shop-id="entry.conversation.shopId" :buyer-id="entry.conversation.buyerId" /></span><time>{{ formatMailTime(entry.message?.at ?? entry.conversation.updatedAt) }}</time></span>
               <span class="mail-row-subject-line"><strong class="mail-row-subject" :title="entrySubject(entry)"><i v-if="entry.conversation.priority === 'urgent' || entry.conversation.priority === 'high'" class="mail-priority-dot" :class="entry.conversation.priority" :title="priorityLabel(entry.conversation)" />{{ entrySubject(entry) }}</strong><span v-if="entry.conversation.source === 'buyer'" class="mail-row-status" :class="`status-${entry.conversation.status}`">{{ entry.conversation.status === 'processed' ? '已处理' : entry.conversation.status === 'ignored' ? '已忽略' : '待处理' }}</span></span><span class="mail-row-preview">{{ entry.message ? getMessageBodyText(entry.message) : getPreview(entry.conversation) }}</span>
               <span v-if="entry.message?.delivery || entry.conversation.tags?.length || entry.conversation.messages.some(m => m.kind === 'note')" class="mail-row-badges"><em v-if="entry.message?.delivery" :class="{ 'mail-failed-badge': ['failed', 'unknown'].includes(entry.message.delivery) }">{{ deliveryText[entry.message.delivery] }}</em><em v-if="entry.message?.sendSource === 'automation'" class="mail-automation-badge">自动发送</em><em v-for="t in entry.conversation.tags?.slice(0, 2)" :key="t" :style="tagStyle(t)">{{ tagLabel(t) }}</em><em v-if="entry.conversation.messages.some(m => m.kind === 'note')" class="mail-note-badge">备注 {{ entry.conversation.messages.filter(m => m.kind === 'note').length }}</em></span>
               <span v-if="automationLabel(entry.message)" class="mail-automation-rule" :title="automationLabel(entry.message)">{{ automationLabel(entry.message) }}</span>
-              <span class="mail-row-bottom"><span>{{ entry.conversation.shopName }}</span><span v-if="draftPresent(entry.conversation)" class="mail-draft-tag">草稿</span><span v-if="entry.conversation.source === 'buyer'">{{ entry.conversation.assignee || '未指派' }}</span></span>
-            </button>
+              <span class="mail-row-bottom"><span>{{ entry.conversation.shopName }}</span><span v-if="draftPresent(entry.conversation)" class="mail-draft-tag">草稿</span><span v-if="entry.conversation.source === 'buyer'">{{ handlerText(entry.conversation) }}</span></span>
+            </div>
           </article>
         </div>
         <footer class="mail-list-footer" v-prototype="annotation('pagination', '分页与每页条数')"><div class="mail-page-size"><span>共 {{ results.length }} 条记录</span><label>每页 <select v-model.number="session.pageSize" aria-label="每页条数" @change="changePageSize"><option :value="20">20 条</option><option :value="50">50 条</option><option :value="100">100 条</option></select></label></div><div class="mail-page-navigation"><button :disabled="page === 1" aria-label="首页" @click="changePage(1)">«</button><button :disabled="page === 1" aria-label="上一页" @click="changePage(page - 1)">‹</button><span>第 <input :value="page" aria-label="跳转页码" inputmode="numeric" type="number" min="1" :max="totalPages" @change="changePage(Number(($event.target as HTMLInputElement).value) || 1)" @keydown.enter="changePage(Number(($event.target as HTMLInputElement).value) || 1)" /> / {{ totalPages }} 页</span><button :disabled="page >= totalPages" aria-label="下一页" @click="changePage(page + 1)">›</button><button :disabled="page >= totalPages" aria-label="末页" @click="changePage(totalPages)">»</button></div></footer>
@@ -396,39 +504,56 @@ function confirmForward() { const c = forwardConversation.value; if (!c || !forw
           <div class="mail-header-primary">
             <div class="mail-reader-identity">
               <span class="mail-person-icon"><ElIcon><component :is="current.source === 'ebay' ? Message : User" /></ElIcon></span>
-              <span class="mail-reader-party" :title="current.source === 'ebay' ? 'eBay' : current.buyerId">{{ current.source === 'ebay' ? 'eBay' : current.buyerId }}</span>
+              <span class="mail-reader-party" :title="current.source === 'ebay' ? 'eBay' : current.buyerId"><template v-if="current.source === 'ebay'">eBay</template><BuyerLink v-else :shop-id="current.shopId" :buyer-id="current.buyerId" /></span>
               <ElTag v-if="current.source === 'buyer'" size="small" :type="current.status === 'processed' ? 'success' : current.status === 'ignored' ? 'info' : 'warning'" effect="plain">{{ current.status === 'processed' ? '已处理' : current.status === 'ignored' ? '已忽略' : '待处理' }}</ElTag>
               <ElTag v-else-if="current.status === 'ignored'" size="small" type="info" effect="plain">已忽略</ElTag>
               <span class="mail-header-context" :title="current.shopName">{{ current.shopName }}<template v-if="current.source === 'ebay'"> · {{ formatMailTime(current.updatedAt) }}</template></span>
             </div>
             <div class="mail-reader-actions">
+              <TicketSourceActions v-if="headerTicketMessages.length === 1" :source="ticketSources.get(headerTicketMessages[0]!.id)!" :compact="current.source === 'buyer'" button-style="plain" />
+              <ElPopover v-else-if="headerTicketMessages.length > 1" :key="current.id" trigger="click" placement="bottom-end" :width="360">
+                <template #reference><ElButton size="small" plain type="primary">创建工单</ElButton></template>
+                <strong class="mail-ticket-select-label">选择来源消息</strong>
+                <ul class="mail-ticket-select-list">
+                  <li v-for="message in headerTicketMessages" :key="message.id">
+                    <div><b>{{ message.sender }} · {{ formatMailTime(message.at) }}</b><p>{{ getMessageBodyText(message) }}</p></div>
+                    <TicketSourceActions :source="ticketSources.get(message.id)!" compact />
+                  </li>
+                </ul>
+              </ElPopover>
               <ElButton v-if="current.source === 'buyer' && current.status !== 'ignored'" class="mail-process-action" v-prototype="annotation('queue', '本地待处理与已处理')" type="primary" plain size="small" @click="markCurrentStatus">{{ current.status === 'processed' ? '标注待处理' : '标注已处理' }}</ElButton>
               <ElButton class="mail-inline-action" link v-prototype="annotation('ignore', '忽略与恢复')" @click="ignoreCurrent">{{ current.status === 'ignored' ? '取消忽略' : '忽略' }}</ElButton>
-              <ElTooltip :content="current.flagged ? '取消星标' : '加星关注'"><ElButton text :aria-label="current.flagged ? '取消当前星标' : '关注当前信件'" :class="{ 'is-flagged': current.flagged }" @click="current.flagged = !current.flagged"><ElIcon><component :is="current.flagged ? StarFilled : Star" /></ElIcon></ElButton></ElTooltip>
-              <ElDropdown trigger="click"><ElButton text aria-label="当前信件更多操作"><ElIcon><MoreFilled /></ElIcon></ElButton><template #dropdown><ElDropdownMenu><ElDropdownItem v-if="currentEntry" @click="setConversationUnread(current, !current.unread)"><span v-prototype="annotation('read', '整会话已读未读同步')">{{ current.unread ? '标记已读' : '标记未读' }}</span></ElDropdownItem><ElDropdownItem @click="openAssignment([current.id])">指派客服</ElDropdownItem><ElDropdownItem @click="openForward">转发站内信</ElDropdownItem><ElDropdownItem @click="ignoreCurrent">{{ current.status === 'ignored' ? '取消忽略' : '忽略会话' }}</ElDropdownItem></ElDropdownMenu></template></ElDropdown>
+              <ElTooltip :content="current.flagged ? '取消星标' : '加星关注'"><ElButton text :aria-label="current.flagged ? '取消当前星标' : '关注当前信件'" :class="{ 'is-flagged': current.flagged }" @click="setFlag(current, !current.flagged)"><ElIcon><component :is="current.flagged ? StarFilled : Star" /></ElIcon></ElButton></ElTooltip>
+              <ElDropdown trigger="click"><ElButton text aria-label="当前信件更多操作"><ElIcon><MoreFilled /></ElIcon></ElButton><template #dropdown><ElDropdownMenu><ElDropdownItem v-if="currentEntry" @click="setConversationUnread(current, !current.unread)"><span v-prototype="annotation('read', '整会话已读未读同步')">{{ current.unread ? '标记已读' : '标记未读' }}</span></ElDropdownItem><ElDropdownItem @click="openAssignment([current.id])">指派客服</ElDropdownItem><ElDropdownItem @click="openForward">转发站内信</ElDropdownItem><ElDropdownItem @click="openOperationLogs(current)"><span v-prototype="annotation('operationLogs', '会话操作日志')">操作日志</span></ElDropdownItem><ElDropdownItem @click="ignoreCurrent">{{ current.status === 'ignored' ? '取消忽略' : '忽略会话' }}</ElDropdownItem></ElDropdownMenu></template></ElDropdown>
             </div>
           </div>
           <div class="mail-header-secondary">
-            <div class="mail-classification" v-prototype="annotation('priority', '优先级与业务标签')"><label>优先级 <select v-model="current.priority" aria-label="当前会话优先级"><option v-for="p in priorityOptions" :key="p.value" :value="p.value">{{ p.label }}</option></select></label><button class="mail-tag-editor" v-prototype="annotation('tags', '个人星标与业务标签')" :title="current.tags?.length ? current.tags.map(tagLabel).join(' / ') : '添加标签'" @click="editTags([current.id])"><ElIcon><CollectionTag /></ElIcon><span class="mail-active-tags"><i v-for="t in current.tags" :key="t" :style="tagStyle(t)">{{ tagLabel(t) }}</i><span v-if="!current.tags?.length">添加标签</span></span></button></div>
-            <div v-if="current.source === 'buyer'" class="mail-ownership" v-prototype="annotation('assignment', '指派客服与实际处理人')"><span class="mail-assignment-controls">指派客服 <button @click="openAssignment([current.id])">{{ current.assignee || '未指派' }}</button><button v-if="current.assignee !== me" class="mail-claim" @click="assignMe">指派给我</button></span><ElTooltip :content="`最近处理：${handlerSummary}`" placement="bottom"><span class="mail-last-handler" tabindex="0">最近处理：{{ handlerSummary }}</span></ElTooltip></div>
+            <div class="mail-classification" v-prototype="annotation('priority', '优先级与业务标签')"><label>优先级 <select :value="current.priority ?? 'normal'" aria-label="当前会话优先级" @change="setPriority(current, ($event.target as HTMLSelectElement).value)"><option v-for="p in priorityOptions" :key="p.value" :value="p.value">{{ p.label }}</option></select></label><button class="mail-tag-editor" v-prototype="annotation('tags', '个人星标与业务标签')" :title="current.tags?.length ? current.tags.map(tagLabel).join(' / ') : '添加标签'" @click="editTags([current.id])"><ElIcon><CollectionTag /></ElIcon><span class="mail-active-tags"><i v-for="t in current.tags" :key="t" :style="tagStyle(t)">{{ tagLabel(t) }}</i><span v-if="!current.tags?.length">添加标签</span></span></button></div>
+            <div v-if="current.source === 'buyer'" class="mail-ownership" v-prototype="annotation('assignment', '指派客服与实际处理人')"><span class="mail-assignment-controls">处理人 <button @click="openAssignment([current.id])">{{ handlerText(current) }}</button><button v-if="!getConversationHandlerIds(current).includes(currentHandlerId)" class="mail-claim" @click="assignMe">指派给我</button></span><ElTooltip :content="`最近处理：${handlerSummary}`" placement="bottom"><span class="mail-last-handler" tabindex="0">最近处理：{{ handlerSummary }}</span></ElTooltip></div>
           </div>
         </header>
         <div v-if="outsideResults" class="mail-outside-note">当前信件已不在筛选结果中，内容保留供查看。</div>
-        <div v-if="current.source === 'buyer'" class="mail-context-summary" v-prototype="annotation('association', '当前订单与关联记录')"><template v-if="order"><button @click="openContext('order')">当前订单 <b>{{ order.orderNo }}</b></button><span class="mail-summary-divider" /><button @click="openContext('afterSales')">售后 <b>{{ countLabel(getContextCount(order.afterSales)) }}</b></button><button @click="openContext('disputes')">纠纷 <b>{{ countLabel(getContextCount(order.disputes)) }}</b></button><button @click="openContext('reviews')">评价 <b>{{ countLabel(getContextCount(order.reviews)) }}</b></button></template><template v-else><span>{{ associationLabel }}</span><button v-if="current.product || related.length" @click="openContext('order')">查看相关资料</button></template></div>
+        <div v-if="current.source === 'buyer'" class="mail-context-summary" v-prototype="annotation('association', '当前订单与关联记录')"><template v-if="order"><button @click="openContext('order')">当前订单 <b>{{ order.orderNo }}</b></button><span class="mail-summary-divider" /><button @click="openContext('afterSales')">售后 <b>{{ countLabel(getOrderAfterSalesContext(order).count) }}</b></button><button @click="openContext('disputes')">纠纷 <b>{{ countLabel(getContextCount(order.disputes)) }}</b></button><button @click="openContext('reviews')">评价 <b>{{ countLabel(getContextCount(order.reviews)) }}</b></button></template><template v-else><span>{{ associationLabel }}</span><button v-if="current.product || related.length" @click="openContext('order')">查看相关资料</button></template></div>
         <button v-if="latestNote" class="mail-note-summary" @click="notesOnly = !notesOnly" v-prototype="annotation('notes', '内部备注展示')"><ElIcon><Lock /></ElIcon><b>内部备注 {{ notes.length }}</b><span>{{ latestNote.body }}</span><em>{{ notesOnly ? '显示全部往来' : '查看备注' }}</em></button>
         <div v-if="current.source === 'ebay' && currentNotice && !notesOnly" ref="thread" class="mail-notice-scroll" v-prototype="annotation('notice', '平台通知原文阅读')"><article class="mail-notice-document" :data-message-id="currentNoticeMessage?.id"><div class="mail-notice-wordmark" aria-label="eBay"><span>e</span><span>b</span><span>a</span><span>y</span></div><div class="mail-notice-rule" /><h2>{{ currentNotice.heading }}</h2><p v-for="(p, n) in currentNotice.paragraphs" :key="n">{{ p }}</p><section v-for="(s, n) in currentNotice.sections" :key="n"><h3>{{ s.title }}</h3><p>{{ s.content }}</p></section><footer>{{ currentNotice.footer }}</footer></article></div>
-        <template v-else><div v-if="current.source === 'buyer'" class="mail-thread-controls"><button v-prototype="annotation('translation', '翻译参考与原文')" @click="translateAll">{{ translations.length ? '收起中文' : '全文翻译为中文' }}</button><ElCheckbox v-model="session.autoNext" v-prototype="annotation('autoNext', '回复成功自动下一封')">自动下一封</ElCheckbox></div><div ref="thread" class="mail-thread" aria-label="消息往来" v-prototype="annotation('conversation', '消息往来与内部记录')"><div class="mail-thread-date"><span>{{ notesOnly ? '仅内部备注 · 买家不可见' : '消息往来 · 北京时间' }}</span></div><article v-for="m in current.messages.filter(m => !notesOnly || m.kind === 'note')" :key="m.id" class="mail-message" :data-message-id="m.id" :class="[`mail-message-${m.kind}`, { 'is-target-message': targetMessageId === m.id }]"><div class="mail-message-meta"><span><ElIcon v-if="m.kind === 'note'"><Lock /></ElIcon>{{ m.kind === 'note' ? '内部备注 · ' : '' }}{{ m.sender }}<em v-if="automationLabel(m)" class="mail-automation-origin" :title="automationLabel(m)">{{ automationLabel(m) }}</em></span><time>{{ formatMailTime(m.at) }}</time></div><div class="mail-message-body"><strong v-if="m.subject" class="mail-message-subject">{{ m.subject }}</strong><div v-if="m.bodyHtml" class="mail-rich-body" v-html="sanitizeRichHtml(m.bodyHtml)" /><span v-else>{{ getMessageBodyText(m) }}</span><div v-if="translations.includes(m.id)" class="mail-translation">中文参考：{{ m.translation }}</div><button v-for="a in m.attachments" :key="a.id" class="mail-message-attachment" @click="attachmentInfo(a)"><ElIcon><Document /></ElIcon>{{ a.name }}</button></div><button v-if="m.kind === 'incoming' && m.translation" class="mail-translate-button" @click="toggleTranslation(m)">{{ translations.includes(m.id) ? '收起译文' : '翻译为中文' }}</button><div v-if="m.delivery" class="mail-delivery" :class="`delivery-${m.delivery}`"><span>{{ deliveryText[m.delivery] }}</span><button v-if="m.delivery === 'failed'" v-prototype="annotation('send', '失败重试与待核查')" :disabled="!!ineligible(current)" @click="retryMessage(current, m)">重试</button></div><p v-if="m.failureReason" class="mail-failure-reason">{{ m.failureReason }}</p></article></div></template>
+        <template v-else><div v-if="current.source === 'buyer'" class="mail-thread-controls"><button v-prototype="annotation('translation', '翻译参考与原文')" @click="translateAll">{{ translations.length ? '收起中文' : '全文翻译为中文' }}</button><ElCheckbox v-model="session.autoNext" v-prototype="annotation('autoNext', '回复成功自动下一封')">自动下一封</ElCheckbox></div><div ref="thread" class="mail-thread" aria-label="消息往来" v-prototype="annotation('conversation', '消息往来与内部记录')"><div class="mail-thread-date"><span>{{ notesOnly ? '仅内部备注 · 买家不可见' : '消息往来 · 北京时间' }}</span></div><article v-for="m in current.messages.filter(m => !notesOnly || m.kind === 'note')" :key="m.id" class="mail-message" :data-message-id="m.id" :class="[`mail-message-${m.kind}`, { 'is-target-message': targetMessageId === m.id }]"><div class="mail-message-meta"><span><ElIcon v-if="m.kind === 'note'"><Lock /></ElIcon>{{ m.kind === 'note' ? '内部备注 · ' : '' }}<BuyerLink v-if="m.kind === 'incoming' && current.source === 'buyer'" :shop-id="current.shopId" :buyer-id="current.buyerId">{{ m.sender }}</BuyerLink><template v-else>{{ m.sender }}</template><em v-if="automationLabel(m)" class="mail-automation-origin" :title="automationLabel(m)">{{ automationLabel(m) }}</em></span><time>{{ formatMailTime(m.at) }}</time></div><div class="mail-message-body"><strong v-if="m.subject" class="mail-message-subject">{{ m.subject }}</strong><div v-if="m.bodyHtml" class="mail-rich-body" v-html="sanitizeRichHtml(m.bodyHtml)" /><span v-else>{{ getMessageBodyText(m) }}</span><div v-if="translations.includes(m.id)" class="mail-translation">中文参考：{{ m.translation }}</div><button v-for="a in m.attachments" :key="a.id" class="mail-message-attachment" @click="attachmentInfo(a)"><ElIcon><Document /></ElIcon>{{ a.name }}</button></div>
+          <div v-if="ticketSources.has(m.id)" class="mail-source-actions">
+            <button v-if="m.kind === 'incoming' && m.translation" class="mail-translate-button" @click="toggleTranslation(m)">{{ translations.includes(m.id) ? '收起译文' : '翻译为中文' }}</button>
+            <TicketSourceActions :source="ticketSources.get(m.id)!" />
+          </div>
+          <button v-else-if="m.kind === 'incoming' && m.translation" class="mail-translate-button" @click="toggleTranslation(m)">{{ translations.includes(m.id) ? '收起译文' : '翻译为中文' }}</button><div v-if="m.delivery" class="mail-delivery" :class="`delivery-${m.delivery}`"><span>{{ deliveryText[m.delivery] }}</span><button v-if="m.delivery === 'failed'" v-prototype="annotation('send', '失败重试与待核查')" :disabled="!!ineligible(current)" @click="retryMessage(current, m)">重试</button></div><p v-if="m.failureReason" class="mail-failure-reason">{{ m.failureReason }}</p></article></div></template>
         <ReplyEditor v-if="current.source === 'buyer' && current.canReply" :conversation="current" :draft="composer" v-model:mode="session.composeMode" v-model:mark-processed-on-send="session.markProcessedOnSend" :sending="sending" :uncertain="uncertain" :template-context="templateContext" @send="prepareSend" @save="saveDraft" />
         <div v-else-if="current.source === 'buyer'" class="mail-reply-unavailable">该消息暂不支持回复，可查看已有往来及关联资料。</div>
       </main>
-      <main v-else-if="session.readerOpen" class="mail-empty-reader"><ElEmpty description="选择一封信件开始处理" :image-size="90" /></main>
+      <main v-else-if="session.readerOpen" class="mail-empty-reader"><ElEmpty :description="sourceError || '选择一封信件开始处理'" :image-size="90" /></main>
       <RelatedPanel v-if="session.contextOpen && current?.source === 'buyer'" :conversation="current" :orders="session.orders" :show-identity="!session.readerOpen" v-model:active-tab="session.contextTab" v-model:selected-order-id="session.selectedOrderId" @close="closeContext" />
       <aside v-else-if="session.contextOpen" class="mail-context-placeholder"><ElEmpty :description="current?.source === 'ebay' ? '平台通知没有关联买家资料' : '选择一封买家来信查看资料'" :image-size="70" /></aside>
     </div>
     <MailSettings v-model="settingsOpen" />
-    <ElDialog v-model="assignmentOpen" title="指派客服" width="440px" destroy-on-close><p>将 {{ assignmentIds.length }} 条记录指派给：</p><ElSelect v-model="assignmentValue" aria-label="指派客服选择"><ElOption v-for="a in assignees" :key="a.value" :label="a.label" :value="a.value" /></ElSelect><p class="mail-help">指派代表当前负责人，不改写实际处理人。</p><template #footer><ElButton @click="assignmentValue = me">指派给我</ElButton><ElButton @click="assignmentOpen = false">取消</ElButton><ElButton type="primary" @click="saveAssignment">确定指派</ElButton></template></ElDialog>
-    <ElDialog v-model="tagDialog" title="业务标签" width="460px"><p>{{ tagIds.length > 1 ? `为 ${tagIds.length} 个会话统一设置以下标签，将替换原标签。` : '可选择多个业务标签，取消勾选即可移除。' }}</p><div class="mail-tag-options"><ElCheckbox v-for="t in tagOptions" :key="t.value" :model-value="tagDraft.includes(t.value)" @change="v => tagDraft = v ? [...tagDraft, t.value] : tagDraft.filter(x => x !== t.value)"><span class="mail-tag-choice" :style="tagStyle(t.value)">{{ t.label }}</span></ElCheckbox></div><template #footer><ElButton @click="tagDialog = false">取消</ElButton><ElButton type="primary" @click="saveTags">保存标签</ElButton></template></ElDialog>
-    <ElDialog v-model="batchDialog" title="批量回复站内信" width="760px" :close-on-click-modal="false" :show-close="!batchRunning" :close-on-press-escape="!batchRunning"><div class="mail-batch-dialog-body" v-prototype="annotation('batchReply', '批量回复资格与逐条结果')">
+    <ElDialog :model-value="buyerPageActive && logOpen" @update:model-value="value => { if (buyerPageActive) logOpen = value }" title="操作日志" width="min(720px, 94vw)" :destroy-on-close="buyerPageActive"><div class="mail-operation-log-body"><p>{{ logConversation?.shopName }} · <BuyerLink v-if="logConversation?.source === 'buyer'" :shop-id="logConversation.shopId" :buyer-id="logConversation.buyerId" /><template v-else>eBay通知</template></p><CustomerServiceLogList :key="JSON.stringify([logConversation?.shopId, logConversationId])" :entries="logConversation?.operationLogs ?? []" :show-heading="false" :collapsed="false" :format-time="formatMailTime" /></div><template #footer><ElButton @click="logOpen = false">关闭</ElButton></template></ElDialog>
+    <ElDialog :model-value="buyerPageActive && assignmentOpen" @update:model-value="value => { if (buyerPageActive) assignmentOpen = value }" title="指派客服" width="440px" :destroy-on-close="buyerPageActive"><p>将 {{ assignmentIds.length }} 条记录指派给：</p><ElSelect :model-value="assignmentValue" multiple clearable aria-label="指派客服选择" @update:model-value="changeAssignment"><ElOption v-for="a in handlerOptions" :key="a.value" :label="a.label" :value="a.value" /></ElSelect><p class="mail-help">选中的客服均可办理同一会话。</p><template #footer><ElButton @click="saveAssignment(true)">恢复自动分配</ElButton><ElButton @click="changeAssignment([currentHandlerId])">指派给我</ElButton><ElButton @click="assignmentOpen = false">取消</ElButton><ElButton type="primary" @click="saveAssignment()">确定指派</ElButton></template></ElDialog>
+    <ElDialog :model-value="buyerPageActive && tagDialog" @update:model-value="value => { if (buyerPageActive) tagDialog = value }" title="业务标签" width="460px"><p>{{ tagIds.length > 1 ? `为 ${tagIds.length} 个会话统一设置以下标签，将替换原标签。` : '可选择多个业务标签，取消勾选即可移除。' }}</p><div class="mail-tag-options"><ElCheckbox v-for="t in tagOptions" :key="t.value" :model-value="tagDraft.includes(t.value)" @change="v => tagDraft = v ? [...tagDraft, t.value] : tagDraft.filter(x => x !== t.value)"><span class="mail-tag-choice" :style="tagStyle(t.value)">{{ t.label }}</span></ElCheckbox></div><template #footer><ElButton @click="tagDialog = false">取消</ElButton><ElButton type="primary" @click="saveTags">保存标签</ElButton></template></ElDialog>
+    <ElDialog :model-value="buyerPageActive && batchDialog" @update:model-value="value => { if (buyerPageActive) batchDialog = value }" title="批量回复站内信" width="760px" :close-on-click-modal="false" :show-close="!batchRunning" :close-on-press-escape="!batchRunning"><div class="mail-batch-dialog-body" v-prototype="annotation('batchReply', '批量回复资格与逐条结果')">
       <p class="mail-help">正文中的变量分别按每位买家的资料替换，各会话原有草稿会保留。</p>
       <template v-if="batchStage === 'edit'">
         <label class="mail-form-label">使用模板</label><ElSelect v-model="batchTemplate" placeholder="选择站内信模板" aria-label="批量回复模板" @change="applyBatchTemplate"><ElOption v-for="t in replyTemplates" :key="t.id" :value="t.id" :label="t.title" /></ElSelect>
@@ -439,13 +564,13 @@ function confirmForward() { const c = forwardConversation.value; if (!c || !forw
       <p v-if="batchStage === 'edit'" class="mail-batch-summary" aria-label="批量回复资格统计">可发送 {{ batchEligibleCount }} · 排除 {{ batchRows.length - batchEligibleCount }}</p>
       <p v-else class="mail-batch-summary" aria-label="批量回复结果统计">成功 {{ batchResultCounts.success }} · 失败 {{ batchResultCounts.failed }} · 待核查 {{ batchResultCounts.unknown }} · 未发送 {{ batchResultCounts.skipped }} · 发送中 {{ batchResultCounts.sending }}</p>
       <div class="mail-batch-review"><div v-for="c in batchRows" :key="c.id">
-        <span><b>{{ c.buyerId || 'eBay' }}</b><small>{{ c.shopName }} · {{ c.assignee || '未指派' }}</small></span>
+        <span><b><BuyerLink v-if="c.source === 'buyer'" :shop-id="c.shopId" :buyer-id="c.buyerId" /><template v-else>eBay</template></b><small>{{ c.shopName }} · {{ handlerText(c) }}</small></span>
         <em :class="{ blocked: batchIssue(c) || batchResults[c.id]?.includes('失败') }">{{ batchStage === 'result' ? batchResults[c.id] : batchIssue(c) || '可回复' }}</em>
         <details v-if="batchBody.trim()" class="mail-batch-recipient-body"><summary>查看该买家的正文</summary><div class="mail-batch-body-preview">{{ batchStage === 'result' ? batchSentDrafts[c.id]?.body : renderBatch(c).body }}</div><p v-for="a in (batchStage === 'result' ? batchSentDrafts[c.id]?.attachments : batchAttachments)" :key="a.id">附件：{{ a.name }}</p></details>
       </div></div>
       </div><template #footer><ElButton :disabled="batchRunning" @click="batchDialog = false">{{ batchStage === 'result' ? '完成' : '取消' }}</ElButton><ElButton v-if="batchStage === 'edit'" type="primary" :disabled="!batchRows.some(c => !batchIssue(c))" @click="confirmBatch">批量发送</ElButton></template>
     </ElDialog>
-    <ElDialog v-model="forwardOpen" title="转发站内信" width="650px" :close-on-click-modal="false"><div class="mail-forward-dialog-body" v-prototype="annotation('forward', '转发内容与收件范围')"><template v-if="!forwardReview"><label class="mail-form-label">收件邮箱</label><ElInput v-model="forwardEmail" placeholder="colleague@example.com" aria-label="转发收件邮箱" /><label class="mail-form-label">附言</label><ElInput v-model="forwardComment" type="textarea" :rows="3" maxlength="1000" aria-label="转发附言" /><p v-if="forwardError" class="mail-error">{{ forwardError }}</p></template><template v-else><p>收件邮箱：<strong>{{ forwardEmail }}</strong></p><p>{{ forwardComment }}</p></template><h4>{{ forwardConversation?.subject }}</h4><div class="mail-send-preview">{{ forwardBody }}</div></div><template #footer><ElButton @click="forwardOpen = false">取消</ElButton><ElButton v-if="!forwardReview" type="primary" @click="reviewForward">预览转发</ElButton><ElButton v-else @click="forwardReview = false">返回编辑</ElButton><ElButton v-if="forwardReview" type="primary" @click="confirmForward">确认转发</ElButton></template></ElDialog>
+    <ElDialog :model-value="buyerPageActive && forwardOpen" @update:model-value="value => { if (buyerPageActive) forwardOpen = value }" title="转发站内信" width="650px" :close-on-click-modal="false"><div class="mail-forward-dialog-body" v-prototype="annotation('forward', '转发内容与收件范围')"><template v-if="!forwardReview"><label class="mail-form-label">收件邮箱</label><ElInput v-model="forwardEmail" placeholder="colleague@example.com" aria-label="转发收件邮箱" /><label class="mail-form-label">附言</label><ElInput v-model="forwardComment" type="textarea" :rows="3" maxlength="1000" aria-label="转发附言" /><p v-if="forwardError" class="mail-error">{{ forwardError }}</p></template><template v-else><p>收件邮箱：<strong>{{ forwardEmail }}</strong></p><p>{{ forwardComment }}</p></template><h4>{{ forwardConversation?.subject }}</h4><div class="mail-send-preview">{{ forwardBody }}</div></div><template #footer><ElButton @click="forwardOpen = false">取消</ElButton><ElButton v-if="!forwardReview" type="primary" @click="reviewForward">预览转发</ElButton><ElButton v-else @click="forwardReview = false">返回编辑</ElButton><ElButton v-if="forwardReview" type="primary" @click="confirmForward">确认转发</ElButton></template></ElDialog>
   </section>
 </template>
 
@@ -454,5 +579,6 @@ function confirmForward() { const c = forwardConversation.value; if (!c || !forw
 
 
 <style scoped>
+.mail-operation-log-body{max-height:60vh;overflow:auto;min-width:0}.mail-operation-log-body>p{margin:0 0 16px;overflow-wrap:anywhere;color:#606d7f;font-size:12px;line-height:1.7}
 .mail-message-subject{display:block;color:var(--yy-text-heading);margin-bottom:8px}.mail-rich-body{white-space:normal;overflow-wrap:anywhere}.mail-rich-body :deep(p){margin:0 0 8px}.mail-rich-body :deep(ul),.mail-rich-body :deep(ol){padding-left:24px}.mail-rich-body :deep(h1){font-size:24px}.mail-rich-body :deep(h2){font-size:20px}.mail-rich-body :deep(h3){font-size:18px}
 </style>

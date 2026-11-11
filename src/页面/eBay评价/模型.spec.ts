@@ -1,9 +1,11 @@
+import { getReviewHandlerIds, getBuyerFeedbackHandlerIds } from './评价处理人'
+import { handlerNames, currentHandlerId } from '@/组件/客服处理人/处理人'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buyerFeedbackTemplates, createBuyerFeedback, createReviews } from './数据'
 import { resetReviewSession, reviewSession, syncReviews } from './会话'
 import {
   addReviewNote, canReplyToReview, createReviewFilters, exportBuyerFeedbackCsv, exportReviewsCsv, filterBuyerFeedback, filterReviews,
-  getBuyerFeedbackBlockedReason, getBuyerFeedbackMethod, getBuyerFeedbackResult, getLinkedBuyerFeedback, getLinkedBuyerFeedbackStatus, getReviewDisplay, groupReviewReasons, groupReviewsByShop, groupReviewTrend,
+  getBuyerFeedbackBlockedReason, getBuyerFeedbackMethod, getBuyerFeedbackResult, getLinkedBuyerFeedback, getLinkedBuyerFeedbackStatus, getReviewDisplay, getReviewOperationLogs, groupReviewReasons, groupReviewsByShop, groupReviewTrend,
   leaveBuyerFeedback, replyToReview, summarizeReviews, toCsv, updateReviewHandling, validateReviewText,
 } from './模型'
 import type { ReviewRecord } from './类型'
@@ -26,9 +28,9 @@ describe('评价筛选与北京时间边界', () => {
     ]
     expect(filterReviews(records, createReviewFilters({ dateRange: ['2026-10-29', '2026-10-29'] })).map(item => item.id)).toEqual(['end', 'start'])
   })
-  it('店铺、类型、来源、负责人、平台状态与待处理取交集', () => {
+  it('店铺、类型、来源、处理人、平台状态与待处理取交集', () => {
     const records = [record(), record({ id: 'other-shop', shopId: 'shop-uk' }), record({ id: 'auto', automated: true }), record({ id: 'done', handlingStatus: 'resolved' })]
-    const result = filterReviews(records, createReviewFilters({ shopIds: ['shop-us'], commentTypes: ['NEUTRAL'], source: 'buyer', owners: ['客服01'], platformStates: ['ENTERED'], onlyAttention: true }))
+    const result = filterReviews(records, createReviewFilters({ shopIds: ['shop-us'], commentTypes: ['NEUTRAL'], source: 'buyer', owners: ['staff-01'], platformStates: ['ENTERED'], onlyAttention: true }))
     expect(result.map(item => item.id)).toEqual(['REV-DEMO-01'])
   })
   it('字段精确匹配和多值搜索不借其它字段命中，超限不变成全量', () => {
@@ -45,6 +47,52 @@ describe('评价筛选与北京时间边界', () => {
     expect(filterBuyerFeedback(createBuyerFeedback(), createReviewFilters(), 'pending')).toHaveLength(11)
     expect(filterBuyerFeedback(createBuyerFeedback(), createReviewFilters({ dateRange: [] }), 'pending')).toHaveLength(12)
     expect(filterBuyerFeedback(createBuyerFeedback(), createReviewFilters(), 'sent')).toHaveLength(5)
+  })
+})
+
+describe('评价处理人按本次交易分工', () => {
+  it('已有人工指派可迁移，改状态保留成员，实际跟进只记录当次操作的人', () => {
+    const item = record({ handlerIds: undefined, owner: '客服03' })
+    expect(getReviewHandlerIds(item)).toEqual(['staff-03'])
+    const before = currentHandlerId.value
+    try {
+      currentHandlerId.value = 'staff-02'
+      updateReviewHandling(item, { handlerIds: ['staff-01', 'staff-02', 'staff-02'] })
+      updateReviewHandling(item, { handlingStatus: 'resolved' })
+      addReviewNote(item, '已核查商品')
+      expect(getReviewHandlerIds(item)).toEqual(['staff-01', 'staff-02'])
+      expect(item.notes[item.notes.length - 1]?.by).toBe('客服02')
+      expect(filterReviews([item], createReviewFilters({ owners: ['staff-02', 'staff-03'] }))).toEqual([item])
+      expect(exportReviewsCsv([item])).toContain(handlerNames(getReviewHandlerIds(item)))
+      updateReviewHandling(item, { handlerIds: [] })
+      expect(filterReviews([item], createReviewFilters({ owners: [''] }))).toEqual([item])
+    } finally { currentHandlerId.value = before }
+  })
+  it('恢复时复用本交易已核实的分工，缺少或矛盾的商品证据保持未分配', () => {
+    const row = record({ owner: '客服03' })
+    expect(getReviewHandlerIds(row)).toEqual(['staff-03'])
+    updateReviewHandling(row, { handlerIds: null })
+    expect(getReviewHandlerIds(row)).toEqual(['staff-01'])
+    const count = row.logs.length
+    updateReviewHandling(row, { handlerIds: null })
+    expect(row.logs).toHaveLength(count)
+    const unknown = record({ skuLink: undefined, owner: '客服03' })
+    updateReviewHandling(unknown, { handlerIds: null })
+    expect(getReviewHandlerIds(unknown)).toEqual([])
+    const conflict = record({ orderLineItemId: 'another-line' })
+    expect(getReviewHandlerIds(conflict)).toEqual([])
+    updateReviewHandling(conflict, { handlerIds: ['staff-02'] })
+    expect(getReviewHandlerIds(conflict)).toEqual(['staff-02'])
+    updateReviewHandling(conflict, { handlerIds: null })
+    expect(getReviewHandlerIds(conflict)).toEqual([])
+    expect(getBuyerFeedbackHandlerIds({ ...createBuyerFeedback()[0]!, sku: 'DEMO-DH-02' })).toEqual([])
+  })
+  it('好评筛选和导出使用交易行处理人，平台执行人仍独立', () => {
+    const row = createBuyerFeedback()[0]!
+    expect(getBuyerFeedbackHandlerIds(row)).toContain('staff-01')
+    expect(filterBuyerFeedback([row], createReviewFilters({ owners: ['staff-01'] }))).toEqual([row])
+    expect(exportBuyerFeedbackCsv([row])).toContain(handlerNames(getBuyerFeedbackHandlerIds(row)))
+    expect(row.comment).toBeUndefined()
   })
 })
 
@@ -87,6 +135,28 @@ describe('评价汇总只读同源事实', () => {
 })
 
 describe('平台隐藏评价的内容保护', () => {
+  it('历史操作日志缺人不回填，平台隐藏后不从日志泄露受限正文或改写原记录', () => {
+    const item = record({ logs: [{ id: 'old', at: now, by: '', action: '回复评价', detail: 'PRIVATE-OLD-REPLY' }] })
+    const original = JSON.stringify(item.logs)
+    expect(getReviewOperationLogs(item)[0]).toMatchObject({ operator: '', content: 'PRIVATE-OLD-REPLY' })
+    expect(getReviewOperationLogs(item)[0]?.result).toBeUndefined()
+    item.platformState = 'HIDDEN'
+    expect(JSON.stringify(getReviewOperationLogs(item))).not.toContain('PRIVATE-OLD-REPLY')
+    expect(JSON.stringify(item.logs)).toBe(original)
+  })
+  it('处理变更、备注和回复记录各自执行人及结果，同值保存不伪记且不复制正文', () => {
+    const item = record({ logs: [], reply: undefined, notes: [] })
+    expect(updateReviewHandling(item, { handlerIds: ['staff-02'] }, '客服02', now).ok).toBe(true)
+    expect(updateReviewHandling(item, { handlerIds: ['staff-02'] }, '客服01', now).ok).toBe(true)
+    expect(item.logs).toHaveLength(1)
+    expect(item.logs[0]).toMatchObject({ by: '客服02', result: '已完成' })
+    expect(addReviewNote(item, 'PRIVATE-NOTE-TEXT', '客服03', now).ok).toBe(true)
+    expect(replyToReview(item, 'Private reply text.', '客服02', now).ok).toBe(true)
+    expect(item.logs.map(log => log.by)).toEqual(['客服02', '客服03', '客服02'])
+    expect(item.logs[2]?.result).toBe('已受理（本地模拟）')
+    expect(JSON.stringify(getReviewOperationLogs(item))).not.toContain('PRIVATE-NOTE-TEXT')
+    expect(JSON.stringify(getReviewOperationLogs(item))).not.toContain('Private reply text.')
+  })
   it('统一投影不输出正文、翻译、回复或追加内容，底层原始资料保持不变', () => {
     const hidden = record({
       platformState: 'HIDDEN', content: 'PRIVATE-ORIGINAL', translation: 'PRIVATE-TRANSLATION',
@@ -139,7 +209,7 @@ describe('回复评价与内部处理的独立性', () => {
   })
   it('内部信息追加日志且不更改评价、回复或OMS状态', () => {
     const item = record(), original = { type: item.commentType, state: item.platformState, order: item.orderId }
-    expect(updateReviewHandling(item, { owner: '客服03', reason: '商品质量', handlingStatus: 'resolved' }, '客服01', now).ok).toBe(true)
+    expect(updateReviewHandling(item, { handlerIds: ['staff-03'], reason: '商品质量', handlingStatus: 'resolved' }, '客服01', now).ok).toBe(true)
     expect(addReviewNote(item, '第一条记录', '客服01', now).ok).toBe(true)
     expect(addReviewNote(item, '第二条记录', '客服02', now).ok).toBe(true)
     expect(item.notes.map(note => note.text)).toEqual(['第一条记录', '第二条记录'])
@@ -147,9 +217,9 @@ describe('回复评价与内部处理的独立性', () => {
     expect(item.reply).toBeUndefined()
   })
   it('非法处理配置拒绝并且不部分写入', () => {
-    const item = record(), owner = item.owner
-    expect(updateReviewHandling(item, { owner: '不存在的客服', reason: '商品质量' }).ok).toBe(false)
-    expect(item.owner).toBe(owner)
+    const item = record(), owners = getReviewHandlerIds(item)
+    expect(updateReviewHandling(item, { handlerIds: ['不存在的客服'], reason: '商品质量' }).ok).toBe(false)
+    expect(getReviewHandlerIds(item)).toEqual(owners)
     expect(item.reason).toBe('车型适配')
   })
 })

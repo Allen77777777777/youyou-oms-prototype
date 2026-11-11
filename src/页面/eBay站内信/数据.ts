@@ -1,4 +1,5 @@
 import type { ContextDataset, ContextRecord, Conversation, MailMessage, RelatedOrder } from './类型'
+import { snapshotConversationSkus } from './会话处理人'
 
 // 本文件全部为虚构评审样例，不包含真实买家、店铺或平台记录。
 const time = (value: string) => `2026-10-${value}+08:00`
@@ -27,9 +28,10 @@ export function createRelatedOrders(): RelatedOrder[] {
   const second = make('order-02', 'buyer_demo_02')
   second.product = { title: '车门把手', sku: 'DEMO-DH-02', quantity: 2 }
   second.platformProduct = { title: 'Demo Exterior Door Handle', sku: 'EBAY-DEMO-DH-02' }
+  second.items = [{ id: 'DEMO-ORDER-02-L1', title: '车门把手', systemSku: 'DEMO-DH-02', platformSku: 'EBAY-DEMO-DH-02', specification: '黑色 · 标准款', quantity: 2 }]
   second.logistics = ready([
-    { ...record('PKG-order-02-1', '包裹 1 · UPS', '运输中', 'DEMO-TRACK-02A · 车门把手 × 1'), trackingNumber: 'DEMO-TRACK-02A', details: [{ label: '覆盖商品', value: 'DEMO-DH-02 × 1' }] },
-    { ...record('PKG-order-02-2', '包裹 2 · UPS', '已签收', 'DEMO-TRACK-02B · 车门把手 × 1'), trackingNumber: 'DEMO-TRACK-02B', details: [{ label: '覆盖商品', value: 'DEMO-DH-02 × 1' }] },
+    { ...record('PKG-order-02-1', '包裹 1 · UPS', '运输中', 'DEMO-TRACK-02A · 车门把手 × 1'), trackingNumber: 'DEMO-TRACK-02A', carrier: 'UPS', latestEvent: '已到达目的地分拨中心', latestEventAt: time('27T09:30:00'), packageItems: [{ orderItemId: 'DEMO-ORDER-02-L1', quantity: 1 }], details: [{ label: '覆盖商品', value: 'DEMO-DH-02 × 1' }] },
+    { ...record('PKG-order-02-2', '包裹 2 · UPS', '已签收', 'DEMO-TRACK-02B · 车门把手 × 1'), trackingNumber: 'DEMO-TRACK-02B', carrier: 'UPS', latestEvent: '已送达买家地址', latestEventAt: time('26T15:40:00'), packageItems: [{ orderItemId: 'DEMO-ORDER-02-L1', quantity: 1 }], details: [{ label: '覆盖商品', value: 'DEMO-DH-02 × 1' }] },
   ])
   const history = make('order-04', 'buyer_demo_01')
   history.product = { title: '空气滤芯', sku: 'DEMO-AF-04', quantity: 1 }
@@ -53,7 +55,26 @@ export function createRelatedOrders(): RelatedOrder[] {
   otherShop.afterSales = ready([record('RET-DEMO-10', '退货申请', '已关闭', '买家已撤回本笔露营椅订单的退货申请。')])
   otherShop.disputes = ready([record('CASE-DEMO-10', '未收到货纠纷', '已关闭', '本笔订单已确认签收，平台案件已关闭。')])
   otherShop.reviews = ready([record('REV-DEMO-10', '订单商品评价', '好评', '椅子轻便，适合露营使用。')])
-  return [first, second, history, candidate1, candidate2, unsynced, failed, unknown, otherShop]
+  // 本轮独立资料样例：与已有 Return 007 的店铺、订单和买家身份逐项一致。
+  // 完整订单及包裹为明确虚构资料；退货仅覆盖理线盒，不把另一个包裹视为已退货或已退款。
+  const contextDemo = make('order-context-07', 'buyer_demo_r07')
+  Object.assign(contextDemo, { orderNo: 'DEMO-ORDER-1007', amount: '69.80', product: { title: '桌面理线盒 · 灰色', sku: 'HOME-CABLE-07', quantity: 1 }, platformProduct: { title: 'Demo Cable Organizer', sku: 'EBAY-HOME-CABLE-07' } })
+  contextDemo.items = [
+    { id: 'DEMO-CONTEXT-1007-L1', title: '桌面理线盒 · 灰色', systemSku: 'HOME-CABLE-07', platformSku: 'EBAY-HOME-CABLE-07', specification: '灰色 · 标准款', quantity: 1 },
+    { id: 'DEMO-CONTEXT-1007-L2', title: '旅行收纳袋 · 六件套', systemSku: 'TRAVEL-BAG-CONTEXT-07', platformSku: 'EBAY-TRAVEL-BAG-CONTEXT-07', specification: '海军蓝 · 六件套', quantity: 1 },
+  ]
+  contextDemo.logistics = {
+    state: 'ready', updatedAt: '2026-11-09T01:15:00Z', records: [
+      { id: 'PKG-CONTEXT-1007-A', title: '包裹 1 · UPS', status: '已签收', description: '理线盒已送达；该商品后续退货退款见平台申请。', at: '2026-10-11T07:40:00Z', trackingNumber: 'DEMO-CONTEXT-TRACK-07A', carrier: 'UPS', latestEvent: '已送达买家地址', latestEventAt: '2026-10-11T07:40:00Z', packageItems: [{ orderItemId: 'DEMO-CONTEXT-1007-L1', quantity: 1 }] },
+      { id: 'PKG-CONTEXT-1007-B', title: '包裹 2 · USPS', status: '运输中', description: '旅行收纳袋单独发运，尚未签收。', at: '2026-11-09T00:45:00Z', trackingNumber: 'DEMO-CONTEXT-TRACK-07B', carrier: 'USPS', latestEvent: '已到达目的地分拨中心', latestEventAt: '2026-11-09T00:45:00Z', packageItems: [{ orderItemId: 'DEMO-CONTEXT-1007-L2', quantity: 1 }] },
+    ],
+  }
+  contextDemo.afterSales = { state: 'ready', updatedAt: '2026-10-29T01:30:00Z', records: [{ id: 'DEMO-RT-007', returnId: 'DEMO-RT-007', title: '退货退款申请', status: '已关闭', description: '理线盒退货及退款已完成，旅行收纳袋不在本次申请范围内。', at: '2026-10-25T04:25:00Z', details: [{ label: '申请编号', value: 'DEMO-RT-007' }, { label: '申请商品', value: 'HOME-CABLE-07 × 1' }] }] }
+  contextDemo.activity = [
+    record('ACT-CONTEXT-1007-1', '理线盒退款已确认', '退款成功', '仅对应 DEMO-RT-007 及其申请商品，详见原申请和内部售后单。', '2026-10-25T04:20:00Z'),
+    record('ACT-CONTEXT-1007-2', '收纳袋包裹轨迹更新', '运输中', '包裹 2 已到达目的地分拨中心。', '2026-11-09T00:45:00Z'),
+  ]
+  return [first, second, history, candidate1, candidate2, unsynced, failed, unknown, otherShop, contextDemo]
 }
 
 function incoming(id: string, buyer: string, body: string, at: string, translation: string): MailMessage {
@@ -173,7 +194,20 @@ export function createConversations(): Conversation[] {
       }],
     }
   })
-  const conversations = [first, second, installation, presale, pending, unsynced, failed, unknown, ...additionalBuyers, ...notices]
+  const contextDemo: Conversation = {
+    id: 'conv-context-07', source: 'buyer', shopId: 'shop-us', shopName: '演示店铺-US', buyerId: 'buyer_demo_r07', subject: '退款记录与分包裹配送进度',
+    buyerDataScope: { buyerKey: demoBuyerKey('buyer_demo_r07'), shopIds: ['shop-us', 'shop-uk'] },
+    unread: true, flagged: false, assignee: '客服01', status: 'pending', updatedAt: '2026-10-20T09:20:00+08:00', canReply: true,
+    association: 'confirmed', relatedOrderIds: ['order-context-07'], sendScenario: 'success', priority: 'normal', tags: ['return', 'logistics'],
+    product: { title: '桌面理线盒 · 灰色', sku: 'HOME-CABLE-07' },
+    messages: [incoming('msg-context-07-1', 'buyer_demo_r07', 'Please check the return and refund progress for the cable organizer and the delivery status of the travel bags in the other package.', '2026-10-20T09:20:00+08:00', '请帮我查看理线盒的退货退款进度，并核对另一个包裹中旅行收纳袋的配送情况。')],
+  }
+  const conversations = [first, second, installation, presale, pending, unsynced, failed, unknown, ...additionalBuyers, contextDemo, ...notices]
+  // 只在样例已明确本次涉及的具体商品行时附上 SKU，供恢复自动分配。保留历史指派，不补造当时日志。
+  snapshotConversationSkus(first, ['DEMO-BP-01'], false)
+  snapshotConversationSkus(second, ['DEMO-DH-02'], false)
+  snapshotConversationSkus(failed, ['DEMO-MC-07'], false)
+  snapshotConversationSkus(contextDemo, ['HOME-CABLE-07', 'TRAVEL-BAG-CONTEXT-07'], false)
   for (const conversation of conversations) {
     for (const message of conversation.messages) {
       if (message.kind === 'incoming') message.unread = conversation.unread

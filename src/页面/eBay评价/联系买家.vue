@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useBuyerPageActive } from '@/组件/买家/页面活跃'
+import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElButton, ElDialog, ElMessage, ElTag } from 'element-plus'
@@ -8,45 +10,68 @@ import type { ReplyDraft } from '../eBay站内信/类型'
 import type { TemplateContext } from '../消息模板管理/模型'
 import { formatReviewTime } from './模型'
 import { reviewAnnotation } from './标注'
-import { discardReviewContactDraft, getReviewContactBlockedReason, getReviewContactConversation, getReviewContactDraft, getReviewContactEditorConversation, getReviewContactIdentity, getReviewContactRecord, isReviewContactSending, sendReviewContact } from './联系买家模型'
+import { resolveReviewContact } from './联系买家模型'
+import { discardContactDraft, getContactBlockedReason, getContactDraft, getContactEditorConversation, isContactSending, sendBuyerContact } from '../eBay站内信/联系买家发送'
+import { getApplicationMailConversations, hasApplicationMailThread, needsApplicationThreadChoice, NEW_APPLICATION_MAIL, resolveApplicationMailContact, applicationContactAnnotation, mailBusinessSourceLabel, type ApplicationMailContext } from '../eBay站内信/申请联系上下文'
 
-const props = defineProps<{ modelValue: boolean; reviewId: string }>()
+const props = defineProps<{ modelValue: boolean; reviewId?: string; application?: ApplicationMailContext }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; sent: [value: { conversationId: string; messageId: string }] }>()
 const router = useRouter(), identity = ref(''), error = ref(''), success = ref('')
+const selectedConversationId = ref('')
 const draft = shallowRef<ReplyDraft>()
 let windowVersion = 0
 function discardWindow() {
   windowVersion++
-  discardReviewContactDraft(draft.value); draft.value = undefined
+  discardContactDraft(draft.value); draft.value = undefined
   identity.value = ''; error.value = ''; success.value = ''
 }
 const opened = computed({ get: () => props.modelValue, set: value => { if (!value) discardWindow(); emit('update:modelValue', value) } })
-const review = computed(() => getReviewContactRecord(props.reviewId))
-const conversation = computed(() => getReviewContactConversation(props.reviewId))
-const blocked = computed(() => getReviewContactBlockedReason(props.reviewId, identity.value))
-const sending = computed(() => isReviewContactSending(props.reviewId))
+const sourceKey = computed(() => props.application
+  ? JSON.stringify([props.application.kind, props.application.shopId, props.application.applicationId])
+  : props.reviewId)
+const candidates = computed(() => props.application ? getApplicationMailConversations(props.application) : [])
+const threadChoice = computed(() => props.application && needsApplicationThreadChoice(props.application, candidates.value))
+const target = computed(() => props.application ? resolveApplicationMailContact(props.application, selectedConversationId.value) : resolveReviewContact(props.reviewId ?? ''))
+const record = computed(() => typeof target.value === 'string' ? undefined : target.value.record)
+const conversation = computed(() => typeof target.value === 'string' ? undefined : target.value.conversation)
+const blocked = computed(() => getContactBlockedReason(target.value, identity.value))
+const sending = computed(() => isContactSending(target.value))
 const uncertain = computed(() => Boolean(conversation.value?.messages.some(message => message.delivery === 'unknown')))
 const editorConversation = computed(() => {
-  const context = getReviewContactEditorConversation(props.reviewId)
+  const context = getContactEditorConversation(target.value)
   return context ? { ...context, canReply: context.canReply && !blocked.value } : undefined
 })
 const templateContext = computed<TemplateContext>(() => {
-  const r = review.value
+  const r = record.value
   if (!r || !editorConversation.value) return {}
   const order = r.orderId ? mailSession.orders.find(item => item.id === r.orderId && item.shopId === r.shopId && item.buyerId === r.buyerId) : undefined
   return { buyerId: r.buyerId, orderNo: r.orderNo, productName: order?.product.title, platformProductName: r.title, platformSku: r.platformSku }
 })
 const history = computed(() => conversation.value?.messages.filter(m => m.kind === 'outgoing').slice(-4).reverse() ?? [])
-watch(() => [props.modelValue, props.reviewId] as const, ([open]) => {
+function prepareWindow() {
   discardWindow()
-  if (open) { identity.value = getReviewContactIdentity(props.reviewId); draft.value = getReviewContactDraft(props.reviewId) }
+  if (!props.modelValue || typeof target.value === 'string') return
+  identity.value = target.value.identity
+  draft.value = getContactDraft(target.value)
+}
+watch([() => props.modelValue, sourceKey], () => {
+  selectedConversationId.value = ''
+  prepareWindow()
 }, { immediate: true, flush: 'sync' })
+function selectConversation(event: Event) {
+  selectedConversationId.value = (event.target as HTMLSelectElement).value
+  prepareWindow()
+}
 watch(() => [draft.value?.body, draft.value?.bodyHtml, JSON.stringify(draft.value?.attachments)], () => { error.value = ''; success.value = '' })
 onBeforeUnmount(discardWindow)
 async function send() {
-  const reviewId = props.reviewId, expectedIdentity = identity.value, version = windowVersion
-  const result = await sendReviewContact(reviewId, expectedIdentity)
-  if (version !== windowVersion || props.reviewId !== reviewId || identity.value !== expectedIdentity || getReviewContactIdentity(reviewId) !== expectedIdentity || !props.modelValue) return
+  const expectedIdentity = identity.value, version = windowVersion
+  const submission = sendBuyerContact(target.value, expectedIdentity)
+  if (props.application && selectedConversationId.value === NEW_APPLICATION_MAIL && conversation.value) {
+    selectedConversationId.value = conversation.value.id
+  }
+  const result = await submission
+  if (version !== windowVersion || typeof target.value === 'string' || target.value.identity !== expectedIdentity || !props.modelValue) return
   if (!result.ok) { error.value = result.message; return }
   error.value = ''; success.value = result.message; ElMessage.success(result.message)
   emit('sent', { conversationId: result.conversationId!, messageId: result.messageId! })
@@ -59,13 +84,29 @@ function openMail() {
   opened.value = false; void router.push('/oms/ebay-service/messages')
 }
 const deliveryLabel = { sending: '发送中', success: '已发送', failed: '发送失败', unknown: '结果待核查' }
+const buyerPageActive = useBuyerPageActive()
 </script>
 
 <template>
-  <ElDialog v-model="opened" title="联系买家" width="min(960px, 94vw)" align-center :close-on-click-modal="false" destroy-on-close class="review-contact-dialog">
-    <div v-if="modelValue" class="review-contact-compose" v-prototype="reviewAnnotation('contact', '联系买家与发送站内信')">
-      <dl v-if="review" class="review-contact-recipient"><dt>发件店铺</dt><dd>{{ review.shopName }}</dd><dt>收件买家</dt><dd>{{ review.buyerId }}</dd><dt>关联交易</dt><dd>{{ review.orderNo || review.orderLineItemId }} · {{ review.title }}</dd></dl>
-      <ReplyEditor v-if="draft && editorConversation" :key="`${reviewId}:${identity}`" purpose="review-contact" :conversation="editorConversation" :draft="draft" mode="reply" :sending="sending" :uncertain="uncertain" :mark-processed-on-send="false" :template-context="templateContext" @send="send" />
+  <ElDialog :model-value="buyerPageActive && opened" @update:model-value="value => { if (buyerPageActive) opened = value }" title="联系买家" :append-to-body="!!application" width="min(960px, 94vw)" align-center :close-on-click-modal="false" :destroy-on-close="buyerPageActive" class="review-contact-dialog">
+    <div v-if="modelValue" class="review-contact-compose" v-prototype="application ? applicationContactAnnotation(application.kind, 'compose') : reviewAnnotation('contact', '联系买家与发送站内信')">
+      <dl v-if="application || record" class="review-contact-recipient">
+        <dt>发件店铺</dt><dd>{{ application?.shopName || record?.shopName }}</dd>
+        <dt>收件买家</dt><dd><BuyerLink :shop-id="application?.shopId || record?.shopId" :buyer-id="application?.buyerId || record?.buyerId" /></dd>
+        <template v-if="application">
+          <dt>平台订单号</dt><dd>{{ application.orderNo || '—' }}</dd>
+          <dt>{{ application.kind === 'cancel' || application.kind === 'return' ? '来源申请' : '来源纠纷' }}</dt><dd>{{ mailBusinessSourceLabel(application.kind) }} · {{ application.applicationId }}</dd>
+        </template>
+        <template v-else-if="record"><dt>关联交易</dt><dd>{{ record.orderNo || record.orderLineItemId }} · {{ record.title }}</dd></template>
+      </dl>
+      <label v-if="threadChoice" class="contact-thread-picker">站内信会话
+        <select aria-label="选择站内信会话" :value="selectedConversationId" :disabled="sending" @change="selectConversation">
+          <option value="" disabled>请选择会话</option>
+          <option v-if="application && !hasApplicationMailThread(application)" :value="NEW_APPLICATION_MAIL">发起新会话</option>
+          <option v-for="c in candidates" :key="c.id" :value="c.id">{{ c.subject }} · {{ c.id }}</option>
+        </select>
+      </label>
+      <ReplyEditor v-if="draft && editorConversation" :key="`${sourceKey}:${identity}`" :purpose="application ? 'application-contact' : 'review-contact'" :application-kind="application?.kind" :conversation="editorConversation" :draft="draft" mode="reply" :sending="sending" :uncertain="uncertain" :mark-processed-on-send="false" :template-context="templateContext" @send="send" />
       <p v-if="blocked && !sending" role="alert" class="review-contact-error">{{ blocked }}</p>
       <p v-if="error" role="alert" class="review-contact-error">{{ error }}</p>
       <p v-if="success" role="status" class="review-contact-success">{{ success }}</p>
@@ -78,5 +119,5 @@ const deliveryLabel = { sending: '发送中', success: '已发送', failed: '发
 <style scoped>
 .review-contact-compose :deep(.reply-editor-host:not(.reply-expanded-dialog)){max-height:none;min-height:0;overflow:visible}.review-contact-compose :deep(.mail-reply-editor.mail-composer){border:1px solid #e7edf4;border-radius:4px}
 .review-contact-count{display:block;margin-top:4px;text-align:right;font-size:12px;line-height:1.2;color:#8a99ab}.review-contact-count.is-over-limit{color:#cc615c}
-.review-contact-compose{font-size:13px;line-height:1.65;color:#52657b;max-height:calc(100vh - 220px);overflow:auto;padding-right:3px}.review-contact-recipient{display:grid;grid-template-columns:74px minmax(0,1fr);gap:8px;margin:0 0 20px;padding:14px 16px;background:#f6f8fb;border:1px solid #e8edf4;border-radius:4px}.review-contact-recipient dt{color:#8a98aa}.review-contact-recipient dd{margin:0;overflow-wrap:anywhere;color:#3e536c}.review-contact-compose>label{display:block;margin:14px 0;font-size:12px;color:#5d7088}.review-contact-compose>label>span{color:#a0abba;margin-left:5px}.review-contact-compose>label .el-input,.review-contact-compose>label .el-textarea{display:block;margin-top:7px}.review-contact-help{font-size:12px;color:#8a99ab;margin:12px 0}.review-contact-error{font-size:12px;color:#cc615c;white-space:pre-wrap;overflow-wrap:anywhere}.review-contact-success{font-size:12px;color:#4a9978}.review-contact-history{border-top:1px solid #e8edf4;padding-top:10px;margin-top:16px;font-size:12px}.review-contact-history summary{cursor:pointer;color:#7189a2}.review-contact-history article{padding:12px 0;border-bottom:1px solid #edf0f5}.review-contact-history header{display:flex;align-items:center;gap:10px;color:#94a1b2;font-size:11px}.review-contact-history strong{display:block;font-size:12px;font-weight:500;margin-top:6px;overflow-wrap:anywhere}.review-contact-history p{margin:7px 0;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.review-contact-history small{color:#cc615c}.review-contact-footer{display:flex;align-items:center;gap:8px}.review-contact-footer>span{flex:1}.review-contact-footer .el-button{margin:0;font-size:12px}
+.contact-thread-picker select{display:block;max-width:100%;margin-top:5px;padding:5px 8px;border:1px solid #cdd8e5;border-radius:4px;font:inherit;color:inherit}.review-contact-compose{font-size:13px;line-height:1.65;color:#52657b;max-height:calc(100vh - 220px);overflow:auto;padding-right:3px}.review-contact-recipient{display:grid;grid-template-columns:74px minmax(0,1fr);gap:8px;margin:0 0 20px;padding:14px 16px;background:#f6f8fb;border:1px solid #e8edf4;border-radius:4px}.review-contact-recipient dt{color:#8a98aa}.review-contact-recipient dd{margin:0;overflow-wrap:anywhere;color:#3e536c}.review-contact-compose>label{display:block;margin:14px 0;font-size:12px;color:#5d7088}.review-contact-compose>label>span{color:#a0abba;margin-left:5px}.review-contact-compose>label .el-input,.review-contact-compose>label .el-textarea{display:block;margin-top:7px}.review-contact-help{font-size:12px;color:#8a99ab;margin:12px 0}.review-contact-error{font-size:12px;color:#cc615c;white-space:pre-wrap;overflow-wrap:anywhere}.review-contact-success{font-size:12px;color:#4a9978}.review-contact-history{border-top:1px solid #e8edf4;padding-top:10px;margin-top:16px;font-size:12px}.review-contact-history summary{cursor:pointer;color:#7189a2}.review-contact-history article{padding:12px 0;border-bottom:1px solid #edf0f5}.review-contact-history header{display:flex;align-items:center;gap:10px;color:#94a1b2;font-size:11px}.review-contact-history strong{display:block;font-size:12px;font-weight:500;margin-top:6px;overflow-wrap:anywhere}.review-contact-history p{margin:7px 0;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.review-contact-history small{color:#cc615c}.review-contact-footer{display:flex;align-items:center;gap:8px}.review-contact-footer>span{flex:1}.review-contact-footer .el-button{margin:0;font-size:12px}
 </style>

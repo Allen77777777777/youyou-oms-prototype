@@ -18,6 +18,37 @@ afterEach(restore)
 const base = (): AfterSaleInput => ({ requestId: 'request-1', shopId: 'shop-us', shopName: '演示店铺-US', returnId: 'DEMO-RT-001', orderNo: 'DEMO-ORDER-1001', kind: '部分退款', actionLabel: '部分退款报价', amount: { value: '10.00', currency: 'USD' }, items: [{ lineId: 'line-1', title: '置物架', quantity: 1, reason: '质量问题' }], note: '客服内部归类' })
 
 describe('售后单分流与跨页面共享', () => {
+  it('本单操作日志区分人员与系统，重复建单和无变化回查不重复留痕', () => {
+    const input = base(), record = createAfterSale(input, afterSaleActors[1]).record!
+    expect(record.logs?.[0]).toMatchObject({ operator: '客服01', action: '创建售后单', result: '成功' })
+    expect(record.logs?.[0]?.content).not.toContain(input.note)
+    createAfterSale(input, afterSaleActors[1]); expect(record.logs).toHaveLength(1)
+    updateAfterSaleResult(record.no, '买家已拒绝报价')
+    expect(record.logs?.slice(-1)[0]).toMatchObject({ operator: '系统', action: '执行结果更新', result: '已更新' })
+    updateAfterSaleResult(record.no, '买家已拒绝报价'); expect(record.logs).toHaveLength(2)
+    const external = createPlatformAfterSale({ ...input, requestId: 'external-refund', kind: '全额退款' }).record!
+    expect(external.logs?.[0]?.operator).toBe('系统 · eBay同步')
+    expect(record.logs?.[0]?.operator).toBe('客服01')
+  })
+  it('重发执行仅对状态事实变化留痕，包裹顺序变化不记且回查不覆盖原审核人', () => {
+    initializeAfterSaleDemo()
+    const record = afterSaleRecords.value.find(row => row.kind === '重发')!
+    expect(approveReship(record.no, afterSaleActors[0]).ok).toBe(true)
+    const order = 共享订单.value.find(row => row.systemOrderNo === record.manualOrderNo)!
+    const reviewer = record.logs?.find(log => log.action === '审核重发')?.operator
+    activeAfterSaleActor.value = afterSaleActors[1]!
+    order.fulfillmentOrders = ['DEMO-PARCEL-A', 'DEMO-PARCEL-B'].map(fulfillmentOrderNo => ({
+      fulfillmentOrderNo, status: '待执行', isActive: true, route: { ...order.defaultRoute! }, plannedQuantity: 1, shippedQuantity: 0,
+    }))
+    const count = record.logs!.length
+    order.fulfillmentOrders = [...order.fulfillmentOrders].reverse()
+    expect(record.logs).toHaveLength(count)
+    order.fulfillmentOrders[0]!.status = '已发货'
+    expect(record.logs).toHaveLength(count + 1)
+    expect(record.logs?.slice(-1)[0]).toMatchObject({ operator: '系统', action: '重发执行结果更新' })
+    expect(record.logs?.find(log => log.action === '审核重发')?.operator).toBe(reviewer)
+    expect(reviewer).toBe('运营01')
+  })
   it('从申请列表先同步再打开售后管理，已收买家答复的历史报价仍关联同一单', () => {
     const source = returnSession.records.find(r => r.id === 'DEMO-RT-019')!
     syncReturnList([source], [source.shopId])

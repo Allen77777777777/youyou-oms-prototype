@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Bell, FullScreen, Operation, ScaleToOriginal, Search } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { 获取全部页面菜单 } from '@/配置/菜单'
 import { 标注状态 } from '@/原型标注/标注状态'
+import { currentHandlerId, handlerOptions } from '@/组件/客服处理人/处理人'
 import RouteTabs from './页面页签.vue'
 
 const router = useRouter()
+const route = useRoute()
+const handlerDemo = computed(() => 标注状态.标注模式.value &&
+  /^\/oms\/ebay-service\/(messages|reviews|cancellations|returns|disputes)(\/|$)/.test(route.path))
 const 搜索打开 = ref(false)
 const 关键词 = ref('')
 const 搜索结果 = computed(() => {
@@ -26,6 +30,10 @@ function 切换全屏() {
 
 function 设置密度(密度: string) {
   document.documentElement.dataset.density = 密度
+}
+
+function 切换客服身份(id: string) {
+  if (handlerOptions.some(person => person.value === id)) currentHandlerId.value = id
 }
 
 async function 打开搜索结果(路径?: string) {
@@ -73,7 +81,15 @@ async function 打开搜索结果(路径?: string) {
           <span>{{ 标注状态.标注模式.value ? '关闭标注' : '原型标注' }}</span>
         </button>
       </ElTooltip>
-      <ElTooltip content="原型环境" placement="bottom-end">
+      <ElDropdown v-if="handlerDemo" trigger="click" popper-class="客服身份菜单" @command="切换客服身份">
+        <button class="用户入口" type="button" aria-label="切换客服演示身份">{{ currentHandlerId.slice(-2) }}</button>
+        <template #dropdown>
+          <ElDropdownMenu>
+            <ElDropdownItem v-for="person in handlerOptions" :key="person.value" :command="person.value" :disabled="person.value === currentHandlerId">{{ person.label }}</ElDropdownItem>
+          </ElDropdownMenu>
+        </template>
+      </ElDropdown>
+      <ElTooltip v-else content="原型环境" placement="bottom-end">
         <button class="用户入口" type="button" aria-label="用户菜单">U</button>
       </ElTooltip>
     </div>
@@ -92,6 +108,11 @@ async function 打开搜索结果(路径?: string) {
     </div>
   </ElDialog>
 </template>
+
+<style>
+/* 标注工作台在 5001 层，演示身份切换只在该模式下开放。 */
+.el-popper.客服身份菜单 { z-index: 5002 !important; }
+</style>
 
 <style scoped>
 .顶部导航 {

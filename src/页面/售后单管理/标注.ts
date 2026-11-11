@@ -1,3 +1,4 @@
+import { customerServiceLogLayoutRule } from '@/组件/客服日志/排版标注'
 import type { 原型标注 } from '@/类型/标注'
 
 const entries = {
@@ -9,6 +10,7 @@ const entries = {
   result: ['本次处理结果', '平台售后状态跟随原申请，主行使用 eBay SUMMARY.state，补充使用 SUMMARY.status。两项中文不同时显示总体状态，悬停可查看原码。', '本地办理结果仅在本次办理明细及同申请处理记录中展示。仓库实收与本笔实际退款按各自凭证核实。'],
   related: ['同申请处理记录', '同店铺、同一 Return ID 的每次独立办理分行展示，可直接打开对应售后单。', '申请合计分别展示已批准退回、仓库实收及已确认实际退款。实际退款按币种汇总一次，缺少依据显示待核实。'],
   approval: ['重发人工审核', '有重发审核权限的运营可以审核自己提交的单，核对商品、原单收件地址及发货路由后生成手工订单。', '打开审核时自动带入可靠原单资料。审核人补齐缺项后确认，重新校验店铺权限、原单及履约资料。每张售后单只生成一张手工订单，由 OMS 人工审单。'],
+  logs: ['操作日志', '详情独立展示本单操作人员、时间、动作、关键内容及结果，默认折叠、最新记录优先。', '建单、重发审核与手工单关联、来源执行结果变化自动留痕；系统回查明确系统来源。重复建单、审核、无变化结果及仅包裹排列变化不重复记成功日志；其他员工查看或回查不覆盖原操作人。内部备注与原申请平台处理过程各自保留，日志不复制收件地址和对客正文。历史未记录的操作不补造。'],
 } as const
 
 export const afterSaleAnnotations: 原型标注[] = Object.entries(entries).map(([key, [title, description, rule]]) => ({
@@ -18,11 +20,11 @@ export const afterSaleAnnotations: 原型标注[] = Object.entries(entries).map(
   分类: key === 'list' ? '页面' : key === 'approval' ? '规则' : '交互',
   标题: title,
   说明: description,
-  版本: '1.2',
+  版本: key === 'logs' ? '日志排版 0.2 / 2026-11-05' : '1.2',
   状态: '待评审',
   事实等级: key === 'approval' || key === 'queues' ? '已确认' : '合理假设',
-  prd引用: ['PRD/售后单管理功能PRD.md', 'PRD/eBay退换货申请功能PRD.md'],
-  交互规则: [rule],
+  prd引用: ['PRD/eBay客服时间通用规范.md', 'PRD/售后单管理功能PRD.md', 'PRD/eBay退换货申请功能PRD.md', 'PRD/eBay客服操作日志通用规范.md'],
+  交互规则: [rule, ...(key === 'logs' ? [customerServiceLogLayoutRule] : [])],
 }))
 
 export const afterSaleAnnotation = (key: keyof typeof entries) => afterSaleAnnotations.find(item => item.id === 'oms.after-sale-orders.' + key)!

@@ -40,7 +40,7 @@ describe('消息模板管理页面', () => {
   it('新增放在筛选下方独立操作行，使用居中弹窗且没有变量管理入口', async () => {
     expect(wrapper.findAll('button').some(item => ['变量管理', '新增变量', '保存变量'].includes(item.text().trim()))).toBe(false)
     expect(wrapper.get('.template-actions').element.previousElementSibling).toBe(wrapper.get('.template-filters').element)
-    expect(wrapper.get('.template-actions').text()).toBe('新增站内信模板')
+    expect(wrapper.get('.template-actions').text()).toBe('新增站内信模板变更记录')
     await button('新增站内信模板').trigger('click')
     expect(wrapper.get('.template-editor-dialog').attributes('data-align-center')).toBe('')
     expect(wrapper.find('.el-drawer').exists()).toBe(false)

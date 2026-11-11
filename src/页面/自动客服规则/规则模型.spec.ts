@@ -16,6 +16,22 @@ beforeEach(() => { resetFeedbackTemplateSession(); resetTemplateSession(); reset
 afterEach(() => { resetFeedbackTemplateSession(); resetTemplateSession(); resetServiceRules() })
 
 describe('自动客服规则配置边界', () => {
+  it('未变化保存及同状态启停不改版本或写日志，有变化操作记录现有客服身份和完成结果', () => {
+    const source = serviceRules.value.find(item => item.type === 'assignment')!
+    const original = JSON.stringify(source)
+    const unchanged = createEditor('assignment', 'edit', source)
+    expect(saveEditor(unchanged)).toBeUndefined()
+    expect(JSON.stringify(serviceRules.value.find(item => item.id === source.id))).toBe(original)
+    expect(serviceRuleLogs.value).toHaveLength(0)
+    expect(setRulesEnabled([{ id: source.id, version: source.version }], source.enabled)).toMatchObject({ changed: 0, skipped: 1 })
+    expect(serviceRuleLogs.value).toHaveLength(0)
+    const changed = createEditor('assignment', 'edit', source)
+    changed.draft.note = '由当前客服更新的规则说明'
+    expect(saveEditor(changed)).toBeUndefined()
+    expect(serviceRuleLogs.value).toHaveLength(1)
+    expect(serviceRuleLogs.value[0]).toMatchObject({ ruleId: source.id, operator: '客服01', action: '编辑', result: '已完成' })
+    expect(serviceRuleLogs.value[0]?.at).toMatch(/Z$/)
+  })
   it('仅自动发信使用三种独立新触发，其他两类触发保持且不默认开启买家去重', () => {
     expect(typeTriggers.message).toEqual(['unpaidOrder', 'paidBeforeShipment', 'orderOutbound'])
     expect(typeTriggers.assignment).toEqual(['incoming']); expect(typeTriggers.feedback).toEqual(['paid', 'shipped', 'positive'])

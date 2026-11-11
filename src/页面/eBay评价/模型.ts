@@ -1,6 +1,10 @@
-import { 命中字段搜索, 命中时间范围, 校验字段搜索, 校验时间范围 } from '@/组件/筛选/筛选工具'
-import { reviewCommentLabels, reviewHandlingLabels, reviewOwners, reviewPlatformLabels } from './数据'
+import { handlerNames, handlerOptions, matchesHandlerFilter, currentHandlerName } from '@/组件/客服处理人/处理人'
+import { getReviewHandlerIds, getReviewSkuHandlerIds, hasManualReviewHandlers, getBuyerFeedbackHandlerIds, sameReviewHandlers } from './评价处理人'
+import { 命中字段搜索, 命中时间范围, 校验字段搜索, 校验时间范围, 读取排序时刻 } from '@/组件/筛选/筛选工具'
+import { 格式化北京时间 } from '../订单处理/时间展示工具'
+import { reviewCommentLabels, reviewHandlingLabels, reviewPlatformLabels } from './数据'
 import { canUseReviewReason, markReviewReasonUsed } from './原因分类模型'
+import type { CustomerServiceLog } from '@/组件/客服日志/日志工具'
 import type {
   BuyerFeedbackRecord, BuyerFeedbackSendSource, ReviewActionResult, ReviewFilters, ReviewHandlingStatus, ReviewRecord,
   ReviewReasonSummary, ReviewShopSummary, ReviewSummary, ReviewTrend,
@@ -23,12 +27,17 @@ export function getReviewDisplay(record: ReviewRecord): Pick<ReviewRecord, 'cont
   return { hidden: false, content: record.content, translation: record.translation, reply: record.reply, followup: record.followup }
 }
 export function reviewDate(value: string): string {
-  const timestamp = Date.parse(value)
-  return Number.isFinite(timestamp) ? new Date(timestamp + 8 * 3_600_000).toISOString().slice(0, 10) : ''
+  return 读取排序时刻(value) === undefined ? '' : 格式化北京时间(value).slice(0, 10)
 }
 export function formatReviewTime(value: string): string {
-  const timestamp = Date.parse(value)
-  return Number.isFinite(timestamp) ? new Date(timestamp + 8 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ') : '—'
+  const text = 格式化北京时间(value)
+  return 读取排序时刻(value) === undefined ? text : text.slice(0, 16)
+}
+function compareTimeDesc(a: string, b: string): number {
+  const first = 读取排序时刻(a), second = 读取排序时刻(b)
+  if (first === undefined && second !== undefined) return 1
+  if (first !== undefined && second === undefined) return -1
+  return (second ?? 0) - (first ?? 0)
 }
 
 const reviewFields = ['id', 'feedbackId', 'buyerId', 'orderNo', 'orderLineItemId', 'sku', 'platformSku', 'listingId', 'itemId', 'title', 'content']
@@ -38,7 +47,7 @@ export function filterReviews(records: ReviewRecord[], filters: ReviewFilters): 
     if (filters.shopIds.length && !filters.shopIds.includes(record.shopId)) return false
     if (filters.commentTypes.length && !filters.commentTypes.includes(record.commentType)) return false
     if (filters.handlingStatuses.length && !filters.handlingStatuses.includes(record.handlingStatus)) return false
-    if (filters.owners.length && !filters.owners.includes(record.owner)) return false
+    if (!matchesHandlerFilter(getReviewHandlerIds(record), filters.owners)) return false
     if (filters.platformStates.length && !filters.platformStates.includes(record.platformState)) return false
     if (filters.source === 'buyer' && record.automated || filters.source === 'automated' && !record.automated) return false
     if (filters.replyState === 'replied' && !record.reply || filters.replyState === 'unreplied' && record.reply) return false
@@ -48,7 +57,7 @@ export function filterReviews(records: ReviewRecord[], filters: ReviewFilters): 
     // 隐藏记录可以通过ID等元数据定位，但不能通过隐藏正文反查。
     const value = field === 'content' ? getReviewDisplay(record).hidden ? undefined : getReviewDisplay(record).content : record[field as keyof ReviewRecord]
     return 命中字段搜索(typeof value === 'string' ? value : undefined, filters.query, filters.mode, ['title', 'content'].includes(field) ? 'text' : 'identifier')
-  }).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id))
+  }).sort((a, b) => compareTimeDesc(a.createdAt, b.createdAt) || a.id.localeCompare(b.id))
 }
 
 export function filterBuyerFeedback(records: BuyerFeedbackRecord[], filters: ReviewFilters, status: 'all' | 'pending' | 'sent' = 'all'): BuyerFeedbackRecord[] {
@@ -56,11 +65,12 @@ export function filterBuyerFeedback(records: BuyerFeedbackRecord[], filters: Rev
   if (!fields.includes(filters.field) || 校验时间范围(filters.dateRange)) return []
   return records.filter(record => {
     if (filters.shopIds.length && !filters.shopIds.includes(record.shopId)) return false
+    if (!matchesHandlerFilter(getBuyerFeedbackHandlerIds(record), filters.owners)) return false
     if (status !== 'all' && record.status !== status) return false
     if (!命中时间范围(record.completedAt, filters.dateRange)) return false
     const value = filters.field === 'content' ? record.comment?.text : record[filters.field as keyof BuyerFeedbackRecord]
     return 命中字段搜索(typeof value === 'string' ? value : undefined, filters.query, filters.mode, ['title', 'content'].includes(filters.field) ? 'text' : 'identifier')
-  }).sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt) || a.id.localeCompare(b.id))
+  }).sort((a, b) => compareTimeDesc(a.completedAt, b.completedAt) || a.id.localeCompare(b.id))
 }
 
 export function summarizeReviews(records: ReviewRecord[]): ReviewSummary {
@@ -140,34 +150,51 @@ export function validateReviewText(text: string): string | undefined {
   if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(text) || /(?:\+\d{1,3}[ -]?)?(?<!\w)(?:\d[ -]?){10,15}(?!\w)/u.test(text)) return '评价内容不能包含邮箱或电话号码等个人信息'
   return undefined
 }
-function appendLog(record: ReviewRecord, action: string, detail: string, by: string, at: string): void {
-  record.logs.push({ id: `${record.id}-log-${record.logs.length + 1}`, at, by, action, detail })
+function appendLog(record: ReviewRecord, action: string, detail: string, by: string, at: string, result = '已完成'): void {
+  record.logs.push({ id: `${record.id}-log-${record.logs.length + 1}`, at, by, action, detail, result })
+}
+/** 平台隐藏内容不会借历史日志再次露出；历史缺失的人和结果保持缺失。 */
+export function getReviewOperationLogs(record: ReviewRecord): CustomerServiceLog[] {
+  return record.logs.map(log => ({ id: log.id, at: log.at, operator: log.by, action: log.action, content: record.platformState === 'HIDDEN' ? '该评价内容受限，操作详情不展示' : log.detail, result: log.result }))
 }
 
-export function replyToReview(record: ReviewRecord, text: string, by = '客服01', at = new Date().toISOString()): ReviewActionResult {
+export function replyToReview(record: ReviewRecord, text: string, by = currentHandlerName.value, at = new Date().toISOString()): ReviewActionResult {
   const error = getReplyBlockedReason(record) || validateReviewText(text)
   if (error) return failure(error)
   record.reply = { text: text.trim(), at, by }
-  appendLog(record, '回复评价', '已完成本地模拟提交；原评价和客服处理状态保持不变。', by, at)
+  appendLog(record, '回复评价', `评价记录：${record.id}；回复内容见评价与回复。`, by, at, '已受理（本地模拟）')
   return success('回复评价已保存（本地模拟）')
 }
 
-export function updateReviewHandling(record: ReviewRecord, patch: { handlingStatus?: ReviewHandlingStatus; owner?: string; reason?: string }, by = '客服01', at = new Date().toISOString()): ReviewActionResult {
+export function updateReviewHandling(record: ReviewRecord, patch: { handlingStatus?: ReviewHandlingStatus; handlerIds?: string[] | null; reason?: string }, by = currentHandlerName.value, at = new Date().toISOString()): ReviewActionResult {
   if (patch.handlingStatus !== undefined && !['pending', 'processing', 'resolved'].includes(patch.handlingStatus)) return failure('请选择有效的处理状态')
-  if (patch.owner !== undefined && patch.owner !== '' && !reviewOwners.includes(patch.owner)) return failure('请选择有效的负责人')
+  const previous = getReviewHandlerIds(record)
+  const restore = patch.handlerIds === null && hasManualReviewHandlers(record)
+  const next = Array.isArray(patch.handlerIds) ? [...new Set(patch.handlerIds)] : undefined
+  if (next?.some(id => !handlerOptions.some(person => person.value === id) && !previous.includes(id))) return failure('请选择有效的处理人')
   if (patch.reason !== undefined && !canUseReviewReason(patch.reason, record.reason)) return failure('请选择已启用的原因分类')
   const changes: string[] = []
   if (patch.handlingStatus !== undefined && patch.handlingStatus !== record.handlingStatus) changes.push(`处理状态：${reviewHandlingLabels[record.handlingStatus]} → ${reviewHandlingLabels[patch.handlingStatus]}`)
-  if (patch.owner !== undefined && patch.owner !== record.owner) changes.push(`负责人：${record.owner || '未分配'} → ${patch.owner || '未分配'}`)
+  const handlersChanged = next !== undefined && !sameReviewHandlers(previous, next)
+  if (restore) changes.push(`恢复自动分配：${handlerNames(previous)} → ${handlerNames(getReviewSkuHandlerIds(record))}`)
+  if (handlersChanged) changes.push(`处理人：${handlerNames(previous)} → ${handlerNames(next)}`)
   if (patch.reason !== undefined && patch.reason !== record.reason) changes.push(`原因：${record.reason || '未分类'} → ${patch.reason || '未分类'}`)
   if (!changes.length) return success('处理信息没有变化')
-  Object.assign(record, patch)
+  if (restore) {
+    delete record.handlerIds
+    delete record.owner
+  } else if (handlersChanged) {
+    record.handlerIds = next
+    delete record.owner
+  }
+  if (patch.handlingStatus !== undefined) record.handlingStatus = patch.handlingStatus
+  if (patch.reason !== undefined) record.reason = patch.reason
   if (record.reason) markReviewReasonUsed(record.reason)
   appendLog(record, '更新处理信息', changes.join('；'), by, at)
   return success('处理信息已保存')
 }
 
-export function addReviewNote(record: ReviewRecord, text: string, by = '客服01', at = new Date().toISOString()): ReviewActionResult {
+export function addReviewNote(record: ReviewRecord, text: string, by = currentHandlerName.value, at = new Date().toISOString()): ReviewActionResult {
   if (!text.trim()) return failure('请输入内部备注')
   if (Array.from(text.trim()).length > 1000) return failure('内部备注最多1000个字符')
   record.notes.push({ text: text.trim(), at, by })
@@ -215,13 +242,13 @@ export function getBuyerFeedbackBlockedReason(record: BuyerFeedbackRecord, at = 
   if (record.status === 'sent' || record.comment) return '该交易已经给买家留评，不能重复提交'
   if (record.attempts?.some(item => item.outcome === 'succeeded')) return '已存在成功留评记录，请先核对平台结果，不能重复提交'
   if (!record.eligible) return record.ineligibleReason || '当前交易未通过平台留评资格校验'
-  const completedAt = Date.parse(record.completedAt), now = Date.parse(at)
-  if (!Number.isFinite(completedAt) || !Number.isFinite(now) || now < completedAt) return '交易完成时间尚未确认，暂不能留评'
+  const completedAt = 读取排序时刻(record.completedAt), now = 读取排序时刻(at)
+  if (completedAt === undefined || now === undefined || now < completedAt) return '交易完成时间尚未确认，暂不能留评'
   if (now - completedAt > 90 * 86_400_000) return '交易完成已超过90天，当前不可留评'
   return undefined
 }
 export function canLeaveBuyerFeedback(record: BuyerFeedbackRecord, at = new Date().toISOString()): boolean { return !getBuyerFeedbackBlockedReason(record, at) }
-export function leaveBuyerFeedback(record: BuyerFeedbackRecord, text: string, by = '客服01', at = new Date().toISOString(), simulation?: 'success' | 'failure'): ReviewActionResult {
+export function leaveBuyerFeedback(record: BuyerFeedbackRecord, text: string, by = currentHandlerName.value, at = new Date().toISOString(), simulation?: 'success' | 'failure'): ReviewActionResult {
   const error = getBuyerFeedbackBlockedReason(record, at) || validateReviewText(text)
   if (error) return failure(error)
   const simulateFailure = simulation === 'failure' || (simulation === undefined && record.simulateFailureOnce === true)
@@ -252,19 +279,19 @@ export function toCsv(rows: (string | number | null | undefined)[][]): string {
 }
 export function exportReviewsCsv(records: ReviewRecord[]): string {
   return toCsv([
-    ['数据性质', '评价ID', '店铺', '买家', '订单号', '订单行ID', 'SKU', '商品', '评价类型', '评价来源', '平台状态', '评价时间（北京时间）', '评价内容', '回复评价', '回复时间（北京时间）', '处理状态', '负责人', '原因分类', '内部备注'],
+    ['数据性质', '评价ID', '店铺', '买家', '订单号', '订单行ID', 'SKU', '商品', '评价类型', '评价来源', '平台状态', '评价时间（北京时间）', '评价内容', '回复评价', '回复时间（北京时间）', '处理状态', '处理人', '原因分类', '内部备注'],
     ...records.map(record => {
       const display = getReviewDisplay(record)
-      return ['虚构评审数据', record.id, record.shopName, record.buyerId, record.orderNo, record.orderLineItemId, record.sku, record.title, reviewCommentLabels[record.commentType], record.automated ? 'eBay自动评价' : '买家评价', reviewPlatformLabels[record.platformState], formatReviewTime(record.createdAt), display.content, display.reply?.text ?? '', display.reply ? formatReviewTime(display.reply.at) : '', reviewHandlingLabels[record.handlingStatus], record.owner, record.reason, record.notes.map(note => `${formatReviewTime(note.at)} ${note.by}：${note.text}`).join('\n')]
+      return ['虚构评审数据', record.id, record.shopName, record.buyerId, record.orderNo, record.orderLineItemId, record.sku, record.title, reviewCommentLabels[record.commentType], record.automated ? 'eBay自动评价' : '买家评价', reviewPlatformLabels[record.platformState], formatReviewTime(record.createdAt), display.content, display.reply?.text ?? '', display.reply ? formatReviewTime(display.reply.at) : '', reviewHandlingLabels[record.handlingStatus], handlerNames(getReviewHandlerIds(record)), record.reason, record.notes.map(note => `${formatReviewTime(note.at)} ${note.by}：${note.text}`).join('\n')]
     }),
   ])
 }
 export function exportBuyerFeedbackCsv(records: BuyerFeedbackRecord[]): string {
   return toCsv([
-    ['数据性质', '记录ID', '店铺', '买家', '订单号', '订单行ID', 'SKU', '商品', '交易完成时间（北京时间）', '留评状态', '评价类型', '评价内容', '留评时间（北京时间）', '操作人', '好评方式', '自动规则名称', '留评执行结果', '失败原因', '最近尝试时间（北京时间）'],
+    ['数据性质', '记录ID', '店铺', '买家', '订单号', '订单行ID', 'SKU', '商品', '交易完成时间（北京时间）', '留评状态', '评价类型', '评价内容', '留评时间（北京时间）', '操作人', '处理人', '好评方式', '自动规则名称', '留评执行结果', '失败原因', '最近尝试时间（北京时间）'],
     ...records.map(record => {
       const result = getBuyerFeedbackResult(record), latest = record.attempts?.[record.attempts.length - 1], method = getBuyerFeedbackMethod(record)
-      return ['虚构评审数据', record.id, record.shopName, record.buyerId, record.orderNo, record.orderLineItemId, record.sku, record.title, formatReviewTime(record.completedAt), record.status === 'sent' ? '已留评' : '待留评', record.status === 'sent' ? '好评' : '', record.comment?.text ?? '', record.comment ? formatReviewTime(record.comment.at) : '', record.comment?.by ?? '', method.label, method.ruleName ?? '', result.label, result.reason ?? '', latest ? formatReviewTime(latest.at) : '']
+      return ['虚构评审数据', record.id, record.shopName, record.buyerId, record.orderNo, record.orderLineItemId, record.sku, record.title, formatReviewTime(record.completedAt), record.status === 'sent' ? '已留评' : '待留评', record.status === 'sent' ? '好评' : '', record.comment?.text ?? '', record.comment ? formatReviewTime(record.comment.at) : '', record.comment?.by ?? '', handlerNames(getBuyerFeedbackHandlerIds(record)), method.label, method.ruleName ?? '', result.label, result.reason ?? '', latest ? formatReviewTime(latest.at) : '']
     }),
   ])
 }

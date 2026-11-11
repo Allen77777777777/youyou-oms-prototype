@@ -20,7 +20,7 @@ export function statisticsAnnotation(id: string, title: string): 原型标注 {
   return {
     id: anchor, 锚点: anchor, 标题: title, 说明: content[0]!, 分类: id === 'overview' ? '页面' : '交互',
     路由: '/oms/ebay-service/review-statistics', 版本: '0.5 / 2026-10-29', 状态: '待评审', 事实等级: '合理假设',
-    prd引用: ['PRD/eBay评价统计功能PRD.md', 'PRD/eBay评价功能PRD.md', 'PRD/列表筛选组件规范.md'], 交互规则: content,
+    prd引用: ['PRD/eBay客服时间通用规范.md', 'PRD/eBay评价统计功能PRD.md', 'PRD/eBay评价功能PRD.md', 'PRD/列表筛选组件规范.md'], 交互规则: content,
     数据来源: ['评价页面同源虚构会话；统计为内部管理口径，不是平台官方信用评级。'],
     权限与审计: ['本地原型未实现服务端店铺范围权限、真实采集和持久化审计。'],
     验收要点: ['草稿不提前查询；来源隔离；隐藏及撤回排除；空分母—；下钻与已应用数量一致；导出安全；三种桌面宽度无页面级横向溢出。'],

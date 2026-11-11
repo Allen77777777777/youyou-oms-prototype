@@ -9,7 +9,9 @@ import { 注册业务页签清理, 注销业务页签清理 } from '@/布局/页
 import type { 履约模式 } from '../全渠道订单/类型'
 import { 校验条件配置, 格式化条件值, type 规则范围 } from '../订单规则/规则条件定义'
 import { 是否支持比价币种 } from '../订单规则/比价币种'
-import { defaultAutoReplyConfig, autoReplyScheduleSummary, autoReplyShopIds, normalizeAutoReplyShops, validateAutoReplyConfig, type AutoReplyConfig } from './自动回复配置'
+import { defaultAutoReplyConfig, autoReplyScheduleSummary, autoReplyShopIds, normalizeAutoReplyShops, migrateAutoReplyTimeZone, validateAutoReplyConfig, type AutoReplyConfig } from './自动回复配置'
+import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
+import { 格式化北京时间, 解析来源时刻 } from '../订单处理/时间展示工具'
 export * from './自动回复配置'
 
 export type ServiceRuleType = 'assignment' | 'feedback' | 'message' | 'autoReply'
@@ -24,7 +26,7 @@ export interface ServiceRule {
   trigger: TriggerEvent; timing: 'immediate' | 'delayed'; delay: number; delayUnit: 'minute' | 'hour' | 'day'
   conditions: RuleCondition[]; assignment: AssignmentAction; templateId: string; messageDedup?: MessageDedup; autoReply?: AutoReplyConfig
 }
-export interface RuleLog { id: string; ruleId: string; at: string; operator: string; action: string; content: string }
+export interface RuleLog extends CustomerServiceLog { id: string; ruleId: string }
 export interface EditorSession { key: string; id: string; mode: EditorMode; draft: ServiceRule; skuInputs: Partial<Record<ConditionField, string>>; sourceId?: string; sourceVersion?: number }
 export const ruleListPath = '/oms/ebay-service/automation-rules'
 export const maximumRulePriority = 999999
@@ -54,7 +56,21 @@ export function createRuleCondition(field: ConditionField): RuleCondition {
 }
 export { mailTagDefinitions, priorityOptions }
 export function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
-export function timestamp() { return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) }
+export function timestamp() { return new Date().toISOString() }
+export const formatRuleTime = 格式化北京时间
+/** 此模块旧 updatedAt 由固定北京格式器生成；只迁移该已知来源，不推断平台时间。 */
+export function normalizeServiceRuleTimes(rule: ServiceRule): void {
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(rule.updatedAt)) {
+    const at = 解析来源时刻(`${rule.updatedAt.replace(' ', 'T')}+08:00`)
+    if (at !== undefined) rule.updatedAt = new Date(at).toISOString()
+  }
+  if (rule.type === 'autoReply' && migrateAutoReplyTimeZone(rule.autoReply)) {
+    rule.enabled = false
+    rule.version++
+    rule.updatedAt = timestamp()
+    serviceRuleLogs.value.unshift({ ...createCustomerServiceLog('系统', '时区配置待核对', `原休息时段使用 ${rule.autoReply!.legacySchedule!.timeZone || '未记录时区'}，已保留原配置并停用，请重新设置北京时间时段。`, '待核对'), id: crypto.randomUUID(), ruleId: rule.id })
+  }
+}
 export function typeLabel(type: ServiceRuleType) { return ruleTypes.find(item => item.value === type)?.label ?? type }
 export function parseSkuValues(input: string) { return [...new Set(input.split(/[,，;；\r\n]+/u).map(item => item.trim()).filter(Boolean))] }
 export function availableTemplates(type: ServiceRuleType) {
@@ -88,7 +104,7 @@ export function defaultRule(type: ServiceRuleType): ServiceRule {
   return { id: '', type, name: '', enabled: false, order: type === 'autoReply' ? 0 : 10, version: 1, updatedAt: '', note: '', trigger: typeTriggers[type][0]!, timing: 'immediate', delay: 1, delayUnit: 'hour', conditions: type === 'autoReply' ? [] : [{ field: 'shop', operator: 'eq', values: [] }], assignment: { assign: false, assignee: '', status: false, workStatus: 'pending', tag: false, tagIds: [], prioritize: false, priority: 'normal' }, templateId: '', ...(type === 'message' ? { messageDedup: { enabled: false, days: 1 } } : {}), ...(type === 'autoReply' ? { autoReply: defaultAutoReplyConfig() } : {}) }
 }
 function initialRules(): ServiceRule[] {
-  const make = (type: ServiceRuleType, name: string, index: number, patch: Partial<ServiceRule>): ServiceRule => ({ ...defaultRule(type), id: `AUTO-DEMO-${index}`, name, order: index * 10, updatedAt: '2026-10-29 09:30:00', conditions: [{ field: 'shop', operator: 'eq', values: ['shop-us'] }], ...patch })
+  const make = (type: ServiceRuleType, name: string, index: number, patch: Partial<ServiceRule>): ServiceRule => ({ ...defaultRule(type), id: `AUTO-DEMO-${index}`, name, order: index * 10, updatedAt: '2026-10-29T01:30:00.000Z', conditions: [{ field: 'shop', operator: 'eq', values: ['shop-us'] }], ...patch })
   return [
     make('assignment', '美国店铺来信分配', 1, { assignment: { assign: true, assignee: '客服01', status: true, workStatus: 'pending', tag: false, tagIds: [], prioritize: false, priority: 'normal' } }),
     make('assignment', '家居商品咨询优先跟进', 2, { conditions: [{ field: 'systemSku', operator: 'eq', values: ['DEMO-HOME-001', 'DEMO-HOME-002'] }], assignment: { assign: true, assignee: '客服02', status: true, workStatus: 'pending', tag: true, tagIds: ['fitment'], prioritize: true, priority: 'high' } }),
@@ -107,13 +123,13 @@ export const serviceRuleLogs = ref<RuleLog[]>([])
 export const activeRuleType = ref<ServiceRuleType>('assignment')
 export const editorSessions = reactive(new Map<string, EditorSession>())
 export function autoReplyShopSummary(config: AutoReplyConfig | undefined): string { return autoReplyShopIds(config).map(shopId => shopOptions.find(item => item.value === shopId)?.label ?? shopId).join('、') || '未选择店铺账号' }
-export function sortedServiceRules(type: ServiceRuleType) { return serviceRules.value.filter(item => item.type === type).sort((a, b) => type === 'autoReply' ? autoReplyShopSummary(a.autoReply).localeCompare(autoReplyShopSummary(b.autoReply), 'zh-CN') : a.order - b.order) }
+export function sortedServiceRules(type: ServiceRuleType) { serviceRules.value.forEach(normalizeServiceRuleTimes); return serviceRules.value.filter(item => item.type === type).sort((a, b) => type === 'autoReply' ? autoReplyShopSummary(a.autoReply).localeCompare(autoReplyShopSummary(b.autoReply), 'zh-CN') : a.order - b.order) }
 function writeTypeOrder(type: ServiceRuleType, ordered: ServiceRule[]) {
   let index = 0
   serviceRules.value = serviceRules.value.map(rule => rule.type === type ? ordered[index++]! : rule)
 }
 function nextRulePriority(type: ServiceRuleType) { return Math.min(maximumRulePriority, Math.max(0, ...serviceRules.value.filter(item => item.type === type).map(item => item.order)) + 10) }
-export function addLog(rule: ServiceRule, action: string, content: string) { serviceRuleLogs.value.unshift({ id: crypto.randomUUID(), ruleId: rule.id, at: timestamp(), operator: '当前用户', action, content }) }
+export function addLog(rule: ServiceRule, action: string, content: string) { serviceRuleLogs.value.unshift({ ...createCustomerServiceLog(reviewOwners[0]!, action, content, '已完成'), id: crypto.randomUUID(), ruleId: rule.id }) }
 export function conditionSummary(condition: RuleCondition) {
   if (condition.field === 'orderAmount') return `订单总金额 ${condition.amountRange ? 格式化条件值({ ...condition.amountRange, field: 'orderAmount', operator: '介于' }) || '未配置' : '未配置'}`
   const options = conditionOptions(condition.field)
@@ -181,10 +197,15 @@ export function validateRule(rule: ServiceRule, rules: ServiceRule[] = serviceRu
   return templateError(rule)
 }
 export function createEditor(type: ServiceRuleType, mode: EditorMode, source?: ServiceRule) {
+  if (source) normalizeServiceRuleTimes(source)
   const id = mode === 'edit' && source ? source.id : crypto.randomUUID(), key = `${mode}:${id}`
   if (editorSessions.has(key)) {
     const session = editorSessions.get(key)!
-    if (session.draft.type === 'autoReply') normalizeAutoReplyShops(session.draft.autoReply)
+    if (session.draft.type === 'autoReply') {
+      normalizeAutoReplyShops(session.draft.autoReply)
+      // 草稿尚未保存，不伪记一次已生效配置迁移；原规则版本仍按原并发门槛复验。
+      if (migrateAutoReplyTimeZone(session.draft.autoReply)) session.draft.enabled = false
+    }
     return session
   }
   const draft = source ? clone(source) : defaultRule(type)
@@ -224,7 +245,13 @@ export function saveEditor(session: EditorSession): string | undefined {
   const rule = clone(session.draft), original = session.mode === 'edit' ? serviceRules.value.find(item => item.id === session.sourceId) : undefined
   if (rule.type === 'autoReply') normalizeAutoReplyShops(rule.autoReply)
   rule.id = original?.id ?? `AUTO-${crypto.randomUUID()}`; rule.name = rule.name.trim(); rule.note = rule.note.trim(); rule.version = original ? original.version + 1 : 1; rule.updatedAt = timestamp()
+  if (rule.autoReply?.legacySchedule && !rule.autoReply.legacySchedule.reviewedAt && !rule.autoReply.timeZoneReviewRequired) rule.autoReply.legacySchedule.reviewedAt = rule.updatedAt
   rule.conditions.forEach(condition => { condition.values = condition.values.map(value => value.trim()) })
+  if (original && JSON.stringify({ ...original, version: 0, updatedAt: '' }) === JSON.stringify({ ...rule, version: 0, updatedAt: '' })) {
+    activeRuleType.value = rule.type
+    discardEditor(session.key)
+    return undefined
+  }
   const baseline = sortedServiceRules(rule.type)
   const ordered = original ? baseline.map(item => item.id === original.id ? rule : item) : [...baseline, rule]
   if (!original) serviceRules.value.push(rule)
@@ -237,6 +264,7 @@ export function saveEditor(session: EditorSession): string | undefined {
   return undefined
 }
 export function setRulesEnabled(targets: Array<{ id: string; version: number }>, enabled: boolean): { error?: string; changed: number; skipped: number } {
+  serviceRules.value.forEach(normalizeServiceRuleTimes)
   const rules = targets.map(target => serviceRules.value.find(item => item.id === target.id && item.version === target.version))
   if (rules.some(item => !item)) return { error: '所选规则已变化，请重新选择', changed: 0, skipped: 0 }
   for (const rule of rules) if (enabled && rule!.enabled !== enabled) { const error = validateRule(rule!); if (error) return { error: `${rule!.name}：${error}`, changed: 0, skipped: 0 } }
@@ -248,7 +276,7 @@ export function deleteRule(id: string, version: number): string | undefined {
   const index = serviceRules.value.findIndex(item => item.id === id && item.version === version)
   if (index < 0) return '规则已变化或被删除，请刷新列表'
   const rule = serviceRules.value[index]!
-  addLog(rule, '删除', `删除规则「${rule.name}」，保留历史操作记录`)
+  addLog(rule, '删除', `删除规则「${rule.name}」，保留历史操作日志`)
   serviceRules.value.splice(index, 1)
   for (const [key, session] of editorSessions) if (session.mode === 'edit' && session.sourceId === id) discardEditor(key)
 }

@@ -5,14 +5,18 @@ import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import MultiFilter from '@/组件/筛选/多选筛选.vue'
 import { 命中字段搜索, 校验字段搜索 } from '@/组件/筛选/筛选工具'
 import { formatMailTime, MAX_REPLY_ATTACHMENTS, MAX_REPLY_BODY_LENGTH, validateDraft } from '../eBay站内信/模型'
+import { 格式化北京时间 } from '../订单处理/时间展示工具'
 import type { MessageAttachment } from '../eBay站内信/类型'
 import RichTextEditor from './富文本编辑器.vue'
 import FeedbackTemplateManager from './评价模板管理.vue'
+import TemplateChangeHistory from './模板变更记录.vue'
 import { plainTextToHtml, richHtmlToSendText, richHtmlToText, sanitizeRichHtml } from './富文本'
 import { copyTemplate, deleteTemplate, getTemplateVariables, renderMessageTemplate, saveTemplate, setTemplateEnabled, templateSession, variableSources, type MessageTemplate, type TemplateContext, type TemplateInput, type TemplateKind, type TemplateVariable } from './模型'
 import { templateAnnotation as annotation } from './标注'
 
 const kind = ref<TemplateKind | 'feedback'>('message'), page = ref(1)
+const historyOpen = ref(false), historyId = ref('')
+function openChanges(id = '') { historyId.value = id ? JSON.stringify([kind.value, id]) : ''; historyOpen.value = true }
 const fields = [{ value: 'title', label: '名称', kind: 'text' as const }, { value: 'body', label: '正文', kind: 'text' as const }]
 const filter = reactive({ query: '', field: 'title', mode: 'contains' as 'contains' | 'exact', statuses: [] as string[] })
 const applied = reactive({ ...filter, statuses: [] as string[] }), queryError = ref('')
@@ -24,7 +28,7 @@ const results = computed(() => templateSession.templates.filter(item => item.kin
 const rows = computed(() => results.value.slice((page.value - 1) * 20, page.value * 20))
 const kindLabel = (value: TemplateKind | 'feedback') => value === 'message' ? '站内信模板' : value === 'phrase' ? '常用语' : '评价模板'
 const variablesFor = (item: TemplateInput) => getTemplateVariables(`${item.kind === 'message' ? item.subject ?? '' : ''}\n${item.body}`)
-watch(kind, () => { page.value = 1 })
+watch(kind, () => { page.value = 1; historyOpen.value = false })
 watch(() => results.value.length, () => { page.value = Math.min(page.value, Math.max(1, Math.ceil(results.value.length / 20))) })
 function query() { queryError.value = 校验字段搜索(filter.query, filter.mode, 'text') ?? ''; if (queryError.value) return; Object.assign(applied, filter, { statuses: [...filter.statuses] }); page.value = 1 }
 function resetFilters() { Object.assign(filter, { query: '', field: 'title', mode: 'contains', statuses: [] }); query() }
@@ -121,19 +125,20 @@ function setPreviewValue(source: string, value: string) { previewContext[source 
     <template v-else>
     <div class="template-filters" v-prototype="annotation('filters', '模板查询')"><MultiFilter v-model="filter.statuses" :options="statusOptions" placeholder="全部状态" :width="132" /><FieldSearch v-model="filter.query" v-model:field="filter.field" v-model:mode="filter.mode" :fields="fields" aria-prefix="模板" :width="380" @search="query" /><ElButton type="primary" @click="query">查询</ElButton><ElButton @click="resetFilters">重置</ElButton></div>
     <p v-if="queryError" class="template-error" role="alert">{{ queryError }}</p>
-    <div class="template-actions" aria-label="模板操作"><ElButton type="primary" @click="openEditor()">新增{{ kindLabel(kind) }}</ElButton></div>
+    <div class="template-actions" aria-label="模板操作"><ElButton type="primary" @click="openEditor()">新增{{ kindLabel(kind) }}</ElButton><ElButton @click="openChanges()">变更记录</ElButton></div>
     <div class="template-table"><ElTable :data="rows" row-key="id" height="100%" stripe>
       <ElTableColumn prop="title" label="名称" min-width="175"><template #default="{ row }"><button class="template-name" @click="openEditor(row as MessageTemplate)">{{ row.title }}</button></template></ElTableColumn>
       <ElTableColumn label="正文摘要" min-width="270"><template #default="{ row }"><p class="template-body-summary" :title="row.body">{{ row.body }}</p></template></ElTableColumn>
       <ElTableColumn label="使用变量" min-width="150"><template #default="{ row }"><div class="template-variable-tags"><ElTag v-for="variable in variablesFor(row as MessageTemplate)" :key="variable.id" size="small" effect="plain">{{ variable.label }}</ElTag><span v-if="!variablesFor(row as MessageTemplate).length" class="template-muted">—</span></div></template></ElTableColumn>
       <ElTableColumn label="状态" width="85"><template #default="{ row }"><ElTag :type="row.enabled ? 'success' : 'info'" size="small" effect="plain">{{ row.enabled ? '已启用' : '已停用' }}</ElTag></template></ElTableColumn>
-      <ElTableColumn label="更新时间" width="132"><template #default="{ row }"><span :title="`${row.updatedAt}（显示为北京时间）`">{{ formatMailTime(row.updatedAt) }}</span></template></ElTableColumn>
-      <ElTableColumn label="操作" width="230" fixed="right"><template #default="{ row }"><div class="template-row-actions" v-prototype="annotation('lifecycle', '模板复制启停与删除')"><ElButton link type="primary" @click="openPreview(row as MessageTemplate)">预览</ElButton><ElButton link type="primary" @click="openEditor(row as MessageTemplate)">编辑</ElButton><ElButton link type="primary" @click="duplicate(row as MessageTemplate)">复制</ElButton><ElButton link :type="row.enabled ? 'warning' : 'primary'" @click="toggleEnabled(row as MessageTemplate)">{{ row.enabled ? '停用' : '启用' }}</ElButton><ElButton link type="danger" @click="remove(row as MessageTemplate)">删除</ElButton></div></template></ElTableColumn>
+      <ElTableColumn label="更新时间" width="132"><template #default="{ row }"><span :title="格式化北京时间(row.updatedAt)">{{ formatMailTime(row.updatedAt) }}</span></template></ElTableColumn>
+      <ElTableColumn label="操作" width="300" fixed="right"><template #default="{ row }"><div class="template-row-actions" v-prototype="annotation('lifecycle', '模板复制启停与删除')"><ElButton link type="primary" @click="openPreview(row as MessageTemplate)">预览</ElButton><ElButton link type="primary" @click="openEditor(row as MessageTemplate)">编辑</ElButton><ElButton link type="primary" @click="duplicate(row as MessageTemplate)">复制</ElButton><ElButton link :type="row.enabled ? 'warning' : 'primary'" @click="toggleEnabled(row as MessageTemplate)">{{ row.enabled ? '停用' : '启用' }}</ElButton><ElButton link type="primary" @click="openChanges(row.id)">变更记录</ElButton><ElButton link type="danger" @click="remove(row as MessageTemplate)">删除</ElButton></div></template></ElTableColumn>
       <template #empty><ElEmpty description="没有匹配的内容" :image-size="64" /></template>
     </ElTable></div>
     <footer class="template-pagination"><span>共 {{ results.length }} 条</span><ElPagination v-model:current-page="page" :page-size="20" :total="results.length" layout="prev, pager, next" size="small" :pager-count="5" /></footer>
     </template>
 
+    <TemplateChangeHistory v-if="historyOpen && kind !== 'feedback'" :kinds="[kind]" :template-id="historyId" @close="historyOpen = false" />
     <ElDialog v-model="editorOpen" :title="`${editId ? '编辑' : '新增'}${kindLabel(editDraft.kind)}`" width="min(860px, 94vw)" align-center :close-on-click-modal="false" destroy-on-close class="template-editor-dialog">
       <section class="template-edit-content" v-prototype="annotation('editor', '模板标题正文与附件')">
         <label class="template-field"><span>{{ editDraft.kind === 'message' ? '模板名称' : '名称' }} <i>*</i></span><ElInput v-model="editDraft.title" maxlength="80" show-word-limit aria-label="模板名称" placeholder="输入便于识别的名称" /></label>

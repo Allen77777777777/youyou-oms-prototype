@@ -16,6 +16,28 @@ function received(patch: Partial<ReviewRecord> = {}): ReviewRecord {
 const project = (orders = [source()], reviews: ReviewRecord[] = []) => projectAwaitingReviewOrders(orders, reviews, [])
 
 describe('未收到买家评价订单投影', () => {
+  it('按剩余未评价行确定所有处理人，搜到单一商品不改整单分工', () => {
+    const rows = projectAwaitingReviewOrders(createAwaitingReviewOrders(), createReviews(), createBuyerFeedback())
+    const order = rows.find(item => item.id === 'AWAIT-DEMO-PARTIAL')!
+    expect(order.reviewedLineCount).toBe(1)
+    expect(new Set(order.handlerIds)).toEqual(new Set(['staff-01', 'staff-02']))
+    const filters = { ...createAwaitingReviewFilters(), field: 'sku' as const, query: 'DEMO-CUP-04', handlerIds: ['staff-01'] }
+    const found = filterAwaitingReviewOrders([order], filters)[0]!
+    expect(found.missingLines.map(line => line.sku)).toEqual(['DEMO-CUP-04'])
+    expect(found.handlerIds).toEqual(order.handlerIds)
+    expect(found.missingLines[0]?.handlerIds).toEqual(['staff-02'])
+    expect(exportAwaitingReviewCsv([found])).toContain('"客服01、客服02","客服02"')
+    expect(exportAwaitingReviewCsv([found])).toContain('客服02')
+    expect(rows.find(item => item.id === 'AWAIT-DEMO-ASSOCIATION')?.handlerIds).toEqual([])
+  })
+  it('一行待核对时只汇集其他已确认未评商品的人员', () => {
+    const order = createAwaitingReviewOrders()[0]!
+    const mixed = project([{ ...order, lines: order.lines.map((line, i) => i === 1 ? { ...line, association: 'unknown' } : line) }])[0]!
+    expect(mixed.status).toBe('check')
+    expect(mixed.handlerIds).toEqual(['staff-01'])
+    expect(mixed.missingLines[1]?.handlerIds).toEqual([])
+    expect(project([{ ...order, coverage: 'unknown' }])[0]?.handlerIds).toEqual([])
+  })
   it('只取 OMS 已发货的 eBay 订单，平台 FULFILLED 不能替代', () => {
     expect(project([source(), source({ id: 'B', processingStatus: '待发货' }), source({ id: 'C', platform: 'Temu' })]).map(row => row.id)).toEqual(['ORDER-A'])
   })

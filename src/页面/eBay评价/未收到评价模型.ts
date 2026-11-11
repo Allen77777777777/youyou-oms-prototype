@@ -1,4 +1,5 @@
-import { 命中字段搜索, 命中时间范围, 校验字段搜索, 校验时间范围 } from '@/组件/筛选/筛选工具'
+import { currentHandlerName, getSkuHandlerIds, handlerNames, matchesHandlerFilter } from '@/组件/客服处理人/处理人'
+import { 命中字段搜索, 命中时间范围, 校验字段搜索, 校验时间范围, 读取排序时刻 } from '@/组件/筛选/筛选工具'
 import type { BuyerFeedbackRecord, ReviewActionResult, ReviewComment, ReviewRecord } from './类型'
 
 export interface AwaitingReviewLine {
@@ -12,6 +13,8 @@ export interface AwaitingReviewLine {
   association: 'confirmed' | 'unknown'
   /** 只读展示投影，仅此交易行存在已确认的 eBay 自动评价。 */
   automatedOnly?: boolean
+  /** 当前查询投影中，此行对应的处理人。 */
+  handlerIds?: string[]
 }
 export interface AwaitingReviewOrder {
   id: string
@@ -37,6 +40,7 @@ export interface AwaitingReviewOrder {
 export type AwaitingSellerFeedbackState = 'sent' | 'not_sent' | 'partial' | 'unknown'
 export interface AwaitingReviewRow extends AwaitingReviewOrder {
   status: 'unreviewed' | 'check'
+  handlerIds: string[]
   missingLines: AwaitingReviewLine[]
   reviewedLineCount: number
   unreviewedLineCount: number
@@ -47,6 +51,7 @@ export interface AwaitingReviewRow extends AwaitingReviewOrder {
   blockedReason?: string
 }
 export interface AwaitingReviewFilters {
+  handlerIds: string[]
   shopIds: string[]
   status: 'unreviewed' | 'check' | 'all'
   automated: 'all' | 'only' | 'none'
@@ -67,8 +72,7 @@ export const AWAITING_LOGISTICS_PLACEHOLDER = '待接入'
 const isPresent = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim())
 const lineKey = (shopId: string, lineId: string) => JSON.stringify([shopId, lineId])
 function timestamp(value: string): number {
-  const normalized = value.replace(' UTC+8', '+08:00').replace(' ', 'T')
-  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? Date.parse(normalized) : NaN
+  return 读取排序时刻(value) ?? NaN
 }
 function beijingDay(value: string): string {
   const time = timestamp(value)
@@ -81,7 +85,7 @@ export function getAwaitingShippedDays(order: Pick<AwaitingReviewOrder, 'shipped
 }
 
 export function createAwaitingReviewFilters(): AwaitingReviewFilters {
-  return { shopIds: [], status: 'unreviewed', automated: 'all', outboundStatuses: [], sellerFeedback: 'all', dateRange: ['2026-09-30', '2026-10-29'], minDays: '', maxDays: '', field: 'orderNo', mode: 'contains', query: '' }
+  return { handlerIds: [], shopIds: [], status: 'unreviewed', automated: 'all', outboundStatuses: [], sellerFeedback: 'all', dateRange: ['2026-09-30', '2026-10-29'], minDays: '', maxDays: '', field: 'orderNo', mode: 'contains', query: '' }
 }
 
 function sellerFeedback(order: AwaitingReviewOrder, lines: AwaitingReviewLine[], records: BuyerFeedbackRecord[]): { sellerFeedbackState: AwaitingSellerFeedbackState; sellerFeedbackLabel: string } {
@@ -108,12 +112,15 @@ export function projectAwaitingReviewOrders(orders: AwaitingReviewOrder[], revie
   const result: AwaitingReviewRow[] = []
   for (const order of eligible) {
     const reasons = new Set<string>()
-    if (![order.id, order.shopId, order.buyerId, order.orderNo].every(isPresent) || rowIds.get(order.id) !== 1) reasons.add('订单身份缺失或重复')
+    const trustedOrder = [order.id, order.shopId, order.buyerId, order.orderNo].every(isPresent) && rowIds.get(order.id) === 1
+    if (!trustedOrder) reasons.add('订单身份缺失或重复')
     if (order.association !== 'confirmed') reasons.add('订单与评价交易关联尚未确认')
     if (order.coverage !== 'complete') reasons.add(order.coverage === 'incomplete' ? '历史评价采集尚未完整完成' : '历史评价覆盖尚未核实')
     if (getAwaitingShippedDays(order, now) === undefined) reasons.add('发货时间缺失、无明确时区或晚于当前时间')
     if (!order.lines.length) reasons.add('订单商品行缺失')
-    if (order.lines.some((line, index) => order.lines.findIndex(item => item.id === line.id) !== index)) reasons.add('商品行标识重复')
+    const itemCounts = new Map<string, number>()
+    for (const line of order.lines) itemCounts.set(line.id, (itemCounts.get(line.id) ?? 0) + 1)
+    if ([...itemCounts.values()].some(count => count > 1)) reasons.add('商品行标识重复')
     let reviewedLineCount = 0, automatedCount = 0
     const missingLines: AwaitingReviewLine[] = []
     for (const line of order.lines) {
@@ -134,14 +141,17 @@ export function projectAwaitingReviewOrders(orders: AwaitingReviewOrder[], revie
       if (!uncertain && matches.some(review => review.automated === false && review.buyerId === order.buyerId)) {
         reviewedLineCount++; continue
       }
+      const verified = !uncertain && trustedOrder && order.association === 'confirmed' && order.coverage === 'complete' &&
+        itemCounts.get(line.id) === 1 && isPresent(line.sku)
       const automatedOnly = !uncertain && matches.some(review => review.automated === true)
-      missingLines.push({ ...line, automatedOnly })
+      missingLines.push({ ...line, automatedOnly, handlerIds: verified ? getSkuHandlerIds([line.sku]) : [] })
       if (automatedOnly) automatedCount++
     }
     // 已确认全部曾有主动评价时无需等待，也不因历史隐藏或撤回重新进入。
     if (order.lines.length && !missingLines.length) continue
     const status = reasons.size ? 'check' : 'unreviewed'
-    result.push({ ...order, status, missingLines, reviewedLineCount, unreviewedLineCount: missingLines.length, totalLineCount: order.lines.length, automatedOnly: automatedCount > 0,
+    const handlerIds = [...new Set(missingLines.flatMap(line => line.handlerIds ?? []))]
+    result.push({ ...order, status, handlerIds, missingLines, reviewedLineCount, unreviewedLineCount: missingLines.length, totalLineCount: order.lines.length, automatedOnly: automatedCount > 0,
       ...sellerFeedback(order, missingLines, buyerFeedback), blockedReason: status === 'check' ? [...reasons].join('；') : undefined })
   }
   return result
@@ -162,6 +172,7 @@ export function filterAwaitingReviewOrders(rows: AwaitingReviewRow[], filters: A
     const field = filters.field as 'sku' | 'platformSku' | 'title'
     return { ...row, missingLines: row.missingLines.filter(line => 命中字段搜索(line[field], filters.query, filters.mode, field === 'title' ? 'text' : 'identifier')) }
   }).filter(row => {
+    if (!matchesHandlerFilter(row.handlerIds, filters.handlerIds)) return false
     if (filters.status !== 'all' && row.status !== filters.status || filters.shopIds.length && !filters.shopIds.includes(row.shopId)) return false
     if (filters.automated === 'only' && !row.automatedOnly || filters.automated === 'none' && row.automatedOnly) return false
     if (filters.outboundStatuses.length && !row.outboundStatuses.some(status => filters.outboundStatuses.includes(status))) return false
@@ -176,7 +187,7 @@ export function filterAwaitingReviewOrders(rows: AwaitingReviewRow[], filters: A
   }).sort((a, b) => (Number.isFinite(timestamp(b.shippedAt)) ? timestamp(b.shippedAt) : 0) - (Number.isFinite(timestamp(a.shippedAt)) ? timestamp(a.shippedAt) : 0) || a.id.localeCompare(b.id))
 }
 
-export function addAwaitingReviewNote(order: AwaitingReviewOrder, text: string, by = '客服01', at = new Date().toISOString()): ReviewActionResult {
+export function addAwaitingReviewNote(order: AwaitingReviewOrder, text: string, by = currentHandlerName.value, at = new Date().toISOString()): ReviewActionResult {
   const content = text.trim()
   if (!content) return { ok: false, message: '请输入备注内容' }
   if (Array.from(content).length > 1000) return { ok: false, message: '备注最多1000个字符' }
@@ -186,11 +197,11 @@ export function addAwaitingReviewNote(order: AwaitingReviewOrder, text: string, 
 
 const csvCell = (value: string | number) => `"${String(value).replace(/^[\s]*[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`
 export function exportAwaitingReviewCsv(rows: AwaitingReviewRow[], now = AWAITING_REVIEW_NOW): string {
-  const values: (string | number)[][] = [['店铺', '买家ID', '平台订单号', 'OMS订单号', '发货时间', '发货天数', '出库状态', '物流轨迹状态', '评价跟踪状态', '待核对原因', '平台自动评价', '是否已给买家好评', '商品名称', '系统SKU', '平台SKU', 'Feedback交易行ID', '商品数量', '最新备注', '数据性质']]
+  const values: (string | number)[][] = [['店铺', '买家ID', '平台订单号', 'OMS订单号', '发货时间', '发货天数', '出库状态', '物流轨迹状态', '评价跟踪状态', '待核对原因', '平台自动评价', '是否已给买家好评', '商品名称', '系统SKU', '平台SKU', 'Feedback交易行ID', '商品数量', '最新备注', '订单处理人', '商品行处理人', '数据性质']]
   for (const row of rows) {
     // 缺少商品行的核对订单仍导出订单事实与原因，商品单元格留空，不补造商品。
     const lines: (AwaitingReviewLine | undefined)[] = row.missingLines.length ? row.missingLines : row.status === 'check' ? [undefined] : []
-    for (const line of lines) values.push([row.shopName, row.buyerId, row.orderNo, row.omsOrderNo, row.shippedAt, getAwaitingShippedDays(row, now) ?? '', row.outboundStatuses.join('、'), AWAITING_LOGISTICS_PLACEHOLDER, row.status === 'check' ? '待核对' : '未收到买家评价', row.blockedReason ?? '', line?.automatedOnly ? '仅平台自动评价' : row.status === 'check' ? '待核对' : '暂无评价', row.sellerFeedbackLabel, line?.title ?? '', line?.sku ?? '', line?.platformSku ?? '', line?.orderLineItemId ?? '', line?.quantity ?? '', row.notes.slice(-1)[0]?.text ?? '', '虚构原型评审数据'])
+    for (const line of lines) values.push([row.shopName, row.buyerId, row.orderNo, row.omsOrderNo, row.shippedAt, getAwaitingShippedDays(row, now) ?? '', row.outboundStatuses.join('、'), AWAITING_LOGISTICS_PLACEHOLDER, row.status === 'check' ? '待核对' : '未收到买家评价', row.blockedReason ?? '', line?.automatedOnly ? '仅平台自动评价' : row.status === 'check' ? '待核对' : '暂无评价', row.sellerFeedbackLabel, line?.title ?? '', line?.sku ?? '', line?.platformSku ?? '', line?.orderLineItemId ?? '', line?.quantity ?? '', row.notes.slice(-1)[0]?.text ?? '', handlerNames(row.handlerIds), handlerNames(line?.handlerIds ?? []), '虚构原型评审数据'])
   }
   return '\uFEFF' + values.map(row => row.map(csvCell).join(',')).join('\r\n')
 }

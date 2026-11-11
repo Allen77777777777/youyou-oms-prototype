@@ -164,6 +164,20 @@ describe('退货API遗漏字段补齐契约', () => {
     expect(row.detail!.keepItemInfo).toMatchObject({ value: true, source: 'state' })
     expect(row.history[row.history.length - 1]).toMatchObject({ author: 'SELLER', fromState: 'RETURN_REQUESTED', toState: 'ITEM_KEPT', attributes: { keepOriginalItem: true }, parsedAttributes: { keepOriginalItem: true } })
   })
+  it('免退历史按可信绝对时刻选择最新项，无偏移或无效日期不制造安排事实', () => {
+    const row = createReturnData()[0]!
+    const history = (at: string, keepOriginalItem: boolean) => ({ activity: 'SELLER_APPROVE_REQUEST', author: 'SELLER', creationDate: { value: at },
+      toState: keepOriginalItem ? 'ITEM_KEPT' : 'ITEM_READY_TO_SHIP', attributes: { keepOriginalItem } })
+    for (const value of ['2026-11-06T14:30:00', '2026-11-06', '2026-11-06T14:30:00-00:00', '2026-02-30T14:30:00Z']) {
+      applyReturnFull(row, { detail: { itemDetail: item(row), responseHistory: [history(value, true)] } }, now)
+      expect(row.detail!.keepItemInfo).toMatchObject({ value: null, source: 'unknown' })
+    }
+    applyReturnFull(row, { detail: { itemDetail: item(row), responseHistory: [history('2026-11-06T14:30:00+08:00', true), history('2026-11-06T07:00:00Z', false)] } }, now)
+    expect(row.detail!.keepItemInfo).toMatchObject({ value: false, source: 'history' })
+    row.state = 'ITEM_KEPT'
+    applyReturnFull(row, { detail: { itemDetail: item(row), responseHistory: [history('invalid', false)] } }, now)
+    expect(row.detail!.keepItemInfo).toMatchObject({ value: true, source: 'state' })
+  })
 
   it('资金演示回执缺失新增字段时清除旧值，不从本次草稿或预计退款补齐', () => {
     const row = createReturnData()[2]!, refund = row.detail!.refund

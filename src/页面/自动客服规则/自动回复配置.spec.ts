@@ -28,10 +28,10 @@ describe('自动回复休息时段配置', () => {
     expect(defaultAutoReplyConfig().weekly[0]!.enabled).toBe(false)
     expect(validateRule(newReply())).toBeUndefined()
   })
-  it('只接受明确支持的IANA时区，不接受固定偏移或空时区', () => {
+  it('仅接受北京时间，不接受其他IANA时区、固定偏移或空值', () => {
     const config = defaultAutoReplyConfig(); config.shopIds = ['shop-uk']
     for (const zone of autoReplyTimeZones) { config.timeZone = zone.value; expect(validateAutoReplyConfig(config)).toBeUndefined() }
-    for (const zone of ['', '+08:00', 'Asia/Unknown', 'Asia/Shanghai ']) { config.timeZone = zone; expect(validateAutoReplyConfig(config)).toContain('有效时区') }
+    for (const zone of ['', '+08:00', 'Asia/Unknown', 'Asia/Shanghai ', 'Europe/London', 'UTC']) { config.timeZone = zone; expect(validateAutoReplyConfig(config)).toContain('北京时间') }
   })
   it('每周支持当天、跨天和明确全天，起止相同不能冒充全天', () => {
     const config = defaultAutoReplyConfig(); config.shopIds = ['shop-uk']
@@ -226,12 +226,12 @@ describe('自动回复规则店铺唯一性及编辑保护', () => {
   })
   it('保存日志保留新旧账号、时区、两类时段和模板；不更改站内信或建立发送结果', () => {
     const source = sourceReply(), before = JSON.stringify(mailSession), edit = createEditor('autoReply', 'edit', source)
-    edit.draft.autoReply!.shopIds = ['shop-uk']; edit.draft.autoReply!.timeZone = 'Europe/London'
+    edit.draft.autoReply!.shopIds = ['shop-uk']
     edit.draft.autoReply!.specificEnabled = true
     edit.draft.autoReply!.specificPeriods = [{ id: 'holiday', start: '2026-12-24 18:00', end: '2026-12-28 09:00' }]
     expect(saveEditor(edit)).toBeUndefined()
     const log = serviceRuleLogs.value[0]!.content
-    for (const value of ['演示店铺-UK', 'Europe/London', '每周', '2026-12-24 18:00', 'template-rest-auto-reply', '变更前', 'shop-us', 'Asia/Shanghai']) expect(log).toContain(value)
+    for (const value of ['演示店铺-UK', 'Asia/Shanghai', '每周', '2026-12-24 18:00', 'template-rest-auto-reply', '变更前', 'shop-us', 'Asia/Shanghai']) expect(log).toContain(value)
     expect(log).not.toContain('优先级'); expect(log).not.toContain('0项条件')
     expect(JSON.stringify(mailSession)).toBe(before)
   })

@@ -1,5 +1,7 @@
 import { reviewSession } from './会话'
 import type { ReviewActionResult, ReviewReasonCategory } from './类型'
+import { currentHandlerName } from '@/组件/客服处理人/处理人'
+import { createCustomerServiceLog } from '@/组件/客服日志/日志工具'
 
 export interface ReviewReasonOption { value: string; label: string; disabled?: boolean }
 const failure = (error: string): ReviewActionResult => ({ ok: false, message: error, error })
@@ -37,19 +39,24 @@ export function saveReviewReason(name: string, id?: string): ReviewActionResult 
     if (category.name === normalized) return success('原因分类没有变化')
     const blocked = getReviewReasonRenameBlockedReason(category.id)
     if (blocked) return failure(blocked)
+    const previous = category.name
     category.name = normalized
+    reviewSession.reasonOperationLogs.push(createCustomerServiceLog(currentHandlerName.value, '编辑评价原因分类', `${category.id}：${previous} → ${normalized}`, '已完成'))
     return success('原因分类已更新')
   }
   let nextId: string
   do { nextId = `review-reason-custom-${++sequence}` } while (reviewSession.reasonCategories.some(item => item.id === nextId))
   reviewSession.reasonCategories.push({ id: nextId, name: normalized, builtin: false, enabled: true, used: false })
+  reviewSession.reasonOperationLogs.push(createCustomerServiceLog(currentHandlerName.value, '新增评价原因分类', `${normalized}（${nextId}）`, '已完成'))
   return success('原因分类已新增')
 }
 export function setReviewReasonEnabled(id: string, enabled: boolean): ReviewActionResult {
   const category = findCategory(id)
   if (!category) return failure('原因分类不存在或标识重复')
   if (typeof enabled !== 'boolean') return failure('请选择有效的启用状态')
+  if (category.enabled === enabled) return success('原因分类状态没有变化')
   category.enabled = enabled
+  reviewSession.reasonOperationLogs.push(createCustomerServiceLog(currentHandlerName.value, enabled ? '启用评价原因分类' : '停用评价原因分类', `${category.name}（${category.id}）`, '已完成'))
   return success(enabled ? '原因分类已启用' : '原因分类已停用')
 }
 

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElButton, ElTable, ElTableColumn, ElTag } from 'element-plus'
 import NumberCopy from '@/组件/单号复制.vue'
+import ServiceLogs from '@/组件/客服日志/日志列表.vue'
 import { 格式化北京时间 } from '../订单处理/时间展示工具'
 import { 共享订单 } from '../订单处理/演示会话'
 import { 手工店铺选项 } from '../手工订单/模型'
@@ -64,7 +66,7 @@ watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming
   <article class="after-detail">
     <div v-prototype="annotation('detail')" class="identity">
       <div>
-        <div class="eyebrow">售后单号</div>
+        <div class="eyebrow">售后单号</div><div v-if="linkedReturn" class="sub">买家 <BuyerLink :shop-id="record.shopId" :buyer-id="linkedReturn.buyerId" /></div>
         <NumberCopy :value="record.no" label="售后单号"><strong class="document-no">{{ record.no }}</strong></NumberCopy>
       </div>
       <div class="identity-status"><strong>{{ record.kind }}</strong><ElTag v-if="record.approval" :type="record.approval === '待审核' ? 'warning' : 'success'" size="small">{{ record.approval }}</ElTag><span v-else>无需审核</span>
@@ -170,6 +172,7 @@ watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming
         <ElTableColumn label="跟踪号" min-width="155"><template #default="{ row }"><NumberCopy :value="row.trackingNumber" label="重发跟踪号" /></template></ElTableColumn>
       </ElTable>
     </section>
+    <section v-prototype="annotation('logs')" class="detail-section"><ServiceLogs :key="JSON.stringify([record.shopId, record.no])" :entries="record.logs || []" :format-time="格式化北京时间" /></section>
     <ReviewDialog v-if="confirming && permitted" :record="record" @close="confirming = false" />
   </article>
 </template>

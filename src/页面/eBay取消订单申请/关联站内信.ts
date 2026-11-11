@@ -1,6 +1,6 @@
 import type { Conversation } from '../eBay站内信/类型'
 import { getMessageBodyText } from '../eBay站内信/邮箱模型'
-import { 转换eBay时间 } from '../eBay订单/时间工具'
+import { 格式化北京时间 } from '../订单处理/时间展示工具'
 import { 读取排序时刻 } from '@/组件/筛选/筛选工具'
 
 export interface BuyerIncomingMail {
@@ -37,8 +37,5 @@ export function getBuyerIncomingMail(conversations: Conversation[], shopId: stri
     })
 }
 
-/** 不猜来源墙钟或默认北京时间；缺失／无效站点时区保留来源值与核验提示。 */
-export function formatBuyerMailTime(at: string, timeZone?: string): string {
-  try { return 转换eBay时间(at, timeZone) }
-  catch { return 转换eBay时间(at, undefined) }
-}
+/** 关联来信与独立客服页面采用同一北京时间；无偏移来源不猜时区。 */
+export const formatBuyerMailTime = (at: string): string => 格式化北京时间(at)

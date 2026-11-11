@@ -7,6 +7,7 @@ import type { 菜单节点 } from '@/类型/菜单'
 import PrimaryRail from './主导航.vue'
 import FeatureMenu from './功能菜单.vue'
 import AppHeader from './顶部导航.vue'
+import { buyerRetainedPageNames, buyerScopedPage } from './买家浏览保留'
 
 const route = useRoute()
 const 已打开菜单 = ref<菜单节点>()
@@ -30,7 +31,11 @@ watch(
       <AppHeader />
       <div class="内容与标注">
         <main class="页面内容">
-          <RouterView />
+          <RouterView v-slot="{ Component, route: pageRoute }">
+            <KeepAlive :include="buyerRetainedPageNames">
+              <component v-if="Component" :is="buyerScopedPage(pageRoute.path)" :key="pageRoute.path" :page="Component" :view-route="pageRoute" />
+            </KeepAlive>
+          </RouterView>
         </main>
         <AnnotationDrawer />
       </div>

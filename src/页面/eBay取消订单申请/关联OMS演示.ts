@@ -7,7 +7,8 @@ import { createCancellations } from './模型'
 export function 创建取消申请OMS演示(createOrder: (index: number, patch?: Partial<全渠道订单>) => 全渠道订单): { 订单: 全渠道订单[]; 执行: 仓库执行[] } {
   const 订单: 全渠道订单[] = [], 执行: 仓库执行[] = []
   for (const [index, source] of createCancellations().entries()) {
-    if (!source.systemOrderNo) continue
+    // 该跨功能样例使用退货原单的同一份订单、商品、履约及仓库执行资料。
+    if (!source.systemOrderNo || source.systemOrderNo === 'OMS-DEMO-RET-002') continue
     const countryCode = ({ EBAY_US: 'US', EBAY_GB: 'GB', EBAY_DE: 'DE' } as Record<string, string>)[source.marketplaceId]!
     const route: 订单路由 = { warehouse: source.warehouse, warehouseProvider: source.warehouse.split(' · ')[0]!, warehouseAccount: source.outbounds?.[0]?.account || `DEMO ${source.warehouse.split(' · ')[0]}账号`, shippingChannel: source.orderChannel!, shippingChannelCode: source.outbounds?.[0]?.channelCode || `DEMO-CXL-${countryCode}`, labelMode: '仓配一体' }
     const order = createOrder(950 + index, {

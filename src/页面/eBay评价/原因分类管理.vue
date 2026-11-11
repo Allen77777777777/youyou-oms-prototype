@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import CustomerServiceLogList from '@/组件/客服日志/日志列表.vue'
 import { ElButton, ElDialog, ElInput, ElMessage, ElTable, ElTableColumn, ElTag } from 'element-plus'
 import { reviewSession } from './会话'
 import { getReviewReasonRenameBlockedReason, getReviewReasonUsage, saveReviewReason, setReviewReasonEnabled } from './原因分类模型'
@@ -45,6 +46,7 @@ function toggle(row: ReviewReasonCategory) {
         <ElTableColumn label="状态" width="85"><template #default="{ row }"><ElTag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</ElTag></template></ElTableColumn>
         <ElTableColumn label="操作" width="175"><template #default="{ row }"><div class="review-reason-actions"><template v-if="editingId === row.id"><ElButton link type="primary" @click="save">保存</ElButton><ElButton link @click="editingId = ''; error = ''">取消</ElButton></template><template v-else><ElButton link type="primary" :disabled="!!getReviewReasonRenameBlockedReason(row.id)" :title="getReviewReasonRenameBlockedReason(row.id)" @click="edit(row as ReviewReasonCategory)">编辑</ElButton><ElButton link :type="row.enabled ? 'danger' : 'primary'" @click="toggle(row as ReviewReasonCategory)">{{ row.enabled ? '停用' : '启用' }}</ElButton></template></div></template></ElTableColumn>
       </ElTable>
+      <CustomerServiceLogList :entries="reviewSession.reasonOperationLogs" />
     </div>
     <template #footer><ElButton @click="opened = false">关闭</ElButton></template>
   </ElDialog>

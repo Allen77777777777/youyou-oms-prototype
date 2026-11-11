@@ -10,7 +10,7 @@ export interface AwaitingReviewView {
   selected: string[]
 }
 export function cloneAwaitingFilters(filters: AwaitingReviewFilters): AwaitingReviewFilters {
-  return { ...filters, shopIds: [...filters.shopIds], outboundStatuses: [...filters.outboundStatuses], dateRange: filters.dateRange.length ? [filters.dateRange[0]!, filters.dateRange[1]!] : [] }
+  return { ...filters, handlerIds: [...filters.handlerIds], shopIds: [...filters.shopIds], outboundStatuses: [...filters.outboundStatuses], dateRange: filters.dateRange.length ? [filters.dateRange[0]!, filters.dateRange[1]!] : [] }
 }
 const initialView = (): AwaitingReviewView => ({ draft: createAwaitingReviewFilters(), applied: createAwaitingReviewFilters(), page: 1, pageSize: 20, selected: [] })
 /** 只恢复同一浏览器会话内的查看位置；刷新重置，不作为业务持久化。 */

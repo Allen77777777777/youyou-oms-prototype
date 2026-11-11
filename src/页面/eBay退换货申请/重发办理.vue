@@ -10,6 +10,7 @@ import { returnKey, type ReturnRecord } from './模型'
 import { readReturnDetailView } from './视图会话'
 import SaleFields from './售后联填.vue'
 import { returnAnnotation as annotation } from './标注'
+import { recordReturnOperation } from './操作日志'
 
 const props = defineProps<{ row: ReturnRecord }>()
 const emit = defineEmits<{ close: []; submitted: [no: string] }>()
@@ -31,6 +32,7 @@ function submit() {
   if (error.value) return
   const result = createAfterSale(prepareReship(props.row, fields))
   if (!result.ok || !result.record) { error.value = result.message; return }
+  if (!result.reused) recordReturnOperation(props.row, '创建重发售后单', `售后单号：${result.record.no}；待审核`, '已创建，待审核', new Date().toISOString(), result.record.createdBy)
   submitted.value = true
   ElMessage.success('重发售后单已提交审核')
   emit('submitted', result.record.no)

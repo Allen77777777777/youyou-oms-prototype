@@ -1,3 +1,4 @@
+import type { CustomerServiceLog } from '@/组件/客服日志/日志工具'
 export type ReviewCommentType = 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE'
 export type ReviewHandlingStatus = 'pending' | 'processing' | 'resolved'
 export type ReviewPlatformState = 'ENTERED' | 'WITHDRAWN' | 'HIDDEN' | 'REVISED' | 'REVISION_OPEN' | 'REVISION_DECLINED_OR_EXPIRED'
@@ -14,8 +15,11 @@ export interface ReviewReasonCategory {
 }
 
 export interface ReviewComment { text: string; at: string; by: string }
-export interface ReviewLog { id: string; at: string; by: string; action: string; detail: string }
+export interface ReviewLog { id: string; at: string; by: string; action: string; detail: string; result?: string }
+/** 本地已核实的商品关联及匹配快照，名称、相似 SKU 不构成关联。 */
+export interface ReviewSkuLink { shopId: string; buyerId: string; orderLineItemId: string; sku: string; handlerIds: string[] }
 export interface ReviewRecord {
+  skuLink?: ReviewSkuLink
   id: string
   shopId: string
   shopName: string
@@ -38,7 +42,9 @@ export interface ReviewRecord {
   reply?: ReviewComment
   followup?: ReviewComment
   handlingStatus: ReviewHandlingStatus
-  owner: string
+  /** 旧原型人工指派的显示名。 */
+  owner?: string
+  handlerIds?: string[]
   reason: string
   notes: ReviewComment[]
   logs: ReviewLog[]
@@ -60,6 +66,7 @@ export interface BuyerFeedbackAttempt {
   automationRuleName?: string
 }
 export interface BuyerFeedbackRecord {
+  skuLink?: ReviewSkuLink
   id: string
   shopId: string
   shopName: string
@@ -121,6 +128,7 @@ export interface ReviewActionResult { ok: boolean; message: string; error?: stri
 export interface ReviewSession {
   reviews: ReviewRecord[]
   reasonCategories: ReviewReasonCategory[]
+  reasonOperationLogs: CustomerServiceLog[]
   buyerFeedback: BuyerFeedbackRecord[]
   replyDrafts: Record<string, string>
   lastSyncedAt: string

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { routerKey } from 'vue-router'
 import { ElButton, ElCheckbox, ElDialog, ElEmpty, ElIcon, ElInput } from 'element-plus'
@@ -10,14 +11,15 @@ import { formatMailTime, MAX_NOTE_BODY_LENGTH, MAX_REPLY_ATTACHMENTS, MAX_REPLY_
 import { validateAttachmentUrl } from './邮箱模型'
 import { mailAnnotation } from './站内信标注'
 import { reviewAnnotation } from '../eBay评价/标注'
-import type { Conversation, MessageAttachment, ReplyDraft } from './类型'
+import { applicationContactAnnotation } from './申请联系上下文'
+import type { Conversation, MailBusinessSourceKind, MessageAttachment, ReplyDraft } from './类型'
 
-const props = withDefaults(defineProps<{ conversation: Conversation; draft: ReplyDraft; mode: 'reply' | 'note'; sending: boolean; uncertain: boolean; templateContext?: TemplateContext; markProcessedOnSend?: boolean; purpose?: 'mailbox' | 'review-contact' }>(), { markProcessedOnSend: true, purpose: 'mailbox' })
+const props = withDefaults(defineProps<{ conversation: Conversation; draft: ReplyDraft; mode: 'reply' | 'note'; sending: boolean; uncertain: boolean; templateContext?: TemplateContext; markProcessedOnSend?: boolean; purpose?: 'mailbox' | 'review-contact' | 'application-contact'; applicationKind?: MailBusinessSourceKind }>(), { markProcessedOnSend: true, purpose: 'mailbox' })
 const emit = defineEmits<{ 'update:mode': [value: 'reply' | 'note']; 'update:markProcessedOnSend': [value: boolean]; send: []; save: [] }>()
 const router = inject(routerKey, undefined)
-const embeddedContact = computed(() => props.purpose === 'review-contact')
-const contactEditorAnnotation = { ...reviewAnnotation('contact', '联系买家回复编辑器'), id: 'oms.ebay-reviews.contactEditor', 锚点: 'oms.ebay-reviews.contactEditor' }
-const contactSendAnnotation = { ...reviewAnnotation('contact', '联系买家发送站内信'), id: 'oms.ebay-reviews.contactSend', 锚点: 'oms.ebay-reviews.contactSend' }
+const embeddedContact = computed(() => props.purpose !== 'mailbox')
+const contactEditorAnnotation = computed(() => props.applicationKind ? applicationContactAnnotation(props.applicationKind, 'editor') : { ...reviewAnnotation('contact', '联系买家回复编辑器'), id: 'oms.ebay-reviews.contactEditor', 锚点: 'oms.ebay-reviews.contactEditor' })
+const contactSendAnnotation = computed(() => props.applicationKind ? applicationContactAnnotation(props.applicationKind, 'send') : { ...reviewAnnotation('contact', '联系买家发送站内信'), id: 'oms.ebay-reviews.contactSend', 锚点: 'oms.ebay-reviews.contactSend' })
 const managementPath = '/oms/ebay-service/message-templates'
 const expanded = ref(false), templatesOpen = ref(false), templateSearch = ref(''), uploadOpen = ref(false), urlValue = ref(''), urlError = ref(''), uploadDragging = ref(false)
 const templateKind = ref<TemplateKind>('message'), selectedTemplate = ref<MessageTemplate>(), templateError = ref('')
@@ -300,7 +302,7 @@ onBeforeUnmount(() => { cancelAi(); stopResize() })
         <div v-if="!embeddedContact" class="reply-mode-tabs"><button type="button" :class="{ active: mode === 'reply' }" @click="setMode('reply')"><ElIcon><ChatDotRound /></ElIcon>回复买家</button><button type="button" :class="{ active: mode === 'note' }" @click="setMode('note')"><ElIcon><Lock /></ElIcon>内部备注</button></div>
         <div class="reply-tools"><ElButton text :disabled="mode === 'note'" @click="openTemplates">常用回复</ElButton><ElButton text :disabled="mode === 'note' || !conversation.canReply" :loading="generating" @click="generateAi"><ElIcon v-if="!generating"><MagicStick /></ElIcon>AI 回复</ElButton><ElButton text :aria-label="expanded ? '收起写信窗口' : '展开写信'" @click="expanded ? closeExpanded() : expandEditor()"><ElIcon><FullScreen /></ElIcon>{{ expanded ? '收起' : '展开写信' }}</ElButton></div>
       </div>
-      <div class="reply-recipient"><template v-if="mode === 'reply'">发送至 <strong>{{ conversation.buyerId }}</strong><span>· {{ conversation.shopName }}</span></template><template v-else><ElIcon><Lock /></ElIcon>内部记录，仅客服可见，不发送给买家</template></div>
+      <div class="reply-recipient"><template v-if="mode === 'reply'">发送至 <strong><BuyerLink :shop-id="conversation.shopId" :buyer-id="conversation.buyerId" /></strong><span>· {{ conversation.shopName }}</span></template><template v-else><ElIcon><Lock /></ElIcon>内部记录，仅客服可见，不发送给买家</template></div>
       <p v-if="uncertain && mode === 'reply'" class="reply-send-block" role="alert">上一条发送结果待核查，暂不能再次发送。请先核对平台记录。</p>
 
       <div v-if="aiOpen && mode === 'reply'" v-prototype="mailAnnotation('ai-reply', 'AI 回复建议')" class="reply-ai-panel">

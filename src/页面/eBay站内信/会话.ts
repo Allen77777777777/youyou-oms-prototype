@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 import { createConversations, createRelatedOrders } from './数据'
-import type { ContextTab, Conversation, MessageSource, RelatedOrder, ReplyDraft } from './类型'
+import type { ContextTab, Conversation, MailMessage, MessageSource, RelatedOrder, ReplyDraft } from './类型'
 
 interface MailSession {
   navigationTarget?: { conversationId: string; messageId: string; shopId: string; buyerId: string }
@@ -39,13 +39,33 @@ export function resetMailSession(): void {
   Object.assign(mailSession, initialSession())
 }
 
+/** 排除重复消息身份、内部备注及未确认发送的记录。 */
+export function businessMessages(conversation: Conversation) {
+  const messages = new Map<string, MailMessage>()
+  const seen = new Set<string>()
+  for (const message of conversation.messages) {
+    if (!message.id?.trim()) continue
+    if (seen.has(message.id)) { messages.delete(message.id); continue }
+    seen.add(message.id)
+    if (message.kind === 'incoming' || (message.kind === 'outgoing' && message.delivery === 'success')) messages.set(message.id, message)
+  }
+  return messages
+}
+
+export function findBusinessMessage(shopId: string, conversationId: string, messageId: string) {
+  if (![shopId, conversationId, messageId].every(value => value.trim())) return
+  const matches = mailSession.conversations.filter(item => item.id === conversationId)
+  const conversation = matches.length === 1 ? matches[0] : undefined
+  if (!conversation || conversation.shopId !== shopId) return
+  const message = businessMessages(conversation).get(messageId)
+  return message ? { conversation, message } : undefined
+}
+
 /** 显式点击来源来信时传递稳定消息身份；收件工作台消费后才应用选中与阅读行为。 */
 export function requestBuyerMailNavigation(shopId: string, buyerId: string, conversationId: string, messageId: string): boolean {
   if (![shopId, buyerId, conversationId, messageId].every(value => value.trim())) return false
-  const matches = mailSession.conversations.filter(c => c.id === conversationId)
-  if (matches.length !== 1) return false
-  const c = matches[0]!
-  if (c.source !== 'buyer' || c.shopId !== shopId || c.buyerId !== buyerId || c.messages.filter(m => m.id === messageId && m.kind === 'incoming' && !m.notice).length !== 1) return false
+  const source = findBusinessMessage(shopId, conversationId, messageId)
+  if (!source || source.conversation.source !== 'buyer' || source.conversation.buyerId !== buyerId || source.message.kind !== 'incoming' || source.message.notice) return false
   mailSession.navigationTarget = { shopId, buyerId, conversationId, messageId }
   return true
 }

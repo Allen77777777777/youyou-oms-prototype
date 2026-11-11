@@ -13,10 +13,10 @@ export function resolveReturnOrder(source: ReturnRecord, orders: readonly 全渠
 }
 
 /** 仅复用明确的虚构来源交易行，双平台交易身份、订单和明细均须唯一一致。 */
-export function resolveReturnItem(source: ReturnRecord, orders: readonly 全渠道订单[]): 订单商品行 | undefined {
+export function resolveReturnItem(source: ReturnRecord, orders: readonly 全渠道订单[], itemLinks = demoReturnItemLinks): 订单商品行 | undefined {
   const order = resolveReturnOrder(source, orders), detail = source.detail
   if (!order || !detail?.itemId || !detail.transactionId) return undefined
-  const links = demoReturnItemLinks.filter(link => link.shopId === source.shopId && link.orderNo === source.orderNo && link.itemId === detail.itemId && link.transactionId === detail.transactionId && link.systemOrderNo === order.systemOrderNo)
+  const links = itemLinks.filter(link => link.shopId === source.shopId && link.orderNo === source.orderNo && link.itemId === detail.itemId && link.transactionId === detail.transactionId && link.systemOrderNo === order.systemOrderNo)
   // 重复初始化测试可能重建同一虚构来源；相同证据去重，不合并不同来源明细。
   const identities = [...new Set(links.map(link => link.externalLineId))]
   if (identities.length !== 1) return undefined
