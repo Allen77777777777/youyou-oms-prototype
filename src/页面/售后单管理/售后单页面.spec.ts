@@ -12,6 +12,9 @@ import { 路由仓库键 } from '../订单处理/仓库物流选择模型'
 import WarehouseFields from '../订单处理/仓库物流选择.vue'
 import { returnSession } from '../eBay退换货申请/数据'
 import { stateNames } from '../eBay退换货申请/模型'
+import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import FieldSearch from '@/组件/筛选/字段搜索.vue'
+import { currentHandlerId } from '@/组件/客服处理人/处理人'
 
 const path = '/oms/ebay-service/after-sale-orders'
 const shell = { props: ['modelValue', 'title'], template: '<section v-if="modelValue" :aria-label="title"><slot /><footer><slot name="footer" /></footer></section>' }
@@ -58,7 +61,7 @@ describe('售后单管理联动', () => {
   it('在待审核队列单选并直接审核，通过后移出队列，平台售后状态仍等于来源申请状态', async () => {
     const record = recordOf('重发')
     expect(wrapper.get('.table-area').text()).toContain('平台售后状态')
-    expect(wrapper.get('.table-area').text()).not.toContain('等待重发审核')
+    expect(wrapper.get('.table-area').text()).toContain('等待重发审核')
     const tab = (label: string) => wrapper.findAll('[role="tab"]').find(node => node.text().startsWith(label))!
     await tab('待审核').trigger('click')
     expect(button('审核').attributes('disabled')).toBeDefined()
@@ -104,6 +107,24 @@ describe('售后单管理联动', () => {
     expect(wrapper.find('[aria-label="审核重发"]').exists()).toBe(false)
     expect(firstRadio().attributes('disabled')).toBeDefined()
     expect(button('审核').attributes('disabled')).toBeDefined()
+    expect(record.approval).toBe('待审核')
+  })
+  it('从全局入口切客服身份立即清除列表审核确认，切回运营也不恢复旧选择', async () => {
+    const record = recordOf('重发')
+    await wrapper.findAll('[role="tab"]').find(node => node.text().startsWith('待审核'))!.trigger('click')
+    const radio = () => wrapper.get<HTMLInputElement>('input[aria-label="选择审核 ' + record.no + '"]')
+    await radio().setValue()
+    await button('审核').trigger('click')
+    expect(wrapper.find('[aria-label="审核重发"]').exists()).toBe(true)
+    currentHandlerId.value = 'staff-03'
+    await settle()
+    expect(wrapper.find('[aria-label="审核重发"]').exists()).toBe(false)
+    expect(button('审核').attributes('disabled')).toBeDefined()
+    currentHandlerId.value = 'ops-01'
+    await settle()
+    expect(radio().element.checked).toBe(false)
+    expect(button('审核').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[aria-label="审核重发"]').exists()).toBe(false)
     expect(record.approval).toBe('待审核')
   })
   it('直接办理的部分退款在无需审核队列显示报价，不显示审核动作或虚构的实际退款，按店铺打开原申请', async () => {
@@ -202,5 +223,103 @@ describe('售后单管理联动', () => {
     expect(router.currentRoute.value.query.documentNo).toBe(accepted.no)
     expect(wrapper.get('.case-metrics').text()).toContain('本次实际退款不适用')
     expect(wrapper.get('.case-metrics').text()).toContain('本次仓库实收' + accepted.warehouseReceipts![0]!.quantity + ' 件')
+  })
+
+  it('列表显示本笔失败、待核查与拒绝结果，结果筛选待查询才生效且不改审核队列', async () => {
+    const record = recordOf('部分退款')
+    const failure = { ...record, no: 'RESULT-FAILED', executionResult: '平台提交失败' }
+    const unknown = { ...record, no: 'RESULT-UNKNOWN', executionResult: '平台结果待核实' }
+    const declined = { ...record, no: 'RESULT-DECLINED', executionResult: '买家已拒绝报价' }
+    afterSaleRecords.value.push(failure, unknown, declined)
+    await settle()
+    const list = () => wrapper.get('.table-area')
+    expect(list().text()).toContain('平台提交失败')
+    expect(list().text()).toContain('平台结果待核实')
+    expect(list().text()).toContain('买家已拒绝报价')
+    const resultFilter = wrapper.findAllComponents(MultiFilter).find(node => node.props('placeholder') === '本次办理结果')!
+    resultFilter.vm.$emit('update:modelValue', ['失败'])
+    await settle()
+    expect(list().text()).toContain(unknown.no)
+    await button('查询').trigger('click')
+    expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(1)
+    expect(list().text()).toContain(failure.no)
+    expect(list().text()).not.toContain(unknown.no)
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toContain('全部')
+    resultFilter.vm.$emit('update:modelValue', ['待核查', '买家拒绝'])
+    await settle()
+    await button('查询').trigger('click')
+    expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(2)
+    expect(list().text()).toContain(unknown.no)
+    expect(list().text()).toContain(declined.no)
+    await button('重置').trigger('click')
+    expect(list().text()).toContain(failure.no)
+  })
+
+  it('按任一退回运单号精确或多值查询重发单，来源读取失败、冲突、隐藏或无权限时不命中', async () => {
+    const record = recordOf('重发')
+    const source = returnSession.records.find(row => row.shopId === record.shopId && row.id === record.returnId)!
+    const detail = source.detail!
+    const prior = { orderNo: source.orderNo, held: detail.contentOnHold, read: detail.readStatus.detail.status, trackingRead: detail.shipments[0]!.readStatus }
+    const search = wrapper.findComponent(FieldSearch)
+    async function findTracking(value: string) {
+      search.vm.$emit('update:field', 'returnTracking')
+      search.vm.$emit('update:mode', 'exact')
+      search.vm.$emit('update:modelValue', value)
+      await settle()
+      await button('查询').trigger('click')
+      await settle()
+    }
+    try {
+      for (const shipment of detail.shipments) {
+        await findTracking(shipment.trackingNumber)
+        expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(1)
+        expect(wrapper.get('.table-area').text()).toContain(record.no)
+      }
+      await findTracking(detail.shipments.map(shipment => shipment.trackingNumber).join('\n'))
+      expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(1)
+      detail.shipments[0]!.readStatus = 'failed'
+      await findTracking(detail.shipments[0]!.trackingNumber)
+      expect(wrapper.get('.table-area').text()).toContain(record.no)
+      detail.readStatus.detail.status = 'failed'
+      await settle()
+      expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(0)
+      detail.readStatus.detail.status = 'success'
+      source.orderNo = 'DIFFERENT-ORDER'
+      await settle()
+      expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(0)
+      source.orderNo = prior.orderNo
+      detail.contentOnHold = true
+      await settle()
+      expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(0)
+      detail.contentOnHold = false
+      activeAfterSaleActor.value = { ...afterSaleActors[2]!, shopIds: [] }
+      await settle()
+      expect(wrapper.findAll('.table-area .el-table__row')).toHaveLength(0)
+    } finally {
+      source.orderNo = prior.orderNo
+      detail.contentOnHold = prior.held
+      detail.readStatus.detail.status = prior.read
+      detail.shipments[0]!.readStatus = prior.trackingRead
+      activeAfterSaleActor.value = afterSaleActors[0]!
+    }
+  })
+
+  it('来源省略订单号仍展示买家，明确订单冲突或隐藏时不展示来源买家', async () => {
+    const record = recordOf('重发')
+    const source = returnSession.records.find(row => row.shopId === record.shopId && row.id === record.returnId)!
+    const prior = { orderNo: source.orderNo, held: source.detail!.contentOnHold }
+    const buyerSelector = '.table-area button[aria-label="查看买家 ' + source.buyerId + ' 的详情"]'
+    try {
+      source.orderNo = ''
+      await settle()
+      expect(wrapper.find(buyerSelector).exists()).toBe(true)
+      source.orderNo = 'DIFFERENT-ORDER'
+      await settle()
+      expect(wrapper.find(buyerSelector).exists()).toBe(false)
+      source.orderNo = prior.orderNo
+      source.detail!.contentOnHold = true
+      await settle()
+      expect(wrapper.find(buyerSelector).exists()).toBe(false)
+    } finally { source.orderNo = prior.orderNo; source.detail!.contentOnHold = prior.held }
   })
 })

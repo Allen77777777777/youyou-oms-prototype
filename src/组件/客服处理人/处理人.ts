@@ -8,6 +8,13 @@ export const handlerOptions = [
 ]
 export const handlerFilterOptions = [...handlerOptions, { value: '', label: '未分配' }]
 
+/** 演示操作身份与商品负责人分开；这里只提供姓名，不据此授予业务权限。 */
+export const serviceActorOptions = [
+  ...handlerOptions,
+  { value: 'ops-01', label: '运营01' },
+  { value: 'ops-02', label: '运营02' },
+]
+
 const skuOwners = new Map<string, string>()
 const assignedSkus: Record<string, string[]> = {
   'staff-01': ['DEMO-BP-01', 'DEMO-AF-04', 'DEMO-STORAGE-01', 'DEMO-PET-05', 'HOME-DEMO-01',
@@ -47,4 +54,4 @@ export function matchesHandlerFilter(ids: readonly string[], selected: readonly 
 }
 
 export const currentHandlerId = ref(handlerOptions[0]!.value)
-export const currentHandlerName = computed(() => handlerNames([currentHandlerId.value]))
+export const currentHandlerName = computed(() => serviceActorOptions.find(person => person.value === currentHandlerId.value)?.label ?? handlerNames([currentHandlerId.value]))

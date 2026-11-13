@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import BuyerLink from '@/组件/买家/买家链接.vue'
 import { useBuyerPageActive } from '@/组件/买家/页面活跃'
-import { returnSession } from '../eBay退换货申请/数据'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElDrawer, ElEmpty, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTag } from 'element-plus'
@@ -17,6 +16,10 @@ import { afterSaleAnnotation as annotation } from './标注'
 import Detail from './售后单详情.vue'
 import ReviewDialog from './重发审核.vue'
 import PlatformState from './平台售后状态.vue'
+import { resolveAfterSaleSource } from './来源关联'
+import { afterSaleResultOptions, afterSaleResultPresentation, afterSaleTrackingNumbers } from './办理结果'
+import { afterSaleDisplayItems } from './商品展示'
+import { afterSaleFailureSummary } from './失败原因'
 
 initializeAfterSaleDemo()
 const route = useRoute()
@@ -24,13 +27,14 @@ const router = useRouter()
 const fields: 搜索字段[] = [
   { value: 'no', label: '售后单号' }, { value: 'returnId', label: '来源申请号' }, { value: 'orderNo', label: '平台订单号' },
   { value: 'systemOrderNo', label: '原系统订单号' }, { value: 'sku', label: '系统 SKU' }, { value: 'manualOrderNo', label: '重发订单号' },
+  { value: 'returnTracking', label: '退货跟踪号' },
 ]
 const methods = afterSaleKinds.map(value => ({ value, label: value }))
 const reasons = afterSaleReasons.map(value => ({ value, label: value }))
 const queues = ['全部', '待审核', '已审核', '无需审核'] as const
 const queue = ref<typeof queues[number]>('全部')
 const emptyFilters = () => ({
-  shops: [] as string[], kinds: [] as string[], reasons: [] as string[], dates: null as string[] | null,
+  shops: [] as string[], kinds: [] as string[], reasons: [] as string[], results: [] as string[], dates: null as string[] | null,
   field: 'no', mode: 'contains' as 搜索模式, keyword: '',
 })
 const draft = ref(emptyFilters())
@@ -45,7 +49,8 @@ const selected = computed(() => visible.value.find(row => row.no === currentNo.v
 const demoMode = 标注状态.标注模式
 
 function searchValue(row: AfterSaleRecord, field: string) {
-  if (field === 'sku') return row.items.map(item => item.sku ?? '')
+  if (field === 'sku') return afterSaleDisplayItems(row).map(item => item.sku ?? '')
+  if (field === 'returnTracking') return afterSaleTrackingNumbers(row)
   if (field === 'returnId' || field === 'orderNo' || field === 'systemOrderNo' || field === 'manualOrderNo') return row[field]
   return row.no
 }
@@ -53,6 +58,7 @@ const filtered = computed(() => {
   const q = applied.value
   return visible.value.filter(row =>
     命中多选(q.shops, row.shopId) && 命中多选(q.kinds, row.kind) &&
+    命中多选(q.results, afterSaleResultPresentation(row).group) &&
     (!q.reasons.length || row.items.some(item => q.reasons.includes(item.reason))) &&
     命中时间范围(row.createdAt, q.dates) && 命中字段搜索(searchValue(row, q.field), q.keyword, q.mode),
   ).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.no.localeCompare(a.no))
@@ -80,7 +86,7 @@ function query() {
   if (error.value) return
   const value = draft.value
   clearSelection()
-  applied.value = { ...value, shops: [...value.shops], kinds: [...value.kinds], reasons: [...value.reasons], dates: value.dates && [...value.dates] }
+  applied.value = { ...value, shops: [...value.shops], kinds: [...value.kinds], reasons: [...value.reasons], results: [...value.results], dates: value.dates && [...value.dates] }
   page.value = 1
 }
 function reset() { draft.value = emptyFilters(); queue.value = '全部'; query() }
@@ -100,7 +106,7 @@ function returnQuantities(row: AfterSaleRecord) {
   return '批准退回 ' + (approvedReturnQty != null ? approvedReturnQty + ' 件' : '待确认') + ' · 实收 ' + (receivedQty != null ? receivedQty + ' 件' : '待确认')
 }
 const buyerPageActive = useBuyerPageActive()
-function sourceBuyer(row: AfterSaleRecord) { const sources = returnSession.records.filter(item => item.shopId === row.shopId && item.id === row.returnId && item.orderNo === row.orderNo); return sources.length === 1 ? sources[0]?.buyerId : undefined }
+function sourceBuyer(row: AfterSaleRecord) { const source = resolveAfterSaleSource(row).row; return source?.detail?.contentOnHold ? undefined : source?.buyerId }
 </script>
 
 <template>
@@ -114,6 +120,7 @@ function sourceBuyer(row: AfterSaleRecord) { const sources = returnSession.recor
       <MultiFilter v-model="draft.kinds" :options="methods" placeholder="售后类型" :width="124" />
       <MultiFilter v-model="draft.shops" :options="shops" placeholder="来源店铺" :width="144" />
       <MultiFilter v-model="draft.reasons" :options="reasons" placeholder="系统售后原因" :width="145" />
+      <MultiFilter v-model="draft.results" :options="afterSaleResultOptions" placeholder="本次办理结果" :width="145" />
       <span class="date-label">创建时间</span><DateRange v-model="draft.dates" aria-prefix="售后单" precision="date" :width="228" :show-hint="false" />
       <FieldSearch v-model="draft.keyword" v-model:field="draft.field" v-model:mode="draft.mode" :fields="fields" aria-prefix="售后单" :width="342" @search="query" />
       <div class="filter-actions"><ElButton type="primary" @click="query">查询</ElButton><ElButton @click="reset">重置</ElButton></div>
@@ -140,8 +147,9 @@ function sourceBuyer(row: AfterSaleRecord) { const sources = returnSession.recor
         <ElTableColumn label="平台订单号" min-width="142" prop="orderNo" />
         <ElTableColumn label="商品名称 / 系统 SKU" min-width="176">
           <template #default="{ row }">
-            <div v-for="item in row.items" :key="item.lineId" class="product-line">
+            <div v-for="item in afterSaleDisplayItems(row as AfterSaleRecord)" :key="item.lineId" class="product-line">
               <div>{{ item.title || '—' }}</div><div class="sub">{{ item.sku || '—' }}</div>
+              <div v-if="item.skuSourceNote" class="sub sku-source">{{ item.skuSourceNote }}</div>
             </div>
             <span v-if="!row.items.length">—</span>
           </template>
@@ -154,6 +162,7 @@ function sourceBuyer(row: AfterSaleRecord) { const sources = returnSession.recor
           <template v-else-if="row.amount">{{ row.actionLabel?.includes('报价') ? '报价' : '拟退' }} {{ row.amount.value }} {{ row.amount.currency }} · 暂无实退</template>
           <template v-else>暂无已确认实退</template>
         </div></template></ElTableColumn>
+        <ElTableColumn label="本次办理结果" min-width="175"><template #default="{ row }"><span class="execution-result" :class="'result-' + afterSaleResultPresentation(row as AfterSaleRecord).tone">{{ afterSaleResultPresentation(row as AfterSaleRecord).text }}</span><div v-if="afterSaleFailureSummary(row as AfterSaleRecord)" class="sub failure-summary">失败原因：{{ afterSaleFailureSummary(row as AfterSaleRecord) }}</div></template></ElTableColumn>
         <ElTableColumn label="审核状态" width="83">
           <template #default="{ row }"><ElTag v-if="row.approval" :type="row.approval === '待审核' ? 'warning' : 'success'" size="small">{{ row.approval }}</ElTag><span v-else class="quiet">无需审核</span></template>
         </ElTableColumn>
@@ -195,6 +204,11 @@ function sourceBuyer(row: AfterSaleRecord) { const sources = returnSession.recor
 .count { display: inline-block; font-size: 10px; margin-left: 5px; padding: 0 5px; background: #eaf2fb; color: #41678f; border-radius: 6px; }
 .product-line + .product-line { border-top: 1px solid #ebeef5; margin-top: 5px; padding-top: 5px; }
 .method { font-weight: 500; color: #354053; }
+.execution-result { display: inline-block; line-height: 1.7; }
+.result-warning { color: #986618; }
+.result-danger { color: #b64437; }
+.result-success { color: #36804d; }
+.failure-summary { color: #a34b3c; overflow-wrap: anywhere; }
 .sub { font-size: 11px; margin-top: 2px; }
 .after-sale-page footer { justify-content: space-between; gap: 10px; flex-wrap: wrap; min-height: 52px; font-size: 12px; color: #687587; }
 :global(.after-sale-drawer .el-drawer__header) { padding: 17px 22px 14px; margin: 0; border-bottom: 1px solid #e7ebf0; }

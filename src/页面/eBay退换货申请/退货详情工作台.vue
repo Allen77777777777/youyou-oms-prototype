@@ -21,7 +21,7 @@ import { resolveReturnOrder, resolveReturnOutbound, resolveReturnItem } from './
 import { actionNames, actionOptions, addReturnNote, createReturnActionDraft, escalationReasons, formatReturnTime, getReturnApprovalAction, getReturnBlockedReason, getReturnDetail, isEscalated, prepareReturnAction, returnKey, stateNames, submitPreparedReturnAction, type ReturnAction, type ReturnRecord } from './模型'
 import PlatformStatus from './平台状态资料.vue'
 import { afterSaleReasons, afterSaleReturnSummary, canViewAfterSale, recordsForReturn, validateAfterSale } from '../售后单管理/会话'
-import { createReturnSaleDraft, isSaleAction, prepareDirectSale, retryReturnSale, submitReturnAndSale, syncReturnWithSales, validateSaleQuantity } from './售后联动'
+import { createCorrectedReturnSaleDraft, createReturnSaleDraft, isSaleAction, prepareDirectSale, retryReturnSale, submitReturnAndSale, syncReturnWithSales, validateSaleQuantity } from './售后联动'
 import ReturnSaleFields from './售后联填.vue'
 import ReshipForm from './重发办理.vue'
 import { activityNames, noLabelReasons, formatMinor, parseMoney, type ReturnAddress } from './接口契约'
@@ -86,6 +86,8 @@ const selected = (value: ReturnAction) => action.value === value || (value === '
 const linkedSales = computed(() => recordsForReturn(active.value.shopId, active.value.id))
 const saleTotals = computed(() => afterSaleReturnSummary(active.value.shopId, active.value.id))
 const hasReturnSale = computed(() => linkedSales.value.some(sale => sale.kind === '退货'))
+const failedSale = computed(() => action.value ? retryReturnSale(active.value, action.value) : undefined)
+const retryingOriginal = computed(() => !!failedSale.value && view.saleDraft?.requestId === failedSale.value.requestId)
 function openSale(no: string) { void router.push({ path: '/oms/ebay-service/after-sale-orders', query: { documentNo: no } }) }
 function closeAction() {
   action.value = null; actionDraft.value = null; prepared.value = null; confirmation.value = false
@@ -101,6 +103,21 @@ function chooseAction(value: ReturnAction) {
     ? JSON.parse(JSON.stringify(active.value.pendingDraft)) : createReturnActionDraft(active.value, actual)
   if (requiresSale.value) view.saleDraft = createReturnSaleDraft(active.value, undefined, actual)
   void nextTick(() => { if (operationPane.value) operationPane.value.scrollTop = 0; actionPanel.value?.querySelector<HTMLInputElement | HTMLTextAreaElement>('input,textarea')?.focus({ preventScroll: true }) })
+}
+function chooseRetryMode(mode: 'retry' | 'correct') {
+  if (!action.value || !failedSale.value) return
+  const error = blocked(active.value, action.value)
+  if (error) { actionError.value = error; return }
+  if (mode === 'retry') {
+    if (!active.value.pendingDraft) { actionError.value = '未取得原请求快照，请先核查原办理'; return }
+    actionDraft.value = JSON.parse(JSON.stringify(active.value.pendingDraft))
+    view.saleDraft = createReturnSaleDraft(active.value, undefined, action.value)
+  } else {
+    const corrected = createCorrectedReturnSaleDraft(active.value, action.value)
+    if (!corrected) return
+    view.saleDraft = { ...(view.saleDraft || corrected), requestId: corrected.requestId }
+  }
+  prepared.value = null; view.preparedSale = undefined; confirmation.value = false; actionError.value = ''
 }
 function prepare() {
   if (!action.value || !actionDraft.value) return
@@ -200,6 +217,10 @@ const buyerPageActive = useBuyerPageActive()
           <section v-if="action || view.reshipOpen || isEscalated(active) || closed(active) || !active.eligibilityKnown" ref="actionPanel" v-prototype="annotation('action-form')" class="detail-panel action-section">
             <ReshipForm v-if="view.reshipOpen" :row="active" @close="closeAction" @submitted="closeAction" />
             <p v-else-if="isEscalated(active) || closed(active) || !active.eligibilityKnown" class="muted">{{ isEscalated(active) ? '请结合关联纠纷最新结果继续处理。' : closed(active) ? '申请已关闭，可查看历史和添加内部备注。' : '申请资料待核实，请先刷新数据。' }}</p>
+            <div v-if="failedSale && requiresSale" class="retry-choice" aria-label="失败后办理方式">
+              <div><ElButton size="small" :type="retryingOriginal ? 'primary' : 'default'" :aria-pressed="retryingOriginal" @click="chooseRetryMode('retry')">原请求重试</ElButton><ElButton size="small" :type="!retryingOriginal ? 'primary' : 'default'" :aria-pressed="!retryingOriginal" @click="chooseRetryMode('correct')">更正后新办理</ElButton></div>
+              <p>{{ retryingOriginal ? '沿用原售后单和提交内容；如需改金额或资料，请选择更正后新办理。' : '按更正后的内容新建售后单，原失败单及提交记录保留。' }}</p>
+            </div>
             <ReturnActionForm v-if="action && actionDraft" :row="active" :action="action" :draft="actionDraft" :error="actionError" @cancel="closeAction" @prepare="prepare">
               <template #after-sale><ReturnSaleFields v-if="requiresSale && view.saleDraft" :row="active" :draft="view.saleDraft" :kind="action === 'partial' ? '部分退款' : '退货'" :has-error="!!actionError" :refund-items="action === 'refund' ? actionDraft.refundItems : undefined" /></template>
             </ReturnActionForm>
@@ -232,7 +253,7 @@ const buyerPageActive = useBuyerPageActive()
         <p v-if="['approve','offerReturn'].includes(prepared.action)">商品安排：{{ prepared.draft.keepOriginalItem ? '允许买家保留，无需寄回' : '按退货安排寄回' }}</p><p v-if="prepared.request.api === 'return-graphql'">退货授权编号：{{ prepared.draft.rmaNumber.trim() || '不提供，本次免除编号要求' }}</p><p v-else-if="prepared.request.body.RMANumber">退货授权编号：{{ prepared.draft.rmaNumber }}</p>
         <p v-if="prepared.action === 'escalate'">介入原因：{{ escalationReasons.find(item => item.value === prepared!.draft.reason)?.label }}</p>
         <template v-if="prepared.action === 'label'"><p>面单处理：{{ { UPLOAD_LABEL: '提供已上传的面单', MARK_AS_SENT: '面单已通过其他方式提供', NO_LABEL: '不提供面单，说明退回安排' }[prepared.draft.label.labelAction] }}</p><p v-if="prepared.draft.label.labelAction === 'UPLOAD_LABEL' && prepared.draft.label.fileId">文件：{{ activeDetail?.files.find(file => file.fileId === prepared!.draft.label.fileId)?.fileName }}</p><p v-if="prepared.draft.label.labelAction !== 'NO_LABEL' && prepared.draft.label.trackingNumber">{{ prepared.draft.label.carrierEnum }} · {{ prepared.draft.label.trackingNumber }}</p><p v-if="prepared.draft.label.labelAction === 'MARK_AS_SENT' && prepared.draft.label.labelSentDate">发送时间：{{ time(prepared.draft.label.labelSentDate, active) }}</p><p v-if="prepared.draft.label.labelAction === 'NO_LABEL' && prepared.draft.label.noLabelReason">原因：{{ noLabelReasons.find(item => item.value === prepared!.draft.label.noLabelReason)?.label }}</p><p v-if="prepared.draft.label.returnLabelCost">面单费用：{{ active.currency }} {{ prepared.draft.label.returnLabelCost }}</p></template>
-        <section v-if="view.preparedSale" class="sale-summary"><strong>{{ retryReturnSale(active, prepared.action) ? `继续办理售后单 ${retryReturnSale(active, prepared.action)!.no}` : '同时创建售后单 · 无需审核' }}</strong><p>{{ view.preparedSale.kind }} · {{ view.preparedSale.items[0]?.title }} × {{ view.preparedSale.items[0]?.quantity }}</p><p>系统原因：{{ view.preparedSale.items[0]?.reason }}</p><p v-if="view.preparedSale.note">售后单备注：{{ view.preparedSale.note }}</p></section>
+        <section v-if="view.preparedSale" class="sale-summary"><strong>{{ failedSale ? retryingOriginal ? `原请求重试 · 售后单 ${failedSale.no}` : '更正后新办理 · 创建新售后单' : '同时创建售后单 · 无需审核' }}</strong><p v-if="failedSale && !retryingOriginal">原失败单 {{ failedSale.no }} 保留</p><p>{{ view.preparedSale.kind }} · {{ view.preparedSale.items[0]?.title }} × {{ view.preparedSale.items[0]?.quantity }}</p><p>系统原因：{{ view.preparedSale.items[0]?.reason }}</p><p v-if="view.preparedSale.note">售后单备注：{{ view.preparedSale.note }}</p></section>
         <p v-if="prepared.draft.text" class="confirm-message">{{ prepared.draft.text }}</p><ElAlert title="请核对本次提交内容。资格或来源金额变化后须重新确认；退款以平台资金结果为准。" type="info" :closable="false" />
       </div>
       <template #footer><ElButton @click="confirmation = false">返回修改</ElButton><ElButton type="primary" @click="submit">确认提交</ElButton></template>
@@ -240,6 +261,7 @@ const buyerPageActive = useBuyerPageActive()
 </section>
 </template>
 <style scoped>
+.retry-choice{margin:0 0 12px;padding:10px;border:1px solid #e1e6ec;border-radius:4px;background:#f7f9fc}.retry-choice p{margin:7px 0 0;font-size:12px;line-height:1.6;color:#64748b}
 .sale-count{font-size:11px;line-height:19px;padding:0 7px;border-radius:3px;background:#f2f5f9;color:#63748a}
 .sale-totals{display:flex;flex-wrap:wrap;gap:5px 16px;font-size:11px;line-height:1.7;margin-top:9px;padding-top:8px;border-top:1px solid #edf0f4;color:#738090}
 .sale-totals b{margin-left:4px;color:#3e5065;font-weight:500}

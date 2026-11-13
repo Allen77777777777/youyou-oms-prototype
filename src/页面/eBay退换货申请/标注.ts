@@ -87,5 +87,11 @@ for (const entry of returnAnnotations.filter(item => /\.(overview|queues|executi
   entry.prd引用 = [...new Set([...(entry.prd引用 || []), 'PRD/eBay退换货申请功能PRD.md', '文档/需求/退货退款申请PRD复盘2026-11-13/复盘记录.md'])]
 }
 
+for (const entry of returnAnnotations.filter(item => /\.(execution|action-form|after-sale-fields|after-sale-links)$/.test(item.id))) {
+  entry.版本 = '售后关联 1.2 / 2026-11-13'
+  entry.交互规则?.push('售后联动完善：可靠退款成功按原执行尝试回填原售后单，报价回复按原报价归属并去重。明确失败后原请求重试复用原单、更正后新办理生成新单；均重新复验资格并确认，未知不得绕过防重。实际提交人与售后创建人共用当前操作身份，失败摘要按本笔尝试保留，金额仍按独立凭据核实。')
+  entry.prd引用 = [...new Set([...(entry.prd引用 || []), 'PRD/售后单管理功能PRD.md'])]
+}
+
 
 

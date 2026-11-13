@@ -5,6 +5,7 @@ import { 创建手工订单草稿, 手工订单路由 } from '../手工订单/�
 import { 共享订单 } from '../订单处理/演示会话'
 import { 路由仓库键 } from '../订单处理/仓库物流选择模型'
 import { afterSaleActors, afterSaleRecords, createAfterSale, createPlatformAfterSale, updateAfterSaleResult, type AfterSaleInput, type AfterSaleKind, type AfterSaleRecord } from './会话'
+import { reconcileReturnBuyerReplies } from '../eBay退换货申请/售后回执归属'
 
 function dateHistoricalSample(record: AfterSaleRecord, at: string) {
   const day = new Date(new Date(at).valueOf() + 8 * 3600_000).toISOString().slice(0, 10).replace(/-/g, '')
@@ -28,6 +29,7 @@ export function initializeAfterSaleDemo(): void {
     const existing = afterSaleRecords.value.find(r => r.requestId === requestId && r.shopId === source.shopId && r.returnId === source.id)
     if (existing) {
       if (kind === '部分退款' && !source.afterSaleOfferNo) source.afterSaleOfferNo = existing.no
+      if (kind === '部分退款') reconcileReturnBuyerReplies(source)
       continue
     }
     const order = resolveReturnOrder(source, 共享订单.value)
@@ -57,18 +59,11 @@ export function initializeAfterSaleDemo(): void {
     if (!created.record) continue
     if (kind === '退货') created.record.approvedReturnQty = source.quantity
     if (kind === '全额退款' && refund?.issuedAt) dateHistoricalSample(created.record, refund.issuedAt)
-    let observedResult = resultText
     if (kind === '部分退款' && !source.afterSaleOfferNo) {
       source.afterSaleOfferNo = created.record.no
-      // 从申请列表先同步时，样例报价可能已经收到了买家答复。
-      if (source.mock?.consumed && source.mock.externalEvent === 'buyerAccept') {
-        source.afterSaleRefundNo ??= created.record.no
-        observedResult = '买家已接受报价，退款处理中'
-      } else if (source.mock?.consumed && source.mock.externalEvent === 'buyerDecline') {
-        observedResult = '买家已拒绝报价'
-      }
     }
-    updateAfterSaleResult(created.record.no, observedResult, actual)
+    updateAfterSaleResult(created.record.no, resultText, actual)
+    if (kind === '部分退款') reconcileReturnBuyerReplies(source)
   }
   const refund = afterSaleRecords.value.find(r => r.returnId === 'DEMO-RT-007' && r.kind === '全额退款' && r.shopId === 'shop-us')
   if (!refund) return

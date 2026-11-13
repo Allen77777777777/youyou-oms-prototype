@@ -6,37 +6,41 @@ import { ElButton, ElTable, ElTableColumn, ElTag } from 'element-plus'
 import NumberCopy from '@/组件/单号复制.vue'
 import ServiceLogs from '@/组件/客服日志/日志列表.vue'
 import { 格式化北京时间 } from '../订单处理/时间展示工具'
-import { 共享订单 } from '../订单处理/演示会话'
 import { 手工店铺选项 } from '../手工订单/模型'
-import { returnSession } from '../eBay退换货申请/数据'
-import { findReturnRecord, returnKey } from '../eBay退换货申请/模型'
+import { resolveAfterSaleSource } from './来源关联'
+import { refreshAfterSaleResult } from './来源与核查'
+import { afterSaleResultPresentation, resolveAfterSaleReshipOrder } from './办理结果'
+import { afterSaleDisplayItems } from './商品展示'
+import { afterSaleFailureSummary } from './失败原因'
 import { activeAfterSaleActor, afterSaleFacts, afterSaleReturnSummary, canApproveReship, recordsForReturn, type AfterSaleRecord } from './会话'
 import ReviewDialog from './重发审核.vue'
 import PlatformState from './平台售后状态.vue'
+import ReturnShipping from './退回物流.vue'
 import { afterSaleAnnotation as annotation } from './标注'
 
 const props = defineProps<{ record: AfterSaleRecord }>()
 const router = useRouter()
 const confirming = ref(false)
+const refreshing = ref(false)
 const isReship = computed(() => props.record.kind === '重发')
 const isReturn = computed(() => props.record.kind === '退货')
 const isRefund = computed(() => props.record.kind === '全额退款' || props.record.kind === '部分退款')
 const facts = computed(() => afterSaleFacts(props.record))
+const resultPresentation = computed(() => afterSaleResultPresentation(props.record))
+const displayItems = computed(() => afterSaleDisplayItems(props.record))
+const failureSummary = computed(() => afterSaleFailureSummary(props.record))
 const receipts = computed(() => {
   if (facts.value.receivedQty == null) return []
   return [...new Map(props.record.warehouseReceipts?.map(line => [JSON.stringify([line.warehouse, line.receiptNo, line.lineId]), line])).values()]
 })
 const permitted = computed(() => canApproveReship(props.record, activeAfterSaleActor.value))
-const manual = computed(() => props.record.manualOrderNo
-  ? 共享订单.value.find(order => order.systemOrderNo === props.record.manualOrderNo)
-  : undefined)
+const manual = computed(() => resolveAfterSaleReshipOrder(props.record))
 const packages = computed(() => manual.value?.fulfillmentOrders.filter(parcel => parcel.isActive) ?? [])
-const linkedReturn = computed(() => {
-  const row = findReturnRecord(returnSession.records, returnKey({ shopId: props.record.shopId, id: props.record.returnId }))
-  return row?.orderNo === props.record.orderNo ? row : undefined
-})
+const sourceResolution = computed(() => resolveAfterSaleSource(props.record))
+const linkedReturn = computed(() => sourceResolution.value.row)
+const readableReturn = computed(() => linkedReturn.value?.detail?.contentOnHold ? undefined : linkedReturn.value)
 const pendingRefund = computed(() => {
-  const row = linkedReturn.value
+  const row = readableReturn.value
   return row?.pendingAction === 'refund' && ['pending', 'unknown'].includes(row.outcome) ? row : undefined
 })
 const related = computed(() => recordsForReturn(props.record.shopId, props.record.returnId).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.no.localeCompare(b.no)))
@@ -59,20 +63,32 @@ function openOriginal() {
 function openRelated(no: string) {
   void router.push({ path: router.currentRoute.value.path, query: { ...router.currentRoute.value.query, documentNo: no } })
 }
+async function refreshResult() {
+  if (refreshing.value) return
+  refreshing.value = true
+  try { await refreshAfterSaleResult(props.record) }
+  finally { refreshing.value = false }
+}
 watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming.value = false })
+watch(permitted, value => { if (!value) confirming.value = false }, { flush: 'sync' })
 </script>
 
 <template>
   <article class="after-detail">
     <div v-prototype="annotation('detail')" class="identity">
       <div>
-        <div class="eyebrow">售后单号</div><div v-if="linkedReturn" class="sub">买家 <BuyerLink :shop-id="record.shopId" :buyer-id="linkedReturn.buyerId" /></div>
+        <div class="eyebrow">售后单号</div><div v-if="readableReturn" class="sub">买家 <BuyerLink :shop-id="record.shopId" :buyer-id="readableReturn.buyerId" /></div>
         <NumberCopy :value="record.no" label="售后单号"><strong class="document-no">{{ record.no }}</strong></NumberCopy>
       </div>
       <div class="identity-status"><strong>{{ record.kind }}</strong><ElTag v-if="record.approval" :type="record.approval === '待审核' ? 'warning' : 'success'" size="small">{{ record.approval }}</ElTag><span v-else>无需审核</span>
         <ElButton v-if="isReship && record.approval === '待审核'" type="primary" size="small" :disabled="!permitted" @click="confirming = true">审核重发</ElButton>
       </div>
     </div>
+    <section v-prototype="annotation('resultCheck')" class="result-check" aria-label="办理结果查询">
+      <div class="check-heading"><ElButton size="small" :loading="refreshing" @click="refreshResult">刷新办理结果</ElButton><span>最近查询：{{ record.resultCheck ? 格式化北京时间(record.resultCheck.at) : '尚未查询' }}</span><span v-if="record.resultCheck">{{ record.resultCheck.operator }}</span></div>
+      <p v-if="record.resultCheck" :class="{ 'check-warning': record.resultCheck.status !== 'success' }" role="status">{{ record.resultCheck.message }}<span v-if="record.resultCheck.status !== 'success' && record.resultCheck.sourceSucceededAt"> 上次成功读取：{{ 格式化北京时间(record.resultCheck.sourceSucceededAt) }}</span></p>
+      <p v-if="sourceResolution.issue" class="check-warning" role="status">{{ sourceResolution.issue }}</p>
+    </section>
     <div v-prototype="annotation('result')" class="case-metrics">
       <div><span>平台售后状态</span><PlatformState :record="record" class="state-value" /></div>
       <div><span>本次批准退回</span><strong>{{ isReturn ? (facts.approvedReturnQty != null ? facts.approvedReturnQty + ' 件' : '待确认') : '不适用' }}</strong></div>
@@ -95,7 +111,7 @@ watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming
           <div class="row-time">{{ 格式化北京时间(row.createdAt) }}</div>
         </template></ElTableColumn>
         <ElTableColumn label="售后类型" prop="kind" width="85" />
-        <ElTableColumn label="办理结果" prop="executionResult" min-width="125" />
+        <ElTableColumn label="办理结果" min-width="125"><template #default="{ row }">{{ afterSaleResultPresentation(row as AfterSaleRecord).text }}<div v-if="afterSaleFailureSummary(row as AfterSaleRecord)" class="failure-summary">失败原因：{{ afterSaleFailureSummary(row as AfterSaleRecord) }}</div></template></ElTableColumn>
         <ElTableColumn label="本笔实退" min-width="98"><template #default="{ row }">{{ amount(row.actualAmount) }}</template></ElTableColumn>
       </ElTable>
     </section>
@@ -116,12 +132,13 @@ watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming
     </section>
     <section class="detail-section">
       <h3>本次处理商品</h3>
-      <ElTable :data="record.items" size="small" border>
-        <ElTableColumn label="商品名称 / 系统 SKU" min-width="205"><template #default="{ row }"><div>{{ row.title || '—' }}</div><small>{{ row.sku || '—' }}</small></template></ElTableColumn>
+      <ElTable :data="displayItems" size="small" border>
+        <ElTableColumn label="商品名称 / 系统 SKU" min-width="205"><template #default="{ row }"><div>{{ row.title || '—' }}</div><small>{{ row.sku || '—' }}</small><div v-if="row.skuSourceNote" class="sku-source"><small>{{ row.skuSourceNote }}</small></div></template></ElTableColumn>
         <ElTableColumn label="本次数量" width="88" align="right" prop="quantity" />
         <ElTableColumn label="系统售后原因" min-width="135"><template #default="{ row }">{{ row.reason || '待补录' }}</template></ElTableColumn>
       </ElTable>
     </section>
+    <ReturnShipping :row="linkedReturn" :issue="sourceResolution.issue" />
     <section v-if="isReship && record.approval === '已审核' && record.reshipDraft" class="detail-section">
       <h3>重发安排</h3>
       <dl class="facts">
@@ -142,7 +159,7 @@ watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming
         <dt>审核状态</dt><dd>{{ record.approval }}</dd>
         <template v-if="record.reviewedBy"><dt>审核人</dt><dd>{{ record.reviewedBy }}</dd></template>
         <template v-if="record.reviewedAt"><dt>审核时间</dt><dd>{{ 格式化北京时间(record.reviewedAt) }}</dd></template>
-        <dt>申请累计实退</dt><dd>{{ amount(linkedReturn?.detail?.refund.buyerActual) }}</dd>
+        <dt>申请累计实退</dt><dd>{{ amount(readableReturn?.detail?.refund.buyerActual) }}</dd>
         <template v-if="pendingRefund"><dt>未确认退款</dt><dd>{{ pendingRefund.pendingAmount === null ? '金额待核实' : pendingRefund.pendingAmount + ' ' + pendingRefund.currency }} · {{ pendingRefund.outcome === 'unknown' ? '结果待核实' : '处理中' }}</dd></template>
       </dl>
       <p v-if="record.approval === '待审核' && !permitted" class="attention">当前操作人没有此单的重发审核权限。</p>
@@ -151,7 +168,8 @@ watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming
       <h3>本次办理明细</h3>
       <dl class="facts">
         <dt>业务动作</dt><dd>{{ record.actionLabel || record.kind }}</dd>
-        <dt>本次办理结果</dt><dd>{{ record.executionResult || '—' }}</dd>
+        <dt>本次办理结果</dt><dd><ElTag :type="resultPresentation.tone" size="small">{{ resultPresentation.text }}</ElTag></dd>
+        <template v-if="failureSummary"><dt>失败原因</dt><dd class="wide failure-summary">{{ failureSummary }}</dd></template>
         <template v-if="isRefund">
           <dt>{{ record.actionLabel?.includes('报价') ? '本次报价' : '拟退款金额' }}</dt><dd>{{ amount(record.amount) }}</dd>
           <dt>实际退款金额</dt><dd>{{ amount(record.actualAmount) }}</dd>
@@ -169,7 +187,7 @@ watch(() => [props.record.no, activeAfterSaleActor.value.id], () => { confirming
       <ElTable v-if="packages.length" class="dispatch-table" :data="packages" border size="small">
         <ElTableColumn prop="fulfillmentOrderNo" label="履约单号" min-width="155" />
         <ElTableColumn label="包裹出库数量" width="115" align="right"><template #default="{ row }">{{ row.shippedQuantity ?? '—' }}</template></ElTableColumn>
-        <ElTableColumn label="跟踪号" min-width="155"><template #default="{ row }"><NumberCopy :value="row.trackingNumber" label="重发跟踪号" /></template></ElTableColumn>
+        <ElTableColumn label="重发跟踪号" min-width="155"><template #default="{ row }"><NumberCopy :value="row.trackingNumber" label="重发跟踪号" /></template></ElTableColumn>
       </ElTable>
     </section>
     <section v-prototype="annotation('logs')" class="detail-section"><ServiceLogs :key="JSON.stringify([record.shopId, record.no])" :entries="record.logs || []" :format-time="格式化北京时间" /></section>
@@ -213,5 +231,10 @@ dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .detail-section :deep(.cell) { line-height: 1.65; overflow-wrap: anywhere; }
 .dispatch-table { margin-top: 12px; }
 .attention { color: #935c11; background: #fff8e9; padding: 8px 12px; border-radius: 4px; font-size: 12px; margin: 12px 0 0; line-height: 1.7; }
+.result-check { border: 1px solid #e4e9ee; border-radius: 5px; padding: 10px 12px; font-size: 12px; }
+.check-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; color: #687587; }
+.result-check p { margin: 8px 0 0; line-height: 1.7; overflow-wrap: anywhere; }
+.check-warning { color: #935c11; }
+.failure-summary { color: #a34b3c; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
 @media (max-width: 650px) { .facts { grid-template-columns: 92px minmax(0, 1fr); } .wide { grid-column: auto; } .case-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 </style>

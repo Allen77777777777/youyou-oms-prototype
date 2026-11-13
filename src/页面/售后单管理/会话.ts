@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue'
 import { activeAfterSaleActor, canViewAfterSale, type AfterSaleActor } from './权限'
+import { resolveReshipOrderIdentity } from './重发订单关联'
 export { afterSaleActors, activeAfterSaleActor, canViewAfterSale, type AfterSaleActor } from './权限'
 import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
 import type { 订单路由, 金额 } from '../全渠道订单/类型'
@@ -7,9 +8,9 @@ import { 创建手工订单, 创建手工订单草稿, 原订单关联阻断原�
 import { 共享订单 } from '../订单处理/演示会话'
 import { 查找所选仓库物流, 路由仓库键 } from '../订单处理/仓库物流选择模型'
 import { resolveReturnItem, resolveReturnOrder } from '../eBay退换货申请/关联导航'
-import { returnSession } from '../eBay退换货申请/数据'
 import { formatMinor, parseMoney } from '../eBay退换货申请/接口契约'
 import { returnPlatformPresentation } from '../eBay退换货申请/模型'
+import { resolveAfterSaleSource } from './来源关联'
 
 export type AfterSaleKind = '全额退款' | '部分退款' | '退货' | '重发'
 export const afterSaleKinds: AfterSaleKind[] = ['全额退款', '部分退款', '退货', '重发']
@@ -52,13 +53,15 @@ export interface AfterSaleRecord extends AfterSaleInput {
   reshipRoute?: 订单路由
   /** 仅记录本单真实发生的本地操作及来源结果更新，历史缺失不补造。 */
   logs?: CustomerServiceLog[]
+  /** 主动只读核查的实际人员与取得时刻；不作为退款、退货或发运成功事实。 */
+  resultCheck?: { at: string; status: 'success' | 'failed' | 'unconfirmed'; message: string; operator: string; sourceSucceededAt?: string }
 }
 export const afterSaleRecords = ref<AfterSaleRecord[]>([])
 function addLog(record: AfterSaleRecord, operator: string, action: string, content: string, result: string, at?: string) {
   ;(record.logs ??= []).push(createCustomerServiceLog(operator, action, content, result, at))
 }
 watch(() => afterSaleRecords.value.filter(record => record.manualOrderNo).map(record => {
-  const order = 共享订单.value.find(item => item.systemOrderNo === record.manualOrderNo)
+  const order = resolveReshipOrderIdentity(record, 共享订单.value)
   return { no: record.no, orderNo: record.manualOrderNo!, status: order?.processingStatus || '',
     parcels: order?.fulfillmentOrders.filter(parcel => parcel.isActive).map(parcel => `${parcel.fulfillmentOrderNo}：${parcel.status}`).sort().join('；') || '' }
 }), (rows, previous) => {
@@ -79,9 +82,8 @@ export function recordsForReturn(shopId: string, returnId: string): AfterSaleRec
 }
 
 function currentSource(input: AfterSaleInput, allowMissingOrderNo = false) {
-  const sources = returnSession.records.filter(r => r.shopId === input.shopId && r.id === input.returnId)
-  const source = sources.length === 1 ? sources[0] : undefined
-  return source && (source.orderNo === input.orderNo || (allowMissingOrderNo && !source.orderNo)) ? source : undefined
+  const source = resolveAfterSaleSource(input).row
+  return source && (allowMissingOrderNo || source.orderNo === input.orderNo) ? source : undefined
 }
 
 /** 回执按仓库、实收单号和商品行识别。未知、冲突或跨售后单重复认领时保留待核实。 */

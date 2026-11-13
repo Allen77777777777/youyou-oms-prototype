@@ -5,13 +5,13 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { 获取全部页面菜单 } from '@/配置/菜单'
 import { 标注状态 } from '@/原型标注/标注状态'
-import { currentHandlerId, handlerOptions } from '@/组件/客服处理人/处理人'
+import { currentHandlerId, serviceActorOptions } from '@/组件/客服处理人/处理人'
 import RouteTabs from './页面页签.vue'
 
 const router = useRouter()
 const route = useRoute()
 const handlerDemo = computed(() => 标注状态.标注模式.value &&
-  /^\/oms\/ebay-service\/(messages|reviews|cancellations|returns|disputes)(\/|$)/.test(route.path))
+  /^\/oms\/ebay-service\/(messages|reviews|cancellations|returns|disputes|after-sale-orders)(\/|$)/.test(route.path))
 const 搜索打开 = ref(false)
 const 关键词 = ref('')
 const 搜索结果 = computed(() => {
@@ -33,7 +33,7 @@ function 设置密度(密度: string) {
 }
 
 function 切换客服身份(id: string) {
-  if (handlerOptions.some(person => person.value === id)) currentHandlerId.value = id
+  if (serviceActorOptions.some(person => person.value === id)) currentHandlerId.value = id
 }
 
 async function 打开搜索结果(路径?: string) {
@@ -85,7 +85,7 @@ async function 打开搜索结果(路径?: string) {
         <button class="用户入口" type="button" aria-label="切换客服演示身份">{{ currentHandlerId.slice(-2) }}</button>
         <template #dropdown>
           <ElDropdownMenu>
-            <ElDropdownItem v-for="person in handlerOptions" :key="person.value" :command="person.value" :disabled="person.value === currentHandlerId">{{ person.label }}</ElDropdownItem>
+            <ElDropdownItem v-for="person in serviceActorOptions" :key="person.value" :command="person.value" :disabled="person.value === currentHandlerId">{{ person.label }}</ElDropdownItem>
           </ElDropdownMenu>
         </template>
       </ElDropdown>

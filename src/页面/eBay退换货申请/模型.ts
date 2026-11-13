@@ -10,6 +10,7 @@ import { currentHandlerName } from '@/组件/客服处理人/处理人'
 import { getReturnWritePermissionError } from './权限'
 import { recordReturnOperation, type ReturnOperationLog, type ReturnSubmission } from './操作日志'
 import { usesRmaGraphql, rmaGraphqlBlockedReason, rmaWasWaived, resolveRmaGraphqlMutation, demoRmaMutationResponse } from './RMA授权'
+import { resolveReturnBuyerReply } from './售后回执证据'
 
 export type ReturnQueue = 'all' | 'response' | 'processing' | 'case' | 'closed'
 export interface ReturnRecord {
@@ -18,8 +19,12 @@ export interface ReturnRecord {
   closedHandlerIds?: string[]
   afterSaleSubmission?: { no: string; requestId: string; action: ReturnAction }
   afterSaleOfferNo?: string
+  /** 已核实的历史/平台报价办理依据，独立于本系统的真实提交尝试。 */
+  afterSaleOfferEvidence?: Array<{ shopId: string; returnId: string; requestId: string; sourceEventId: string }>
   afterSaleRefundNo?: string
   afterSaleExternalKey?: string
+  /** 买家对具体报价的首次可靠决定；重复通知不覆盖另一笔办理。 */
+  afterSaleBuyerReplies?: Array<{ requestId: string; decision: 'accepted' | 'declined'; eventId?: string; observedAt: string }>
   /** 内部按单次平台来源事件核实的售后原因，独立于买家填写的 eBay 原因。 */
   afterSaleEventReasons?: Record<string, string>
   id: string; shopId: string; shopName: string; site: string; marketplaceId: string; orderNo: string; buyerId: string
@@ -259,6 +264,25 @@ function applyRefundResult(row: ReturnRecord, now: string): boolean {
 }
 function applyExternal(row: ReturnRecord, event: NonNullable<ReturnMockScenario['externalEvent']>, now: string) {
   const detail = getReturnDetail(row)
+  if (event === 'buyerAccept' || event === 'buyerDecline') {
+    const match = resolveReturnBuyerReply(row)
+    if (match.hasLocalOffers) {
+      if (!match.requestId) {
+        recordReturnOperation(row, '核查买家报价回复', '回复尚不能唯一归属已受理的报价，保留原办理结果', '归属待核实', now, '系统', false, true)
+        return false
+      }
+      const decision = event === 'buyerAccept' ? 'accepted' : 'declined'
+      const replies = row.afterSaleBuyerReplies ??= []
+      const previous = replies.find(reply => reply.requestId === match.requestId)
+      if (previous || row.mock?.externalEventId && replies.some(reply => reply.eventId === row.mock?.externalEventId)) {
+        if (previous && previous.decision !== decision) recordReturnOperation(row, '核查买家报价回复', '同一次报价出现冲突回复，保留原已确认决定并待核查', '回复冲突', now, '系统', false, true)
+        return true
+      }
+      replies.push({ requestId: match.requestId, decision, eventId: row.mock?.externalEventId, observedAt: now })
+      // 迟到决定只补原报价；不得把另一笔当前报价的资格或申请进展改回旧值。
+      if (!match.current || row.state !== 'PARTIAL_REFUND_REQUESTED' || isReturnClosed(row) || detail.refund.status === 'SUCCESS' || hasReturnRefundSuccess(row)) return true
+    }
+  }
   if (event === 'buyerAccept') { row.state = 'PARTIAL_REFUND_INITIATED'; row.status = 'PARTIAL_REFUND_INITIATED'; detail.refund.status = 'PENDING'; setOptions(row, []); setTasks(row, null, null); addActivity(row, 'BUYER_ACCEPTS_PARTIAL_REFUND', '买家已接受部分退款报价，资金结果待回查', now, '买家') }
   if (event === 'buyerDecline') { row.state = 'PARTIAL_REFUND_DECLINED'; row.status = 'PARTIAL_REFUND_DECLINED'; setOptions(row, ['SELLER_APPROVE_REQUEST', 'SELLER_OFFER_PARTIAL_REFUND', 'SELLER_SEND_MESSAGE']); setTasks(row, 'SELLER_APPROVE_REQUEST', null); addActivity(row, 'BUYER_DECLINE_PARTIAL_REFUND', '买家拒绝部分退款报价', now, '买家') }
   if (event === 'autoApprove') {
@@ -276,6 +300,7 @@ function applyExternal(row: ReturnRecord, event: NonNullable<ReturnMockScenario[
   if (event === 'autoRefund') { if (applyRefundResult(row, now)) addActivity(row, 'SYSTEM_INITIATED_REFUND', '已读取平台自动退款来源结果', now) }
   if (event === 'buyerClose' || event === 'systemClose') { row.state = 'CLOSED'; row.status = 'CLOSED'; detail.closeInfo = { at: now, reason: event === 'buyerClose' ? 'BUYER_CLOSED' : 'OTHER', buyerReason: event === 'buyerClose' ? 'BUYER_NO_LONGER_WANTS_RETURN' : '', buyerComment: event === 'buyerClose' ? 'The issue has been resolved.' : '' }; setOptions(row, []); setTasks(row, null, null); addActivity(row, event === 'buyerClose' ? 'BUYER_CLOSE_RETURN' : 'SYSTEM_CLOSE_RETURN', event === 'buyerClose' ? '买家关闭申请' : '平台关闭申请', now, event === 'buyerClose' ? '买家' : '平台') }
   if (event === 'caseClose') { detail.caseClosed = true; detail.caseDecision = '平台已结束案件'; row.caseStatus = '已结束'; addActivity(row, 'CASE_UPDATED', '已取得独立Case的结束结果，原Return继续保留', now) }
+  return true
 }
 export interface ReturnSyncResult { status: 'success' | 'partial' | 'failed'; message: string }
 /** 只比较业务及读取结果；技术尝试／成功时间和本地资格版本不产生业务日志。 */
@@ -303,7 +328,7 @@ function syncReturnFacts(row: ReturnRecord, now: string): ReturnSyncResult {
   } else if (row.outcome === 'pending' && row.pendingAction) {
     if (row.mock?.resolve === 'failed') { row.outcome = 'failed'; row.pendingAction = null; row.submissionError = row.mock.error || '平台明确拒绝本次操作，请核对后重新处理'; recordReturnOperation(row, '回查处理结果', '已取得本次操作的明确失败回执；请按最新资格重新核对', '明确失败', now, '系统', true) }
     else applyAccepted(row, row.pendingAction, now)
-  } else if (row.mock?.externalEvent && !row.mock.consumed) { applyExternal(row, row.mock.externalEvent, now); row.mock.consumed = true }
+  } else if (row.mock?.externalEvent && !row.mock.consumed) { row.mock.consumed = applyExternal(row, row.mock.externalEvent, now) }
   else if (row.mock?.externalEvent === 'autoRefund' && row.mock.consumed && row.mock.refundResult && !row.mock.refundResultConsumed) applyRefundResult(row, now)
   else if (row.detail?.refund.status === 'PENDING' && (row.pendingRequest?.path.endsWith('/issue_refund') || row.state === 'PARTIAL_REFUND_INITIATED')) applyRefundResult(row, now)
   updateReturnKeepItemInfo(row)
@@ -312,7 +337,10 @@ function syncReturnFacts(row: ReturnRecord, now: string): ReturnSyncResult {
 }
 export function syncReturn(row: ReturnRecord, now = new Date().toISOString()): ReturnSyncResult {
   const result = syncReturnFacts(row, now)
-  if (row.lastSubmission && row.outcome !== 'idle') row.lastSubmission.outcome = row.outcome
+  if (row.lastSubmission && row.outcome !== 'idle') {
+    row.lastSubmission.outcome = row.outcome
+    row.lastSubmission.resultError = row.submissionError || (row.outcome === 'unknown' ? '平台尚未确认本次提交结果，请保留原请求继续核查' : '')
+  }
   return result
 }
 export function addReturnNote(row: ReturnRecord, text: string, now = new Date().toISOString()): string {

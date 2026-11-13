@@ -4,6 +4,7 @@ import { actionNames, actionOptions, escalationReasons, getReturnBlockedReason, 
 import { recordReturnOperation, startReturnSubmission } from './操作日志'
 import { buildRmaGraphqlRequest, usesRmaGraphql, type RmaGraphqlSource } from './RMA授权'
 import { getReturnWritePermissionError } from './权限'
+import { notifyReturnRefundEvidence } from './售后回执证据'
 export type ReturnAction = 'approve' | 'decline' | 'offerReturn' | 'partial' | 'refund' | 'message' | 'escalate' | 'provideRma' | 'receive' | 'label'
 export interface ReturnMoney { value: string; currency: string; convertedFromValue?: string; convertedFromCurrency?: string; exchangeRate?: string }
 export interface ReturnAddress { name: string; addressLine1: string; addressLine2?: string; city: string; stateOrProvince: string; postalCode: string; country: string }
@@ -385,7 +386,7 @@ export function submitPreparedReturnAction(row: ReturnRecord, prepared: Prepared
   row.outcome = row.mock?.submit === 'failed' ? 'failed' : row.mock?.submit === 'unknown' ? 'unknown' : 'pending'
   if (row.outcome === 'failed') { row.submissionError = row.mock?.error || '平台明确拒绝：当前申请资格发生变化，请刷新后核对'; row.pendingAction = null; if (row.mock) row.mock.submit = 'accepted' }
   startReturnSubmission(row, actionNames[prepared.action])
-  Object.assign(row.lastSubmission!, { confirmationId: prepared.confirmationId, confirmationIntegrity: prepared.integrity, identity: prepared.identity, requestSnapshot: clone(prepared.request), submittedAt: now, outcome: row.outcome })
+  Object.assign(row.lastSubmission!, { confirmationId: prepared.confirmationId, confirmationIntegrity: prepared.integrity, identity: prepared.identity, requestSnapshot: clone(prepared.request), submittedAt: now, outcome: row.outcome, resultError: row.submissionError || (row.outcome === 'unknown' ? '平台尚未确认本次提交结果，请保留原请求继续核查' : '') })
   ;(row.submissionAttempts ??= []).push(row.lastSubmission!)
   recordReturnOperation(row, '提交' + actionNames[prepared.action], `本次请求快照已保存${prepared.request.api === 'return-graphql' ? prepared.draft.rmaNumber.trim() ? '；提供退货授权编号' : '；本次免除退货授权编号要求' : ''}${prepared.draft.text.trim() ? `；含${prepared.action === 'message' ? '退货留言' : '对外处理说明'}（${prepared.draft.text.trim().length}字）` : ''}`, row.outcome === 'failed' ? '明确失败' : row.outcome === 'unknown' ? '结果待核查，禁止重提' : '已提交，待回查', now, row.lastSubmission!.operator, true)
   if (prepared.action === 'refund' && row.mock?.issueRefundResponse !== undefined) {
@@ -415,11 +416,13 @@ export function applyIssueRefundResponse(row: ReturnRecord, payload: unknown, co
   const outcome = confirmed ? 'confirmed' : pending ? 'pending' : 'unknown'
   const error = confirmed ? '' : pending ? '' : '退款结果待核查，请保留原请求，勿重复退款'
   attempt.outcome = outcome
+  attempt.resultError = error
   // 迟到回执可补原尝试；不能改变另一笔正在办理的表单和提交状态。
   if (row.lastSubmission?.id === attempt.id) {
     row.outcome = outcome; row.submissionError = error
     if (confirmed) row.pendingAction = null
   }
+  if (confirmed) notifyReturnRefundEvidence(row)
   return { outcome, error }
 }
 export function uploadReturnAttachment(row: ReturnRecord, input: { fileName: string; filePurpose: 'ITEM_RELATED' | 'LABEL_RELATED' | 'REFUND_RELATED'; data: string; fileFormat: string }, now = new Date().toISOString()): { error: string; file?: ReturnAttachment; request?: ReturnApiRequest } {

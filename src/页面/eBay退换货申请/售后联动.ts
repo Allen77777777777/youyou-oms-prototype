@@ -4,6 +4,10 @@ import { resolveReturnItem, resolveReturnOrder } from './关联导航'
 import { formatMinor, parseMoney, type PreparedReturnAction, type ReturnAction, type ReturnActionDraft, type ReturnMoney } from './接口契约'
 import { captureReturnHandlers } from './处理人'
 import { hasReturnRefundSuccess, isReturnClosed, syncReturn, submitPreparedReturnAction, validatePreparedReturnAction, type ReturnRecord } from './模型'
+import { reconcileReturnBuyerReplies, reconcileReturnRefundEvidence } from './售后回执归属'
+import { registerReturnRefundEvidenceReconciler, returnRefundEvidenceBusinessIds } from './售后回执证据'
+
+registerReturnRefundEvidenceReconciler(reconcileReturnRefundEvidence)
 
 export interface ReturnSaleDraft {
   requestId: string
@@ -47,6 +51,11 @@ export function createReturnSaleDraft(row: ReturnRecord, requestId?: string, act
   return { requestId: requestId || retry?.requestId || crypto.randomUUID(), quantity: retry?.items[0]?.quantity ?? row.quantity ?? undefined,
     reason: retry?.items[0]?.reason || '', note: retry?.note || '', refundScope: retry?.kind === '全额退款' || retry?.kind === '部分退款' ? retry.kind : '' }
 }
+/** 原请求明确失败后，用户选择更正才能取得新的业务标识；旧单与旧尝试保留。 */
+export function createCorrectedReturnSaleDraft(row: ReturnRecord, action: ReturnAction): ReturnSaleDraft | undefined {
+  if (!retryReturnSale(row, action)) return
+  return { ...createReturnSaleDraft(row, undefined, action), requestId: crypto.randomUUID() }
+}
 export function validateSaleQuantity(row: ReturnRecord, draft: Pick<ReturnSaleDraft, 'quantity'>): string {
   if (row.detail?.quantityConflict || !Number.isSafeInteger(row.quantity) || !row.quantity || row.quantity < 1) return '申请商品数量待核实，请先刷新资料'
   if (!Number.isSafeInteger(draft.quantity) || !draft.quantity || draft.quantity < 1 || draft.quantity > row.quantity) return '本次商品数量须为正整数，且不能超过申请数量'
@@ -86,6 +95,11 @@ export function submitReturnAndSale(row: ReturnRecord, prepared: PreparedReturnA
   }
   const validation = validatePreparedReturnAction(row, prepared, now)
   if (validation) return { error: validation }
+  if (retry && existingDoc?.no === retry.no) {
+    const attempts = row.submissionAttempts?.filter(attempt => attempt.businessId === retry.requestId) || []
+    const original = attempts[attempts.length - 1]?.requestSnapshot
+    if (!original || JSON.stringify(original) !== JSON.stringify(prepared.request)) return { error: '原请求重试须保持原提交内容；需要修改时请选择“更正后新办理”' }
+  }
   const source = returnSaleItem(row)
   const chosen = input.items[0]
   if (input.orderNo !== row.orderNo || input.systemOrderNo !== resolveReturnOrder(row, 共享订单.value)?.systemOrderNo || input.items.length !== 1 || !chosen || chosen.lineId !== source.lineId || chosen.sku !== source.sku || chosen.title !== source.title || validateSaleQuantity(row, chosen)) return { error: '售后商品或原单关联已变化，请重新确认' }
@@ -103,6 +117,7 @@ export function submitReturnAndSale(row: ReturnRecord, prepared: PreparedReturnA
   if (row.lastSubmission) row.lastSubmission.businessId = input.requestId
   if (prepared.action === 'refund' && hasReturnRefundSuccess(row)) row.afterSaleRefundNo = no
   updateAfterSaleResult(no, prepared.action === 'refund' && hasReturnRefundSuccess(row) ? '平台已确认退款，实退金额待核实' : row.outcome === 'failed' ? '平台提交失败' : row.outcome === 'unknown' ? '平台结果待核实' : '已提交，待平台回查')
+  reconcileReturnRefundEvidence(row)
   return { error: '', no }
 }
 export function prepareReship(row: ReturnRecord, fields: ReturnSaleDraft): AfterSaleInput {
@@ -116,8 +131,17 @@ function verifiedMoney(row: ReturnRecord): ReturnMoney | undefined {
 }
 function recordFunds(row: ReturnRecord, no: string) {
   const status = row.detail?.refund.status, amount = verifiedMoney(row)
+  const record = afterSaleRecords.value.find(item => item.no === no)
+  // 旧 FULL 或不完整资料不能冲掉该次 issue_refund 已确认的成功及原有可信金额。
+  if (record && returnRefundEvidenceBusinessIds(row).has(record.requestId) && (status !== 'SUCCESS' || !amount)) {
+    updateAfterSaleResult(no, record.actualAmount ? '平台退款成功' : '平台已确认退款，实退金额待核实')
+    return
+  }
   const text = status === 'SUCCESS' ? (amount ? '平台退款成功' : '平台已确认退款，实退金额待核实') : status === 'FAILED' ? '平台退款失败' : '退款处理中'
   updateAfterSaleResult(no, text, amount ?? null)
+  const attempts = row.submissionAttempts?.filter(attempt => attempt.businessId === record?.requestId) || []
+  const attempt = attempts[attempts.length - 1]
+  if (attempt) attempt.resultError = status === 'FAILED' ? row.mock?.refundResult?.error || '平台确认本次退款执行失败，请核实后继续处理' : ''
 }
 function reconcilePlatformSale(row: ReturnRecord, event: 'autoApprove' | 'autoRefund', newReceipt: boolean) {
   const mock = row.mock
@@ -147,10 +171,10 @@ function reconcilePlatformSale(row: ReturnRecord, event: 'autoApprove' | 'autoRe
 export function syncReturnWithSales(row: ReturnRecord, now = new Date().toISOString()) {
   const pending = row.pendingAction, oldOutcome = row.outcome
   const event = row.mock?.externalEvent
-  const eventPreviouslyRead = row.mock?.consumed
   const previouslyRead = row.mock?.refundResultConsumed
   const wasOpen = !isReturnClosed(row)
   const result = syncReturn(row, now)
+  reconcileReturnRefundEvidence(row)
   if (wasOpen && isReturnClosed(row)) captureReturnHandlers(row)
   if (result.status !== 'success') return result
   const submission = row.afterSaleSubmission
@@ -167,12 +191,9 @@ export function syncReturnWithSales(row: ReturnRecord, now = new Date().toISOStr
     updateAfterSaleResult(submission.no, outcome)
   }
   if (event && row.mock?.consumed) {
-    if (!eventPreviouslyRead && (event === 'buyerAccept' || event === 'buyerDecline') && row.afterSaleOfferNo) {
-      updateAfterSaleResult(row.afterSaleOfferNo, event === 'buyerAccept' ? '买家已接受报价，退款处理中' : '买家已拒绝报价')
-      if (event === 'buyerAccept') row.afterSaleRefundNo = row.afterSaleOfferNo
-    }
     if (event === 'autoApprove' || event === 'autoRefund') reconcilePlatformSale(row, event, !previouslyRead && !!row.mock.refundResultConsumed)
   }
+  reconcileReturnBuyerReplies(row)
   if (!previouslyRead && row.mock?.refundResultConsumed && event !== 'autoRefund') {
     const refunds = afterSaleRecords.value.filter(r => r.shopId === row.shopId && r.returnId === row.id && (r.kind === '全额退款' || r.kind === '部分退款'))
     // 一笔申请可多次报价或退款；遇到多笔，不以最近一次本地提交指针认领资金。
@@ -181,5 +202,6 @@ export function syncReturnWithSales(row: ReturnRecord, now = new Date().toISOStr
       : refunds.length === 1 && refunds[0]?.no === row.afterSaleRefundNo ? refunds[0] : undefined
     if (matched) recordFunds(row, matched.no)
   }
+  reconcileReturnRefundEvidence(row)
   return result
 }

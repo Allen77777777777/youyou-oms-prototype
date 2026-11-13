@@ -14,6 +14,8 @@ export interface ReturnSubmission {
   confirmationId?: string; confirmationIntegrity?: string; identity?: string
   requestSnapshot?: ReturnApiRequest; submittedAt?: string
   outcome?: 'pending' | 'unknown' | 'confirmed' | 'failed'; businessId?: string
+  /** 本次尝试的业务错误摘要；不保存响应正文，不借用申请的另一笔错误。 */
+  resultError?: string
 }
 interface LoggedReturn { logs: ReturnOperationLog[]; lastSubmission?: ReturnSubmission }
 

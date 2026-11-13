@@ -94,6 +94,9 @@ export function createReturnData(): ReturnRecord[] {
   records[3]!.mock = { refundResult: { status: 'FAILED', sellerActual: null, buyerActual: null, actualItems: [], issuedAt: null, initiator: 'SELLER_INITIATED', state: 'REFUND_FAILED', returnStatus: 'RETURN_REQUESTED', error: '平台退款执行失败，请前往平台核实重试资格' } }
   records[12]!.detail!.refund.status = 'FAILED'
   records[16]!.detail!.readStatus.detail.status = 'failed'; records[16]!.detail!.readStatus.detail.error = '详情读取失败，保留上次资料'
+  // 固定虚构的历史报价及买家回复关联依据，不制造本系统的历史提交尝试。
+  records[18]!.afterSaleOfferEvidence = [{ shopId: records[18]!.shopId, returnId: records[18]!.id, requestId: 'seed-after-sale:DEMO-RT-019', sourceEventId: 'DEMO-OFFER-019' }]
+  Object.assign(records[18]!.mock!, { externalRequestId: 'seed-after-sale:DEMO-RT-019', externalEventId: 'DEMO-BUYER-REPLY-019' })
   records[19]!.detail!.refund.moneyMovements = [{ id: 'DEMO-MOVE-020', type: 'AUTO_REFUND', status: 'PENDING', amount: null, actualAmount: null, requestedAmount: { value: '49.90', currency: 'USD' }, at: '2026-10-29T06:00:00Z' }]
   records[19]!.mock!.refundResult = { status: 'SUCCESS', sellerActual: { value: '45.00', currency: 'USD' }, buyerActual: { value: '49.90', currency: 'USD' }, actualItems: [{ refundFeeType: 'PURCHASE_PRICE', amount: { value: '49.90', currency: 'USD' } }], issuedAt: '2026-10-30T08:00:00Z', initiator: 'AUTO_REFUND', state: 'CLOSED', returnStatus: 'CLOSED', closeAt: '2026-10-30T08:01:00Z', closeReason: 'AUTO_REFUNDED' }
   records[21]!.detail!.contentOnHold = true; records[21]!.detail!.buyerComment = ''; records[21]!.detail!.buyerAddress = null; records[21]!.detail!.orderAddress = null

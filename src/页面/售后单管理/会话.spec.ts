@@ -5,6 +5,7 @@ import { 共享订单, 仓库执行记录, 当前版本, 提交审核轮次 } fr
 import { 执行待审核规则轮次 } from '../订单处理/审单规则执行'
 import { 渠道会话 } from '../仓配管理/仓配会话'
 import { initializeAfterSaleDemo } from './演示数据'
+import { afterSaleResultPresentation } from './办理结果'
 import { activeAfterSaleActor, afterSaleActors, afterSaleFacts, afterSaleReasons, afterSaleRecords, afterSaleReturnSummary, approveReship, createAfterSale, createPlatformAfterSale, getReshipReviewDraft, updateAfterSaleResult, type AfterSaleInput } from './会话'
 
 const orderSnapshot = JSON.stringify(共享订单.value), executionSnapshot = JSON.stringify(仓库执行记录.value)
@@ -48,6 +49,32 @@ describe('售后单分流与跨页面共享', () => {
     expect(record.logs?.slice(-1)[0]).toMatchObject({ operator: '系统', action: '重发执行结果更新' })
     expect(record.logs?.find(log => log.action === '审核重发')?.operator).toBe(reviewer)
     expect(reviewer).toBe('运营01')
+  })
+  it.each(['其他售后单', '其他场景', '其他原单', '重复订单'] as const)('重发关联出现%s时不写入该订单的执行事实', failure => {
+    initializeAfterSaleDemo()
+    const record = afterSaleRecords.value.find(row => row.kind === '重发')!
+    expect(approveReship(record.no).ok).toBe(true)
+    const order = 共享订单.value.find(row => row.systemOrderNo === record.manualOrderNo)!
+    if (failure === '其他售后单') order.manualOrder!.afterSaleNo = 'ANOTHER-AFTER-SALE'
+    if (failure === '其他场景') order.manualOrder!.scenario = '寄样赠送'
+    if (failure === '其他原单') order.manualOrder!.originalOrderNo = 'ANOTHER-ORDER'
+    if (failure === '重复订单') 共享订单.value.push(JSON.parse(JSON.stringify(order)))
+    const count = record.logs!.length
+    order.processingStatus = '已发货'
+    expect(afterSaleResultPresentation(record).group).toBe('待核查')
+    expect(record.logs).toHaveLength(count)
+  })
+  it('系统记录可靠执行事实不依赖当前查看人的店铺权限', () => {
+    initializeAfterSaleDemo()
+    const record = afterSaleRecords.value.find(row => row.kind === '重发')!
+    expect(approveReship(record.no).ok).toBe(true)
+    const order = 共享订单.value.find(row => row.systemOrderNo === record.manualOrderNo)!
+    activeAfterSaleActor.value = { ...afterSaleActors[1]!, shopIds: [] }
+    const count = record.logs!.length
+    order.processingStatus = '待推单'
+    expect(record.logs).toHaveLength(count + 1)
+    expect(record.logs![record.logs!.length - 1]).toMatchObject({ operator: '系统', action: '重发执行结果更新', content: expect.stringContaining('待审核 → 待推单') })
+    expect(afterSaleResultPresentation(record).text).toBe('重发订单关联待核查')
   })
   it('从申请列表先同步再打开售后管理，已收买家答复的历史报价仍关联同一单', () => {
     const source = returnSession.records.find(r => r.id === 'DEMO-RT-019')!

@@ -78,6 +78,34 @@ beforeEach(async () => {
 afterEach(() => { wrapper?.unmount(); ElMessage.closeAll() })
 
 describe('退货退款申请连续详情与处理', () => {
+  it('明确失败后可选原请求重试或更正后新办理，金额更正新建单并保留旧失败单', async () => {
+    const row = session.records[0]!
+    row.mock = { submit: 'failed' }
+    await open(row)
+    await click('提出部分退款', '.operation-header')
+    await wrapper.get('input[aria-label="部分退款金额"]').setValue('10.00')
+    await select('系统售后原因', '质量问题')
+    await click('确认内容'); await click('确认提交')
+    const original = recordsForReturn(row.shopId, row.id)[0]!
+    expect(original.executionResult).toBe('平台提交失败')
+    await click('提出部分退款', '.operation-header')
+    expect(wrapper.get('[aria-label="失败后办理方式"]').text()).toContain('原请求重试')
+    expect(button('原请求重试').attributes('aria-pressed')).toBe('true')
+    await wrapper.get('input[aria-label="部分退款金额"]').setValue('9.00')
+    await click('原请求重试')
+    expect((wrapper.get('input[aria-label="部分退款金额"]').element as HTMLInputElement).value).toBe('10.00')
+    await wrapper.get('input[aria-label="部分退款金额"]').setValue('9.00')
+    await click('更正后新办理')
+    await click('确认内容')
+    expect(wrapper.get('.sale-summary').text()).toContain('更正后新办理')
+    expect(wrapper.get('.sale-summary').text()).toContain(original.no)
+    await click('确认提交')
+    const records = recordsForReturn(row.shopId, row.id)
+    expect(records).toHaveLength(2)
+    expect(records[0]).toMatchObject({ amount: { value: '9.00' }, executionResult: '已提交，待平台回查' })
+    expect(original).toMatchObject({ amount: { value: '10.00' }, executionResult: '平台提交失败' })
+    expect(wrapper.find('[aria-label="失败后办理方式"]').exists()).toBe(false)
+  })
   it('申请关闭后列表和详情不再催办，保留平台仍返回的双方期限', async () => {
     const row = session.records[6]!, detail = getReturnDetail(row)
     detail.sellerDue = { activity: 'SELLER_ISSUE_REFUND', at: '2026-10-26T04:00:00Z' }

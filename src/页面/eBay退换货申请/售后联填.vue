@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { ElFormItem, ElInput, ElInputNumber, ElOption, ElSelect } from 'element-plus'
 import { afterSaleReasons } from '../售后单管理/会话'
+import { afterSaleSourceItemDisplay } from '../售后单管理/商品展示'
 import { directRefundCoverage, returnSaleItem, type ReturnSaleDraft } from './售后联动'
 import type { ReturnActionDraft } from './接口契约'
 import type { ReturnRecord } from './模型'
@@ -16,6 +17,7 @@ const props = defineProps<{
   refundItems?: ReturnActionDraft['refundItems']
 }>()
 const item = computed(() => returnSaleItem(props.row))
+const displayItem = computed(() => afterSaleSourceItemDisplay(props.row, item.value))
 const coverage = computed(() => props.refundItems && directRefundCoverage(props.row, props.refundItems))
 const kindLabel = computed(() => props.refundItems ? props.draft.refundScope || '退款' : props.kind)
 watch(coverage, (value, oldValue) => {
@@ -27,11 +29,12 @@ watch(coverage, (value, oldValue) => {
   <section v-prototype="annotation('after-sale-fields')" class="sale-fields" aria-label="售后单信息">
     <header class="sale-heading"><h4>售后单信息</h4><span class="sale-kind">{{ kindLabel }}</span></header>
     <div class="sale-item">
-      <strong>{{ item.title }}</strong>
+      <strong>{{ displayItem.title }}</strong>
       <div class="sale-identity">
-        <span>系统 SKU <b>{{ item.sku || '待核实' }}</b></span>
+        <span>系统 SKU <b>{{ displayItem.sku || '待核实' }}</b></span>
         <span v-if="originalOrder">原订单 <b>{{ originalOrder }}</b></span>
       </div>
+      <div v-if="displayItem.skuSourceNote" class="sale-identity sku-source">{{ displayItem.skuSourceNote }}</div>
     </div>
     <div class="sale-inputs">
       <ElFormItem v-if="refundItems && !coverage" label="退款类型" required class="wide">
