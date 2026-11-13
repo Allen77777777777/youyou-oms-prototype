@@ -11,8 +11,7 @@ import { actionLabels, availableActions, dateText, findRecord, recheckRefundElig
 import { disputeLocation } from './导航'
 import { disputeAnnotations } from './标注'
 import { isPaymentDecision, knownPaymentRevision, paymentHasAnswered, requestCoverage } from './支付争议证据'
-import { disputeShippingLocation, sellerHubFor } from './办理接口边界'
-import { idLabels } from './导航'
+import { disputeShippingLocation } from './办理接口边界'
 
 const props = defineProps<{ record: DisputeRecord }>()
 const router = useRouter()
@@ -39,10 +38,6 @@ watch(allowed, actions => {
 }, { immediate: true })
 const missingPaymentChoices = computed(() => props.record.status === 'ACTION_NEEDED' && props.record.payment?.responseCode !== undefined &&
   props.record.payment.availableChoices === undefined && !paymentHasAnswered(props.record))
-const platformMessage = computed(() => props.record.caseInfo?.platformAction || props.record.payment?.platformAction ||
-  (missingPaymentChoices.value ? '尚未取得当前可选答复，请刷新或到卖家后台核查。' :
-    props.record.inquiry?.requestedInfo?.some(item => item.kind === 'SIGNATURE') ? '如需补交签收文件，请按本案的卖家后台通知办理。' : ''))
-const sellerHub = computed(() => sellerHubFor(props.record.site))
 const deliveryRequests = computed(() => props.record.payment?.details?.requests.filter(request => request.type === 'PROOF_OF_DELIVERY') || [])
 const missingDelivery = computed(() => deliveryRequests.value.some(request => requestCoverage(props.record, request) !== '已提供材料'))
 const shippingLocation = computed(() => disputeShippingLocation(props.record, 共享订单.value))
@@ -83,7 +78,7 @@ function reviewDraft() {
   if (!saved || !action || !allowed.value.includes(action)) return
   refreshDisputeWithHandlers(props.record)
   if (isPaymentDecision(action) && !knownPaymentRevision(props.record.payment?.platformRevision)) {
-    view.feedback = '尚未取得平台版本，请到卖家后台核查该争议。'
+    view.feedback = '尚未取得平台版本，请刷新后核查该争议。'
     return
   }
   saved.revision = props.record.revision
@@ -116,7 +111,7 @@ function openCase() {
       <div v-if="!allowed.length && !view.active" class="receipt">
         <strong>{{ record.progress || record.statusText || '办理资格待核实' }}</strong>
         <p v-if="decision && decision !== record.progress">{{ decision }}</p>
-        <p>{{ record.nextStep || '请刷新并核对卖家后台的当前状态。' }}</p>
+        <p>{{ missingPaymentChoices ? '尚未取得当前可选答复，请刷新后核查。' : record.nextStep || '请刷新并核对当前状态。' }}</p>
         <dl v-if="record.date"><dt>{{ record.date.label }}</dt><dd>{{ dateText(record.date.value) }}</dd></dl>
         <ElButton v-if="linkedCase" size="small" plain type="primary" @click="openCase">查看关联 Case</ElButton>
       </div>
@@ -129,7 +124,6 @@ function openCase() {
         <p>无对应标发记录时，请核对原订单的有效出库及标发结果。完成原订单办理后返回本案回查。</p>
         <ElButton size="small" @click="recheck">回查投递证据</ElButton>
       </div>
-      <div v-if="platformMessage" class="platform-note"><p>{{ platformMessage }}</p><p>查找 {{ idLabels[record.kind] }}：{{ record.id }}</p><a v-if="sellerHub" :href="sellerHub" target="_blank" rel="noopener noreferrer">打开卖家后台 · 请求与纠纷 ↗</a><p v-else>请在本店所属站点的卖家后台查找本案。</p></div>
     </template>
     <div v-if="view.feedback && (allowed.length || record.pending || view.feedback !== record.progress)" class="receipt feedback" role="status">
       <span>{{ view.feedback }}</span>
@@ -148,6 +142,6 @@ h2 { margin:0 0 16px; color:var(--yy-text-heading); font-size:16px; font-weight:
 .receipt strong { font-size:13px;color:var(--yy-text-heading); }.receipt .el-button { margin-top:5px; }
 .receipt dl { margin:7px 0 0;display:flex;flex-wrap:wrap;gap:6px 10px; }.receipt dt {color:#728093}.receipt dd {margin:0}
 .pending,.limit { background:#fff6e5; color:#845b10; }.limit { padding:6px 9px; border-radius:4px; margin:10px 0 0;}
-.platform-note { margin-top:10px; border-top:1px solid #e6ebf1; padding-top:8px; color:#687689; } .platform-note a { color:var(--el-color-primary) }
+.platform-note { margin-top:10px; border-top:1px solid #e6ebf1; padding-top:8px; color:#687689; }
 .feedback { display:flex;align-items:center;justify-content:space-between;gap:8px; margin-top:10px;color:#346548;background:#f0f7f2; }.feedback .el-button {margin:0}
 </style>

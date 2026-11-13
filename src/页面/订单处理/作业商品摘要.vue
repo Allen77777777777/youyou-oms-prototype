@@ -5,6 +5,8 @@ import OrderProductImage from '../全渠道订单/商品缩略图.vue'
 import PlatformProductTitle from '../全渠道订单/平台商品标题.vue'
 import { 格式化金额, 获取订单商品数量 } from '../全渠道订单/订单工具'
 import type { 全渠道订单, 履约单摘要 } from '../全渠道订单/类型'
+import { 获取商品运营人员, 处理人姓名 } from './处理人模型'
+import { 订单处理标注 } from './订单处理原型标注'
 import { 格式化包裹金额, 读取拆分包裹商品投影, type 拆分包裹商品投影 } from './拆分包裹商品投影'
 
 const props = defineProps<{ order: 全渠道订单; sourceOrder: boolean; fulfillment?: 履约单摘要; parcelView?: boolean }>()
@@ -32,6 +34,7 @@ const 展示来源金额 = computed(() => props.parcelView || props.sourceOrder 
         <PlatformProductTitle :order="order" :item="商品" compact />
         <div><span>平台 SKU</span><b>{{ 商品.platformSku || '—' }}</b></div>
         <div><span>系统 SKU</span><b>{{ 商品.systemSku || '—' }}</b></div>
+        <div v-prototype="订单处理标注.运营人员" class="商品运营人员"><span>运营人员</span><b>{{ 处理人姓名(获取商品运营人员(order, 商品)) }}</b></div>
         <dl class="商品金额" :aria-label="parcelView ? '本包商品金额' : 展示来源金额 ? '来源订单商品行金额' : '订单商品行金额'">
           <div><dt>商品单价：</dt><dd>{{ parcelView ? 格式化包裹金额(商品.unitPrice) : 格式化金额(商品.unitPrice) }}</dd></div>
           <div><dt>{{ parcelView ? '本包实收金额' : '商品实收金额' }}：</dt><dd>{{ parcelView ? 格式化包裹金额(本包商品(商品.externalLineId)?.actualReceived) : 格式化金额(商品.actualReceived) }}</dd></div>

@@ -4,6 +4,16 @@ import { addReturnNote, createReturnActionDraft, createReturnFilters, filterRetu
 
 const now = '2026-10-29T06:00:00Z'
 describe('退换货申请操作边界', () => {
+  it('升级或可信退款成功后不显示旧退款待办，平台原始期限仍保留', () => {
+    const row = createReturnData()[2]!, due = structuredClone(row.detail!.sellerDue)
+    row.refundEvidence = [{ shopId: row.shopId, returnId: row.id, submissionId: 'confirmed-attempt', status: 'SUCCESS', observedAt: now, source: 'issue_refund' }]
+    expect(getReturnCurrentTasks(row)).toEqual([])
+    expect(row.detail!.sellerDue).toEqual(due)
+    delete row.refundEvidence
+    row.status = 'ESCALATED'
+    expect(getReturnCurrentTasks(row)).toEqual([])
+    expect(row.detail!.sellerDue).toEqual(due)
+  })
   it('未回查不能重复提交，提交和回查不覆盖已退款事实', () => {
     const row = createReturnData()[2]!
     expect(submitReturnAction(row, 'refund', '', null, '', now)).toBe('')
@@ -33,8 +43,8 @@ describe('退换货申请操作边界', () => {
     expect(getReturnBlockedReason(row, 'refund', now)).toContain('金额尚未确认')
   })
   it('未知结果同步后仍不放行，日志保留', () => {
-    const row = createReturnData()[7]!; syncReturn(row, now)
-    expect(row.outcome).toBe('unknown'); expect(row.logs).toHaveLength(2)
+    const row = createReturnData()[7]!, existingLogs = row.logs.length; syncReturn(row, now)
+    expect(row.outcome).toBe('unknown'); expect(row.logs).toHaveLength(existingLogs + 1)
     expect(getReturnBlockedReason(row, 'refund', now)).toContain('待核查')
   })
   it('升级同时检查卖家资格、起止窗口、原因与说明', () => {

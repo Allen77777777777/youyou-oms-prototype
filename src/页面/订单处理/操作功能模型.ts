@@ -2,6 +2,10 @@ import { 是未匹配审单异常 } from '../全渠道订单/类型'
 import type { 全渠道订单, 订单处理状态, 履约单摘要 } from '../全渠道订单/类型'
 import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 当前版本, 演示时间, 记录操作, type 仓库执行, type 命令结果 } from './演示会话'
 import { 是手工订单, 手工发货条件阻断 } from '../手工订单/来源规则'
+import { 渠道会话 } from '../仓配管理/渠道状态'
+import { 共享规则 } from '../订单规则/演示会话'
+import { 创建推单出库快照 } from '../仓配管理/三方仓出库模型'
+import { 准备包裹收件请求, 保存包裹收件请求, 创建包裹收件请求标识, 读取共同履约请求路由, 校验推仓请求收件资料 } from './请求收件准备'
 
 /** 只处理本地虚构核查证据；真实 API、权限与持久审计未接入。 */
 export function 订单关联仓库执行(订单: 全渠道订单): 仓库执行[] {
@@ -211,8 +215,24 @@ export function 执行演示重新推单(出库单号: string, 版本表: Record
   if (错误) return { 成功: false, 信息: 错误 }
   const 阻断 = 重新推单阻断原因(查找)
   if (阻断.length) return { 成功: false, 信息: 阻断.join('；') }
+  const 来源 = 仓单来源订单(查找), 提交时间 = 演示时间()
+  const 本次路由 = 读取共同履约请求路由(来源, 查找.履约单号)
+  if (!本次路由) return { 成功: false, 信息: '本次履约的全部来源实际路由缺失或不一致，请先核实' }
+  const 收件请求 = 准备包裹收件请求({ requestId: 创建包裹收件请求标识(出库单号, 来源), trigger: 'warehouse_push',
+    orders: 来源, route: 本次路由, rules: 共享规则.value, channels: 渠道会话.value, processedAt: 提交时间,
+  })
+  if (收件请求.blocked) return { 成功: false, 信息: 收件请求.reason }
+  const 收件错误 = 校验推仓请求收件资料(收件请求.address)
+  if (收件错误) return { 成功: false, 信息: 收件错误 }
   const 原失败 = 查找.原因
-  查找.状态 = '下单中'; 查找.待核查 = true; 查找.原因 = '重新推单已受理，等待仓库明确建单结果'; 查找.更新时间 = 演示时间()
+  const 快照 = 创建推单出库快照(来源, 查找.履约单号, 查找.出库快照?.submittedAt || 提交时间)
+  if (!快照.snapshotReliable) return { 成功: false, 信息: 快照.compositionReason || '本次出库来源及商品范围未核实，不能重新推仓' }
+  快照.recipient = JSON.parse(JSON.stringify(收件请求.address))
+  查找.出库快照 = 快照
+  查找.收件请求历史 ??= []
+  查找.收件请求历史.push(JSON.parse(JSON.stringify(收件请求)))
+  保存包裹收件请求(来源, 收件请求)
+  查找.状态 = '下单中'; 查找.待核查 = true; 查找.原因 = '重新推单已受理，等待仓库明确建单结果'; 查找.更新时间 = 提交时间
   for (const 订单 of 仓单来源订单(查找)) 记录操作(订单, '重新推单', `${出库单号} 原明确失败：${原失败}；原请求未生效且已核实修复；修复说明：${修复说明.trim()}；原范围未变，订单保持待推单。仅本地演示。`)
   return { 成功: true, 信息: '重新推单已受理，请同步仓库状态查看结果', 对象号: 出库单号, 待核查: true }
 }

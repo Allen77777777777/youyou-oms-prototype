@@ -68,6 +68,7 @@ describe('手工订单创建与共享履约', () => {
     expect(订单.professionalOrder).toBeUndefined()
     expect(订单.paidAt).toBeUndefined()
     expect(订单.items[0]).toMatchObject({ systemSku: 'DEMO-STORAGE-01', orderedQuantity: 2, fulfillableQuantity: 2, skuResolutionStatus: '成功' })
+    expect(订单.handlerAssignment).toMatchObject({ handlerIds: ['staff-01'], assignedAt: 订单.createdAt, source: 'SKU', lines: [{ systemSku: 'DEMO-STORAGE-01', operatorIds: ['staff-01'] }] })
     expect(订单.items[0]!.platformSku).toBeUndefined()
     expect(订单.items[0]!.platformItemTitle).toBeUndefined()
     expect(格式化金额(订单.amount.orderAmount)).toBe('—')

@@ -567,8 +567,28 @@ describe('退货退款申请连续详情与处理', () => {
     expect(wrapper.get('.return-history-panel').text()).toContain('平台自动批准')
   })
 
-  it('RMA与面单分步办理，上传先保留待关联状态，平台回执后转买家寄回待办', async () => {
+  it('新版RMA可留空确认，显示本次豁免且不提供地址修改表单', async () => {
     const record = session.records[9]!, detail = getReturnDetail(record)
+    await open(record)
+    await click('提供退货授权', '.return-operation')
+    expect(wrapper.get('.action-form').text()).toContain('退货授权编号（选填）')
+    expect(wrapper.get('.action-form').text()).toContain('eBay 后台办理')
+    expect(wrapper.find('textarea[aria-label="退货退款处理说明"]').exists()).toBe(false)
+    await click('确认内容')
+    expect(wrapper.get('[data-title="确认提供退货授权"]').text()).toContain('不提供，本次免除编号要求')
+    await click('确认提交')
+    expect(record.pendingRequest?.body.variables).toEqual({ input: { returnId: record.id, rmaRequirementWaived: true } })
+    expect(record.status).toBe('WAITING_FOR_RMA')
+    await refreshCurrent()
+    expect(record.outcome).toBe('confirmed')
+    expect(detail.rmaRequired).toBe(true)
+    expect(wrapper.get('.application-panel').text()).toContain('本次已免除编号要求')
+    expect(wrapper.get('.return-shipping-panel').text()).toContain('本次无需提供编号')
+  })
+
+  it('旧RMA与面单分步办理，上传先保留待关联状态，平台回执后转买家寄回待办', async () => {
+    const record = session.records[9]!, detail = getReturnDetail(record)
+    delete detail.rmaGraphql
     await open(record)
     expect(wrapper.get('.application-panel').text()).toContain('RMA 策略要求提供编号')
     await click('提供退货授权', '.return-operation')

@@ -128,10 +128,12 @@ export function createConversations(): Conversation[] {
   failed.shopId = 'shop-uk'; failed.shopName = '演示店铺-UK'; failed.sendScenario = 'failed'
   failed.product = { title: '后视镜盖', sku: 'DEMO-MC-07' }
   failed.messages.push({ id: 'msg-07-2', kind: 'outgoing', sender: '自动客服', body: 'Please share the dimensions of the original mirror cover.', at: time('26T11:35:00'), delivery: 'failed', sendSource: 'automation', automationRuleName: '订单商品资料补充', failureReason: '平台拒绝发送，请核对内容后重试。' })
+  failed.messages[1]!.incomingMessageIds = ['msg-07-1']
   failed.updatedAt = time('26T11:35:00')
   const unknown = makeBuyer(8, '物流与纠纷跟进', 'I have not received the parcel. Please check the case.', '我还没有收到包裹，请查看纠纷记录。', 'order-09')
   unknown.sendScenario = 'unknown'
   unknown.messages.push({ id: 'msg-08-2', kind: 'outgoing', sender: '客服02', body: 'We are checking the latest delivery details.', at: time('26T10:35:00'), delivery: 'unknown', failureReason: '请求超时，发送结果待核查，暂不可重复发送。' })
+  unknown.messages[1]!.incomingMessageIds = ['msg-08-1']
   unknown.updatedAt = time('26T10:35:00')
   unknown.tags = ['logistics', 'dispute']
 
@@ -202,7 +204,23 @@ export function createConversations(): Conversation[] {
     product: { title: '桌面理线盒 · 灰色', sku: 'HOME-CABLE-07' },
     messages: [incoming('msg-context-07-1', 'buyer_demo_r07', 'Please check the return and refund progress for the cable organizer and the delivery status of the travel bags in the other package.', '2026-10-20T09:20:00+08:00', '请帮我查看理线盒的退货退款进度，并核对另一个包裹中旅行收纳袋的配送情况。')],
   }
-  const conversations = [first, second, installation, presale, pending, unsynced, failed, unknown, ...additionalBuyers, contextDemo, ...notices]
+  const messageOrders: Conversation = {
+    ...makeBuyer(41, '两笔订单的分别跟进', 'Please check the two orders separately.', '请分别核对这两笔订单。'),
+    id: 'conv-message-orders', buyerId: 'buyer_demo_01', assignee: '客服01',
+    buyerDataScope: { buyerKey: demoBuyerKey('buyer_demo_01'), shopIds: ['shop-us', 'shop-uk'] },
+    association: 'confirmed', relatedOrderIds: ['order-01', 'order-04'], updatedAt: '2026-11-11T01:00:00Z',
+    messages: [
+      { ...incoming('msg-order-a', 'buyer_demo_01', 'Please check the return for my brake pad order.', '2026-10-27T02:10:00Z', '请查看刹车片订单的退货。'), orderAssociation: { state: 'confirmed', orderIds: ['order-01'], source: '已核实交易行' } },
+      { ...incoming('msg-order-b', 'buyer_demo_01', 'Please check the air filter delivery.', '2026-11-10T01:00:00Z', '请查看空气滤芯的配送。'), orderAssociation: { state: 'confirmed', orderIds: ['order-04'], source: '已核实来源单据' } },
+      { ...incoming('msg-order-pending', 'buyer_demo_01', 'It has still not arrived. Could you check?', '2026-11-10T02:00:00Z', '仍未收到，能帮我查一下吗？'), orderAssociation: { state: 'pending', orderIds: [] } },
+      { ...incoming('msg-order-multi', 'buyer_demo_01', 'Please send the tracking details for both orders.', '2026-11-11T01:00:00Z', '请提供这两笔订单各自的物流信息。'), orderAssociation: { state: 'confirmed', orderIds: ['order-01', 'order-04'], source: '已核实两笔交易' } },
+    ],
+  }
+  const checkRejected = makeBuyer(42, '发送结果核查', 'Please check the product details.', '请核对商品资料。')
+  checkRejected.updatedAt = '2026-11-10T03:00:00Z'
+  checkRejected.messages[0]!.at = '2026-11-10T02:55:00Z'
+  checkRejected.messages.push({ id: 'msg-check-rejected', kind: 'outgoing', sender: '客服01', body: 'We are checking the details.', at: '2026-11-10T03:00:00Z', delivery: 'unknown', failureReason: '发送结果待核查。', incomingMessageIds: ['msg-42-1'] })
+  const conversations = [first, second, installation, presale, pending, unsynced, failed, unknown, ...additionalBuyers, contextDemo, messageOrders, checkRejected, ...notices]
   // 只在样例已明确本次涉及的具体商品行时附上 SKU，供恢复自动分配。保留历史指派，不补造当时日志。
   snapshotConversationSkus(first, ['DEMO-BP-01'], false)
   snapshotConversationSkus(second, ['DEMO-DH-02'], false)
@@ -210,6 +228,8 @@ export function createConversations(): Conversation[] {
   snapshotConversationSkus(contextDemo, ['HOME-CABLE-07', 'TRAVEL-BAG-CONTEXT-07'], false)
   for (const conversation of conversations) {
     for (const message of conversation.messages) {
+      // 历史样例逐条核实来源。新增收信不会从会话自动继承订单关系。
+      message.orderAssociation ??= { state: conversation.association, orderIds: [...conversation.relatedOrderIds], source: '已核实样例消息来源' }
       if (message.kind === 'incoming') message.unread = conversation.unread
       if (message.kind === 'outgoing') message.sendSource ??= 'manual'
     }

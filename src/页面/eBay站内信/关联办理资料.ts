@@ -1,7 +1,7 @@
 import type { RouteLocationRaw } from 'vue-router'
 import { 读取排序时刻 } from '@/组件/筛选/筛选工具'
 import { mailSession } from './会话'
-import { getRelatedOrders } from './模型'
+import { getMessageOrders } from './消息订单'
 import type { ContextRecord, Conversation, RelatedOrder } from './类型'
 import { tickets, isTicketClosed, sourceLabels, type Ticket, type TicketSource } from '../工单管理/会话'
 import { ticketViewTimeToUtc } from '../工单管理/时间存储'
@@ -74,8 +74,8 @@ function sourceBelongsToOrder(source: TicketSource, order: RelatedOrder): boolea
     case 'message': {
       const conversation = only(mailSession.conversations.filter(row => row.shopId === source.shopId && row.id === source.contextId))
       if (!conversation || !isMessageSource(source, conversation)) return false
-      // 会话确认了多笔订单仍不足以证明某封消息归哪一笔，不把同一消息工单泛挂各单。
-      const associatedOrder = only(getRelatedOrders(conversation, mailSession.orders))
+      const message = only(conversation.messages.filter(row => row.id === source.id))
+      const associatedOrder = only(getMessageOrders(conversation, message, mailSession.orders))
       return Boolean(associatedOrder && sourceMatchesOrder(associatedOrder, order))
     }
     case 'return': {
@@ -91,9 +91,9 @@ function sourceBelongsToOrder(source: TicketSource, order: RelatedOrder): boolea
       return Boolean(row && sourceMatchesOrder({ shopId: row.shopId, orderNo: row.orderId, buyerId: row.buyer }, order))
     }
     case 'dispute': {
-      // 旧来源缺少纠纷类型时不默认猜测为 Case。
-      if (!source.contextId) return false
-      const row = only(disputeRecords.value.filter(row => row.shopId === source.shopId && row.id === source.id && row.kind === source.contextId))
+      // 工单来源约定以空 contextId 表示旧 Case。
+      const kind = source.contextId || 'EBAY_CASE'
+      const row = only(disputeRecords.value.filter(row => row.shopId === source.shopId && row.id === source.id && row.kind === kind))
       return Boolean(row && sourceMatchesOrder({ shopId: row.shopId, orderNo: row.orderId, buyerId: row.buyer }, order))
     }
   }

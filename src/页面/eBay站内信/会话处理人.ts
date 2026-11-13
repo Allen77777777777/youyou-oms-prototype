@@ -10,7 +10,9 @@ function legacyIds(c: Conversation): string[] {
 export function getConversationHandlerIds(c: Conversation): string[] {
   const a = c.assignment
   if (!a) return legacyIds(c)
-  return a.manualIds ?? (a.rule ? [a.rule.userId] : a.skuHandlerIds)
+  if (a.manualIds !== undefined) return a.manualIds
+  const validRuleUser = a.rule && handlerOptions.some(person => person.value === a.rule!.userId)
+  return validRuleUser ? [a.rule!.userId] : a.skuHandlerIds
 }
 
 function ensureAssignment(c: Conversation) {

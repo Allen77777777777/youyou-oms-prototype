@@ -112,7 +112,7 @@ describe('发货仓库条件使用稳定仓库身份而非展示名称', () => {
   it('分仓规则即使伪造此条件也不能保存或命中', () => {
     const { rule, order, channels } = 准备(), routing = structuredClone(创建规则样例()[1]!)
     routing.conditions = structuredClone(rule.conditions)
-    expect(校验规则配置(routing, [routing], channels)).toContain('仅适用于审单规则和订单标发规则')
+    expect(校验规则配置(routing, [routing], channels)).toContain('仅适用于审单规则、订单标发规则和收件信息规则')
     expect(命中规则(routing, order, channels)).toBe(false)
     expect(试算规则([routing], order, '分仓规则', channels).hit).toBeUndefined()
   })

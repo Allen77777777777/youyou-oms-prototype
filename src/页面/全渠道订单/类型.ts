@@ -1,3 +1,5 @@
+import type { 门牌解析结果, 收件信息动作配置 } from '../订单规则/收件信息规则模型'
+
 export type 平台代码 =
   | 'eBay'
   | 'Temu'
@@ -62,6 +64,8 @@ export interface 脱敏收件信息 {
   district?: string
   addressLine1: string
   addressLine2?: string
+  /** 来源独立返回或录入的门牌号。请求前规则解析值单独保存在 recipientRequestRecords。 */
+  houseNumber?: string
   postalCode?: string
   buyerMessage?: string
 }
@@ -96,6 +100,27 @@ export interface 人工发货方案 {
   packages: 人工发货包裹[]
   reason: string
   updatedAt: string
+  /** 发货安排首次由拆单规则生成的来源快照；后续人工编辑仍保留追溯。 */
+  createdByRule?: {
+    executionId: string
+    rules: { id: string; name: string; version: number; configurationSnapshot?: string }[]
+    appliedAt: string
+    sourceVersion: number
+    /** 当次来源、命中轨迹及包裹选择的完整只读快照。 */
+    inputSnapshot?: string
+    resultSnapshot?: string
+  }
+}
+
+/** 拆单规则阶段的商品组成；未分仓前不得当作可审核的人工发货方案。 */
+export interface 规则拆单候选 {
+  id: string
+  packages: { key: string; items: 人工发货分配[] }[]
+  reason: string
+  createdAt: string
+  sourceVersion: number
+  sourceSnapshot: string
+  createdByRule: NonNullable<人工发货方案['createdByRule']>
 }
 
 export interface 履约单摘要 {
@@ -148,6 +173,60 @@ export interface 专业订单引用 {
   orderId: string
 }
 
+/** 订单创建/明确分配时取得的 SKU 运营人员快照；查看及主数据变化均不重算存量责任。 */
+export interface 订单处理人分配 {
+  handlerIds: string[]
+  assignedAt: string
+  source: 'SKU'
+  lines: {
+    externalLineId: string
+    systemSku?: string
+    operatorIds: string[]
+    issue?: '系统 SKU 未识别' | '系统 SKU 无运营人员'
+  }[]
+}
+
+export type 收件信息请求触发点 = 'freight_quote' | 'logistics_order' | 'warehouse_push'
+export interface 收件信息请求输入快照 {
+  orderNo: string
+  platformCode: string
+  storeId: string
+  fulfillmentMode: 全渠道订单['fulfillmentMode']
+  originalAddress: 脱敏收件信息
+  shippingChannelId: string
+  shippingWarehouseKey: string
+  shippingChannelKey: string
+}
+/** 本次请求的收件处理快照；旧创建事件仅保留历史，不作为请求输入。 */
+export type 订单收件处理记录 = Omit<门牌解析结果, 'status'> & {
+  trigger: 'order_created' | 收件信息请求触发点
+  requestId?: string
+  requestInput?: 收件信息请求输入快照
+  routeSnapshot?: 订单路由
+  processedAt: string
+  ruleId?: string
+  ruleName?: string
+  ruleVersion?: number
+  actionSnapshot?: 收件信息动作配置
+  /** 本次匹配使用的来源上下文，独立于可变订单与请求资料。 */
+  conditionInput: {
+    platformCode: string
+    storeId: string
+    countryCode: string
+    stateProvince: string
+    city: string
+    addressLine1: string
+    addressLine2: string
+    /** 仅优先级评估路径涉及路由条件时记录依据；旧记录缺省为不敏感。 */
+    routeSensitive?: boolean
+    shippingChannelId?: string
+    shippingWarehouseKey?: string
+    shippingChannelKey?: string
+  }
+  status: 门牌解析结果['status'] | 'not_matched' | 'not_applicable'
+}
+export type 收件信息请求处理记录 = 订单收件处理记录 & { trigger: 收件信息请求触发点; requestId: string; requestInput: 收件信息请求输入快照 }
+
 export interface 全渠道订单 {
   systemOrderNo: string
   platformCode: 平台代码
@@ -169,7 +248,15 @@ export interface 全渠道订单 {
   }
   fulfillmentMode: 履约模式
   processingStatus?: 订单处理状态
+  handlerAssignment?: 订单处理人分配
   initialReviewPending?: true
+  /** 本地编排契约：前置处理明确完成后到达合单节点；不能由待审核状态推断。 */
+  mergeNodeArrival?: {
+    arrivedAt: number
+    skuResolution: '已完成'
+    giftProcessing: '已完成' | '不适用'
+    splitProcessing: '未拆单'
+  }
   reviewExceptionCode?: 'NO_REVIEW_RULE_MATCH'
   /** 审单自动重跑按订单累计；状态切换及人工执行均不重置。当前仅本地会话。 */
   reviewRetry?: {
@@ -183,6 +270,7 @@ export interface 全渠道订单 {
   noShipmentReason?: string
   defaultRoute?: 订单路由
   manualShippingPlan?: 人工发货方案
+  ruleSplitDraft?: 规则拆单候选
   cancelledAt?: string
   cancelledReason?: string
   orderedAt: string
@@ -197,6 +285,9 @@ export interface 全渠道订单 {
   tags: string[]
   buyerExternalId?: string
   address: 脱敏收件信息
+  recipientProcessing?: 订单收件处理记录
+  /** 对外请求前处理记录；与旧订单创建记录分开保留。 */
+  recipientRequestRecords?: 收件信息请求处理记录[]
   amount: 订单金额
   items: 订单商品行[]
   fulfillmentOrders: 履约单摘要[]

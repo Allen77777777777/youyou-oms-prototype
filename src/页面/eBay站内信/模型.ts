@@ -5,6 +5,9 @@ import { richHtmlToText, sanitizeRichHtml } from '../消息模板管理/富文�
 import type { ContextDataset, Conversation, MailFilters, MessageSource, RelatedOrder, ReplyDraft } from './类型'
 import { getConversationHandlerIds } from './会话处理人'
 import { handlerIdFromLegacy, matchesHandlerFilter } from '@/组件/客服处理人/处理人'
+import { canViewMail } from './权限与协作'
+import { getPersonalMailStar } from './会话'
+import { getMessageOrders } from './消息订单'
 
 export function getRelatedOrders(conversation: Conversation, orders: RelatedOrder[]): RelatedOrder[] {
   if (conversation.association !== 'confirmed' || !conversation.buyerId) return []
@@ -12,14 +15,15 @@ export function getRelatedOrders(conversation: Conversation, orders: RelatedOrde
   return orders.filter(order => ids.has(order.id) && order.shopId === conversation.shopId && order.buyerId === conversation.buyerId)
 }
 
-export function getBuyerHistory(conversation: Conversation, orders: RelatedOrder[]): RelatedOrder[] {
-  if (conversation.source !== 'buyer' || !conversation.buyerId) return []
+export function getBuyerHistory(conversation: Conversation, orders: RelatedOrder[], currentOrders = getRelatedOrders(conversation, orders)): RelatedOrder[] {
+  if (conversation.source !== 'buyer' || !conversation.buyerId || !canViewMail(conversation)) return []
   // 待确认候选仍可在历史范围核对，但绝不作为当前订单事实。
-  const currentIds = new Set(getRelatedOrders(conversation, orders).map(order => order.id))
+  const currentIds = new Set(currentOrders.map(order => order.id))
   const scope = conversation.buyerDataScope
   // 生产接口必须在返回订单、计数及详情前校验组织/店铺/模块权限；前端过滤仅演示该数据契约。
   // 缺少可信身份键或授权店铺集合时兼容旧数据：只查看本店历史，不按同名买家跨店合并。
   return orders.filter(order => {
+    if (!canViewMail(order)) return false
     if (currentIds.has(order.id) || (scope && !scope.shopIds.includes(order.shopId))) return false
     if (order.shopId === conversation.shopId) {
       return order.buyerId === conversation.buyerId && !(scope?.buyerKey && order.buyerKey && scope.buyerKey !== order.buyerKey)
@@ -38,15 +42,16 @@ export function filterConversations(items: Conversation[], source: MessageSource
   if (!['buyerId', 'subject', 'body', 'orderNo'].includes(filters.field)) return []
   const handlerIds = filters.assignees.map(id => handlerIdFromLegacy(id) || id)
   return items.filter(item => {
+    if (!canViewMail(item)) return false
     if (item.source !== source || !命中多选(filters.shopIds, item.shopId) || !matchesHandlerFilter(getConversationHandlerIds(item), handlerIds)) return false
-    if (filters.onlyUnread && !item.unread || filters.onlyFlagged && !item.flagged) return false
+    if (filters.onlyUnread && !item.unread || filters.onlyFlagged && !getPersonalMailStar(item)) return false
     if (source === 'buyer' && queue !== 'all' && item.status !== queue) return false
     if (source === 'ebay' && ((queue === 'unread' && !item.unread) || (queue === 'read' && item.unread))) return false
     if (source === 'ebay' && !['all', 'unread', 'read'].includes(queue)) return false
     const values = filters.field === 'buyerId' ? item.buyerId
       : filters.field === 'subject' ? [item.subject, ...item.messages.filter(message => message.kind !== 'note').map(message => message.subject?.trim() || item.subject)]
       : filters.field === 'body' ? item.messages.filter(message => message.kind !== 'note').map(getMessageBodyText)
-      : getRelatedOrders(item, orders).map(order => order.orderNo)
+      : item.messages.flatMap(message => getMessageOrders(item, message, orders).map(order => order.orderNo))
     return 命中字段搜索(values, filters.query, filters.mode, kind)
   }).sort((a, b) => {
     const timeA = 读取排序时刻(a.updatedAt), timeB = 读取排序时刻(b.updatedAt)

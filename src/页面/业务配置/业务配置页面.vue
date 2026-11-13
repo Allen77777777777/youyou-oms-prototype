@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { inject, nextTick, ref, watch } from 'vue'
+import { routeLocationKey, routerKey } from 'vue-router'
 import { Clock, EditPen, Setting } from '@element-plus/icons-vue'
 import { ElButton, ElIcon, ElInputNumber, ElMessage, ElSwitch, ElTag } from 'element-plus'
 import type { 原型标注 } from '@/类型/标注'
@@ -7,6 +8,15 @@ import { 共享审单执行设置 as settings, 保存审单执行设置 } from '
 import PushSettingsPanel from './自动推单设置面板.vue'
 
 const section = ref<'review' | 'push'>('review')
+const currentRoute = inject(routeLocationKey, undefined)
+const router = inject(routerKey, undefined)
+watch(() => currentRoute?.query.section, value => {
+  if (value === 'merge') {
+    void router?.replace('/oms/self-fulfillment/order-rules?type=merge')
+    return
+  }
+  if (value === 'review' || value === 'push') section.value = value
+}, { immediate: true })
 const editing = ref(false)
 const draftEnabled = ref(false)
 const draftHours = ref<number | undefined>(2)
@@ -69,9 +79,9 @@ const navigationAnnotation: 原型标注 = {
   标题: '业务配置左侧导航',
   分类: '交互',
   事实等级: '已确认',
-  版本: '0.3',
-  说明: '左侧提供规则执行设置、自动推单设置，分别维护审单与推仓任务。',
-  交互规则: ['规则执行设置默认高亮。切换或重复选择保留各自未保存草稿，只有保存使设置生效。'],
+  版本: '0.4 / 2026-11-13',
+  说明: '业务配置只保留规则执行设置和自动推单设置。用户确认移除合单入口，合单配置唯一入口位于合单规则页上方。',
+  交互规则: ['规则执行设置默认高亮。切换或重复选择保留未保存草稿。旧 section=merge 地址自动替换为合单规则地址，不再显示迁移卡或重复配置。'],
 }
 </script>
 

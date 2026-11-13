@@ -1,7 +1,8 @@
 import { applyIncomingRules, type IncomingFacts } from '../自动客服规则/来信规则执行'
 import { snapshotConversationSkus } from './会话处理人'
 import { 解析来源时刻 } from '../订单处理/时间展示工具'
-import type { Conversation, MailMessage } from './类型'
+import { recordMailOperation } from './操作日志'
+import type { Conversation, MailMessage, WorkStatus } from './类型'
 
 export interface IncomingReceipt {
   shopId: string
@@ -11,6 +12,9 @@ export interface IncomingReceipt {
   subject: string
   message: MailMessage
   facts: IncomingFacts
+  /** 历史补采不重开待办或执行来信规则，新历史会话须有已核实的迁移状态。 */
+  historical?: boolean
+  historicalStatus?: WorkStatus
 }
 
 /** 输入为已经通过身份核验的新来信。按店铺、会话和消息做幂等，同名买家不合并。 */
@@ -26,17 +30,26 @@ export function receiveNewMail(conversations: Conversation[], receipt: IncomingR
   const wasExisting = !!conversation
   const stale = conversation?.messages.some(m => m.kind === 'incoming' && (解析来源时刻(m.at) ?? -Infinity) > incomingAt)
   if (!conversation) {
+    if (receipt.historical && !receipt.historicalStatus) return
     conversation = { id: conversationId, source: 'buyer', shopId, shopName, buyerId, subject, unread: true, flagged: false, assignee: '',
-      status: 'pending', updatedAt: message.at, canReply: true, association: 'none', relatedOrderIds: [], messages: [], sendScenario: 'success' }
+      status: receipt.historicalStatus ?? 'pending', updatedAt: message.at, canReply: true, association: 'none', relatedOrderIds: [], messages: [], sendScenario: 'success' }
     conversations.push(conversation)
   }
-  conversation.messages.push({ ...message, unread: stale ? conversation.unread : true })
-  if (stale) return conversation
-  const skus = facts.lines?.flatMap(line => line.systemSku?.trim() ? [line.systemSku.trim()] : []) ?? []
-  if (!wasExisting || skus.length) snapshotConversationSkus(conversation, skus)
+  const historical = receipt.historical || stale
+  conversation.messages.push({ ...message, historical: Boolean(historical), unread: historical ? conversation.unread : true })
+  if (historical) return conversation
   conversation.unread = true
   for (const m of conversation.messages) if (m.kind === 'incoming') m.unread = true
   if (incomingAt >= (解析来源时刻(conversation.updatedAt) ?? -Infinity)) conversation.updatedAt = message.at
+  // 每封可信新增来信都更新版本，旧发送成功不能把本封新问题标成已处理。
+  conversation.statusRevision = (conversation.statusRevision ?? 0) + 1
+  if (conversation.status === 'ignored') return conversation
+  if (conversation.status === 'processed') {
+    conversation.status = 'pending'
+    recordMailOperation(conversation, '系统', '新来信进入待处理', `消息记录：${message.id}`)
+  }
+  const skus = facts.lines?.flatMap(line => line.systemSku?.trim() ? [line.systemSku.trim()] : []) ?? []
+  if (!wasExisting || skus.length) snapshotConversationSkus(conversation, skus)
   applyIncomingRules(conversation, message.id, facts)
   return conversation
 }

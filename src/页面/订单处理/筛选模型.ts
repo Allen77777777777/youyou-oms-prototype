@@ -3,6 +3,8 @@ import type { 订单标志 } from './订单标志模型'
 import type { 仓库执行 } from './演示会话'
 import { 获取作业路由, type 作业行 } from './展示工具'
 import { 解析来源时刻 } from './时间展示工具'
+import { matchesHandlerFilter } from '../../组件/客服处理人/处理人'
+import { 当前订单处理人ID, 获取订单处理人, 获取作业处理人来源 } from './处理人模型'
 
 export type 订单处理日期类型 = 'orderedAt' | 'paidAt' | 'shipByAt' | 'lastSyncedAt'
 export type 订单处理排序方向 = 'asc' | 'desc'
@@ -19,6 +21,8 @@ export interface 订单处理筛选条件 {
   flag: string[]
   inventory: string[]
   remainingShippingTime: string[]
+  handler: string[]
+  onlyMine: boolean
   dateType: 订单处理日期类型
   dateRange: null | [string, string]
 }
@@ -27,6 +31,7 @@ export interface 订单处理筛选上下文 {
   inventory: Record<string, string>
   flags: (订单: 全渠道订单) => 订单标志[]
   executions?: 仓库执行[]
+  currentUserId?: string
   /** 查询时冻结的当前时刻；不传时同一次匹配调用仅读取一次系统时间。 */
   now?: number
 }
@@ -37,7 +42,7 @@ const 商品搜索类型: 订单处理商品搜索类型[] = ['platformItemTitle
 const 日期搜索类型: 订单处理日期类型[] = ['orderedAt', 'paidAt', 'shipByAt', 'lastSyncedAt']
 
 export function 默认订单处理筛选(): 订单处理筛选条件 {
-  return { keyword: '', searchType: 'platformOrderNo', searchMatch: 'contains', platform: [], store: [], warehouse: [], channel: [], country: [], flag: [], inventory: [], remainingShippingTime: [], dateType: 'orderedAt', dateRange: null }
+  return { keyword: '', searchType: 'platformOrderNo', searchMatch: 'contains', platform: [], store: [], warehouse: [], channel: [], country: [], flag: [], inventory: [], remainingShippingTime: [], handler: [], onlyMine: false, dateType: 'orderedAt', dateRange: null }
 }
 
 /** 编号和 SKU 保留大小写及原始内容，支持换行与常用分隔符。 */
@@ -84,10 +89,7 @@ export function 校验订单处理筛选(筛选: 订单处理筛选条件): stri
 
 /** 履约主行只读取当前有效来源，不取第一张订单，不重复返回同一来源。 */
 export function 获取作业来源订单(行: 作业行, 订单全集: 全渠道订单[]): 全渠道订单[] {
-  if (!行.fulfillment) return [行.order]
-  const 履约号 = 行.fulfillment.fulfillmentOrderNo
-  const 来源 = 订单全集.filter(订单 => 订单.fulfillmentOrders.some(履约 => 履约.isActive && 履约.fulfillmentOrderNo === 履约号))
-  return [...new Map(来源.map(订单 => [订单.systemOrderNo, 订单])).values()]
+  return 获取作业处理人来源(行, 订单全集)
 }
 
 function 命中路由(行: 作业行, 筛选: 订单处理筛选条件): boolean {
@@ -160,6 +162,9 @@ function 命中关键词(行: 作业行, 订单: 全渠道订单, 筛选: 订单
 }
 
 function 命中来源订单(行: 作业行, 订单: 全渠道订单, 筛选: 订单处理筛选条件, 上下文: 订单处理筛选上下文, 当前时刻: number): boolean {
+  const 人员 = 获取订单处理人(订单)
+  if (!matchesHandlerFilter(人员, 筛选.handler)) return false
+  if (筛选.onlyMine && !人员.includes(上下文.currentUserId ?? 当前订单处理人ID.value)) return false
   if (!命中多选(筛选.platform, 订单.platformCode) || !命中多选(筛选.store, 订单.storeId)) return false
   if (!命中多选(筛选.country.map(国家 => 国家.trim().toUpperCase()), 订单.address.countryCode?.trim().toUpperCase())) return false
   if (!命中剩余发货时间(行, 订单, 筛选.remainingShippingTime, 当前时刻)) return false

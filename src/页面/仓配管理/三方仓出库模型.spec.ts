@@ -292,6 +292,8 @@ describe('出库工作台安全共享操作', () => {
     // 旧出库对象的创建时间仍未知；重新提交时间是本次推仓时间，不能反填创建时间。
     expect(row.createdAt).toBe('')
     expect(取得出库详情(row).submittedAt).toBeTruthy()
+    expect(取得出库详情(row).snapshotReliable).toBe(true)
+    expect(取得出库详情(row).items.length).toBeGreaterThan(0)
     expect(仓库执行记录.value.length).toBe(count)
     for (const suffix of ['09', '31']) expect(仓配会话操作拦截(专项旧仓单(suffix), '重新提交')).not.toBe('')
   })

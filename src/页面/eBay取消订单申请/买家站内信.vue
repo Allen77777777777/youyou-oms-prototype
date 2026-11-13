@@ -3,9 +3,11 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElButton, ElMessage } from 'element-plus'
 import ContactBuyer from '../eBay评价/联系买家.vue'
-import { getApplicationMailBlockedReason, type ApplicationMailContext } from '../eBay站内信/申请联系上下文'
+import MailVerificationLink from '../eBay站内信/发送核查入口.vue'
+import { getApplicationMailBlockedReason, resolveApplicationMailContact, type ApplicationMailContext } from '../eBay站内信/申请联系上下文'
 import { getMailUsername, type ApplicationMailRecipient } from '../eBay站内信/申请收件身份'
 import { mailSession, requestBuyerMailNavigation } from '../eBay站内信/会话'
+import { getVisibleBlockingMailVerifications } from '../eBay站内信/发送核查'
 import { formatBuyerMailTime, getBuyerIncomingMail } from './关联站内信'
 
 const props = defineProps<{
@@ -28,7 +30,17 @@ const contact = computed<ApplicationMailContext | undefined>(() => {
     blockedReason: mailBuyer.value ? undefined : '暂无法确认本店的站内信收件人',
   }
 })
-const blockedReason = computed(() => contact.value && getApplicationMailBlockedReason(contact.value))
+const blockingChecks = computed(() => {
+  const source = contact.value
+  if (!source || source.blockedReason || !source.buyerId) return []
+  const target = resolveApplicationMailContact(source)
+  return getVisibleBlockingMailVerifications({
+    shopId: source.shopId, buyerId: source.buyerId, originApplication: source,
+    conversation: typeof target === 'string' ? undefined : target.conversation,
+  })
+})
+const blockedReason = computed(() => contact.value && (getApplicationMailBlockedReason(contact.value)
+  ?? (blockingChecks.value.length ? '存在发送结果待核查的消息，核查前不能重复发送' : undefined)))
 const messages = computed(() => getBuyerIncomingMail(mailSession.conversations, props.shopId, mailBuyer.value))
 const visibleMessages = computed(() => expanded.value ? messages.value : messages.value.slice(0, 3))
 const isLong = (body: string) => body.length > 260 || body.split('\n').length > 5
@@ -47,7 +59,7 @@ watch(() => [props.shopId, props.buyerId], () => { expanded.value = false; expan
       <div class="buyer-mail-title"><h3>买家站内信 <span>{{ messages.length }}</span></h3><span class="mail-scope">本店该买家的来信</span></div>
       <ElButton v-if="contact" type="primary" link class="buyer-mail-compose" :disabled="!!blockedReason" @click="contactOpen = true">发送站内信</ElButton>
     </header>
-    <p v-if="blockedReason" class="buyer-mail-blocked">{{ blockedReason }}</p>
+    <div v-if="blockedReason" class="buyer-mail-blocked"><span>{{ blockedReason }}</span> <MailVerificationLink :targets="blockingChecks" /></div>
     <div v-if="!messages.length" class="buyer-mail-empty">暂无该买家在本店的站内信</div>
     <div v-else class="buyer-mail-list">
       <article v-for="message in visibleMessages" :key="message.key" class="buyer-mail-card" :data-message-id="message.messageId">

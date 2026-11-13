@@ -12,9 +12,9 @@ import { validateAttachmentUrl } from './邮箱模型'
 import { mailAnnotation } from './站内信标注'
 import { reviewAnnotation } from '../eBay评价/标注'
 import { applicationContactAnnotation } from './申请联系上下文'
-import type { Conversation, MailBusinessSourceKind, MessageAttachment, ReplyDraft } from './类型'
+import type { Conversation, MailBusinessSourceKind, MessageAttachment, ReplyDraft, MailMessage } from './类型'
 
-const props = withDefaults(defineProps<{ conversation: Conversation; draft: ReplyDraft; mode: 'reply' | 'note'; sending: boolean; uncertain: boolean; templateContext?: TemplateContext; markProcessedOnSend?: boolean; purpose?: 'mailbox' | 'review-contact' | 'application-contact'; applicationKind?: MailBusinessSourceKind }>(), { markProcessedOnSend: true, purpose: 'mailbox' })
+const props = withDefaults(defineProps<{ conversation: Conversation; draft: ReplyDraft; mode: 'reply' | 'note'; sending: boolean; uncertain: boolean; permissionReason?: string; contextMessage?: MailMessage; templateContext?: TemplateContext; markProcessedOnSend?: boolean; purpose?: 'mailbox' | 'review-contact' | 'application-contact'; applicationKind?: MailBusinessSourceKind }>(), { markProcessedOnSend: true, purpose: 'mailbox' })
 const emit = defineEmits<{ 'update:mode': [value: 'reply' | 'note']; 'update:markProcessedOnSend': [value: boolean]; send: []; save: [] }>()
 const router = inject(routerKey, undefined)
 const embeddedContact = computed(() => props.purpose !== 'mailbox')
@@ -34,11 +34,11 @@ const richBody = computed({ get: () => props.draft.bodyHtml ?? plainTextToHtml(p
 const generating = ref(false), aiOpen = ref(false)
 const aiSuggestion = ref<{ english: string; chinese: string; context: string }>()
 const chineseReference = ref<{ bodySnapshot: string; chinese: string; appended: boolean }>()
-const sendDisabled = computed(() => !props.draft.body.trim() || (props.mode === 'reply' && (!props.conversation.canReply || props.sending || props.uncertain)))
+const sendDisabled = computed(() => !!props.permissionReason || !props.draft.body.trim() || (props.mode === 'reply' && (!props.conversation.canReply || props.sending || props.uncertain)))
 const bodyLengthLimit = computed(() => props.mode === 'note' ? MAX_NOTE_BODY_LENGTH : MAX_REPLY_BODY_LENGTH)
 const visibleTemplates = computed(() => templateSession.templates.filter(template => template.enabled && template.kind === templateKind.value && `${template.title} ${template.subject ?? ''} ${template.body}`.toLowerCase().includes(templateSearch.value.trim().toLowerCase())).map(template => template.kind === 'phrase' ? { ...template } : template))
 const reliableTemplateContext = computed<TemplateContext>(() => ({ buyerId: props.conversation.buyerId, ...props.templateContext }))
-const templateContextSignature = computed(() => JSON.stringify([props.conversation.id, props.mode, reliableTemplateContext.value]))
+const templateContextSignature = computed(() => JSON.stringify([props.conversation.id, props.contextMessage?.id, props.mode, reliableTemplateContext.value]))
 const renderedTemplate = computed(() => selectedTemplate.value ? renderReplyTemplate(selectedTemplate.value, reliableTemplateContext.value) : { subject: '', body: '', bodyHtml: '', attachments: [], missing: [], unknown: [] })
 const selectedVariables = computed(() => getTemplateVariables(selectedTemplate.value?.body ?? ''))
 const templateSelectionIssue = computed(() => {
@@ -58,7 +58,7 @@ const expandedProps = computed(() => expanded.value ? { modelValue: true, title:
 const textareaStyle = computed(() => !expanded.value && bodyHeight.value ? { '--reply-body-height': `${bodyHeight.value}px` } : {})
 const contextSignature = computed(() => {
   const incoming = [...props.conversation.messages].reverse().find(message => message.kind === 'incoming')
-  return JSON.stringify([props.conversation.id, props.conversation.shopId, props.conversation.buyerId, incoming?.id, incoming?.body, props.conversation.association, props.conversation.relatedOrderIds])
+  return JSON.stringify([props.conversation.id, props.conversation.shopId, props.conversation.buyerId, incoming?.id, incoming?.body, props.contextMessage?.orderAssociation, reliableTemplateContext.value])
 })
 let generation = 0
 let aiTimer: ReturnType<typeof setTimeout> | undefined
@@ -148,7 +148,7 @@ function resizeByKey(event: KeyboardEvent) {
 }
 
 function makeSuggestion() {
-  const incoming = [...props.conversation.messages].reverse().find(message => message.kind === 'incoming')?.body.toLowerCase() || ''
+  const incoming = (props.contextMessage ?? [...props.conversation.messages].reverse().find(message => message.kind === 'incoming'))?.body.toLowerCase() || ''
   const subject = props.conversation.subject
   if (/return|refund/.test(incoming) || /退货|售后/.test(subject)) return { english: 'Thank you for your message. I will review the information you shared about your request and follow up with the next steps.', chinese: '感谢您的来信。我会核对您提供的诉求和相关信息，并跟进后续处理步骤。' }
   if (/shipping|tracking|parcel|delivery/.test(incoming) || /物流/.test(subject)) return { english: 'Thank you for contacting us. I will check the available shipping information and follow up with an update.', chinese: '感谢您联系我们。我会核对现有物流信息，并向您跟进最新情况。' }
@@ -303,6 +303,7 @@ onBeforeUnmount(() => { cancelAi(); stopResize() })
         <div class="reply-tools"><ElButton text :disabled="mode === 'note'" @click="openTemplates">常用回复</ElButton><ElButton text :disabled="mode === 'note' || !conversation.canReply" :loading="generating" @click="generateAi"><ElIcon v-if="!generating"><MagicStick /></ElIcon>AI 回复</ElButton><ElButton text :aria-label="expanded ? '收起写信窗口' : '展开写信'" @click="expanded ? closeExpanded() : expandEditor()"><ElIcon><FullScreen /></ElIcon>{{ expanded ? '收起' : '展开写信' }}</ElButton></div>
       </div>
       <div class="reply-recipient"><template v-if="mode === 'reply'">发送至 <strong><BuyerLink :shop-id="conversation.shopId" :buyer-id="conversation.buyerId" /></strong><span>· {{ conversation.shopName }}</span></template><template v-else><ElIcon><Lock /></ElIcon>内部记录，仅客服可见，不发送给买家</template></div>
+      <p v-if="permissionReason" class="reply-send-block" role="alert">{{ permissionReason }}</p>
       <p v-if="uncertain && mode === 'reply'" class="reply-send-block" role="alert">上一条发送结果待核查，暂不能再次发送。请先核对平台记录。</p>
 
       <div v-if="aiOpen && mode === 'reply'" v-prototype="mailAnnotation('ai-reply', 'AI 回复建议')" class="reply-ai-panel">

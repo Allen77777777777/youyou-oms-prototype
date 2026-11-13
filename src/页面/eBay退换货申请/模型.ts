@@ -1,14 +1,19 @@
 import { 命中字段搜索, 命中多选, 命中时间范围, 读取排序时刻, type 搜索模式 } from '@/组件/筛选/筛选工具'
 import type { CancelOutboundContext } from '../eBay取消订单申请/模型'
 import type { ApplicationMailRecipient } from '../eBay站内信/申请收件身份'
+import type { ReturnHandlerAssignment } from './处理人'
 import { activityNames, emptyReturnDetail, parseMoney, parseReturnHistoryAttributes, updateReturnKeepItemInfo, createReturnActionDraft, prepareReturnAction, submitPreparedReturnAction, type ReturnAction, type ReturnDetailData, type ReturnApiRequest, type ReturnActionDraft, type ReturnMockScenario, type ReturnHistoryEntry } from './接口契约'
 export * from './接口契约'
 import { refundSubmissionBlock } from './接口契约'
+import type { ReturnRefundEvidence } from './接口契约'
 import { currentHandlerName } from '@/组件/客服处理人/处理人'
+import { getReturnWritePermissionError } from './权限'
 import { recordReturnOperation, type ReturnOperationLog, type ReturnSubmission } from './操作日志'
+import { usesRmaGraphql, rmaGraphqlBlockedReason, rmaWasWaived, resolveRmaGraphqlMutation, demoRmaMutationResponse } from './RMA授权'
 
 export type ReturnQueue = 'all' | 'response' | 'processing' | 'case' | 'closed'
 export interface ReturnRecord {
+  handlerAssignment?: ReturnHandlerAssignment
   /** 明确办结时保存的人员。旧历史若无快照，保留未知。 */
   closedHandlerIds?: string[]
   afterSaleSubmission?: { no: string; requestId: string; action: ReturnAction }
@@ -34,6 +39,8 @@ export interface ReturnRecord {
   notes: Array<{ at?: string; text: string; author?: string }>; history: ReturnHistoryEntry[]
   logs: ReturnOperationLog[]
   lastSubmission?: ReturnSubmission
+  submissionAttempts?: ReturnSubmission[]
+  refundEvidence?: ReturnRefundEvidence[]
   detail?: ReturnDetailData; pendingRequest?: ReturnApiRequest | null; pendingDraft?: ReturnActionDraft | null; submissionError?: string; mock?: ReturnMockScenario
 }
 export interface ReturnFilters { handlers: string[]; shops: string[]; reasons: string[]; states: string[]; /** 旧配置兼容字段，不再作为业务筛选。 */ outcomes: string[]; field: string; query: string; mode: 搜索模式; dates: string[] | null }
@@ -89,6 +96,7 @@ export function returnPlatformPresentation(row?: ReturnRecord) {
 }
 export const isEscalated = (row: ReturnRecord) => !!row.caseId || row.status === 'ESCALATED'
 export const isReturnClosed = (row: ReturnRecord) => row.state === 'CLOSED' || row.status === 'CLOSED'
+export const hasReturnRefundSuccess = (row: ReturnRecord) => !!row.refundEvidence?.some(evidence => evidence.shopId === row.shopId && evidence.returnId === row.id && evidence.status === 'SUCCESS')
 export const actionOptions: Record<ReturnAction, string> = { approve: 'SELLER_APPROVE_REQUEST', decline: 'SELLER_DECLINE_REQUEST', offerReturn: 'SELLER_OFFER_RETURNS', partial: 'SELLER_OFFER_PARTIAL_REFUND', refund: 'SELLER_ISSUE_REFUND', message: 'SELLER_SEND_MESSAGE', escalate: 'SELLER_ESCALATE', provideRma: 'SELLER_PROVIDE_RMA', receive: 'SELLER_MARK_AS_RECEIVED', label: 'SELLER_PROVIDE_LABEL' }
 /** 一个接受入口对应平台当前允许的决定；没有资格时仍交原有检查阻断。 */
 export function getReturnApprovalAction(row: Pick<ReturnRecord, 'options'>): 'approve' | 'offerReturn' {
@@ -116,7 +124,7 @@ export function inReturnQueue(row: ReturnRecord, queue: ReturnQueue): boolean {
 export function getReturnCurrentTasks(row: ReturnRecord): Array<{ party: string; activity: string; label: string; at: string | null }> {
   const detail = getReturnDetail(row)
   if (isReturnClosed(row) || isEscalated(row)) return []
-  return ([['卖家', detail.sellerDue], ['买家', detail.buyerDue]] as const).flatMap(([party, due]) => due ? [{ party, activity: due.activity, label: activityNames[due.activity] || due.activity, at: due.at }] : [])
+  return ([['卖家', detail.sellerDue], ['买家', detail.buyerDue]] as const).flatMap(([party, due]) => due && !(party === '卖家' && hasReturnRefundSuccess(row) && ['SELLER_ISSUE_REFUND', 'SELLER_RETRY_REFUND', 'REMINDER_FOR_REFUND'].includes(due.activity)) ? [{ party, activity: due.activity, label: activityNames[due.activity] || due.activity, at: due.at }] : [])
 }
 export function filterReturns(rows: ReturnRecord[], filters: ReturnFilters): ReturnRecord[] {
   return rows.filter(row => {
@@ -126,6 +134,9 @@ export function filterReturns(rows: ReturnRecord[], filters: ReturnFilters): Ret
   })
 }
 export function getReturnBlockedReason(row: ReturnRecord, action: ReturnAction, now = new Date().toISOString()): string {
+  const permissionError = getReturnWritePermissionError(row)
+  if (permissionError) return permissionError
+  if ((action === 'refund' || action === 'partial') && hasReturnRefundSuccess(row)) return '已取得本次退款成功回执，请核对资金结果，不能重复退款或报价'
   if (!row.shopId || !row.id || !row.buyerId) return '申请身份不完整，请先核实来源资料'
   if (row.outcome === 'pending') return '上次提交尚未回查，请先刷新数据'
   if (row.outcome === 'unknown') return '上次操作结果待核查，请刷新数据并核实后再处理'
@@ -136,7 +147,8 @@ export function getReturnBlockedReason(row: ReturnRecord, action: ReturnAction, 
   if (detail.quantityConflict) return 'SUMMARY与FULL申请数量不一致，请先核实来源资料'
   if (row.quantity === null || row.quantity <= 0) return '申请数量尚未核实，请先刷新来源资料'
   if (!row.eligibilityKnown || !knownReturnStates.has(row.state) || !knownReturnStatuses.has(row.status) || detail.readStatus.summary.status !== 'success') return '当前可执行操作尚未核实，请先刷新数据'
-  if (!row.options.includes(actionOptions[action])) return action === 'refund' && row.options.includes('SELLER_RETRY_REFUND') ? '平台要求退款重试，请通过来源平台入口核实处理' : '当前申请不支持此操作'
+  if (action === 'provideRma' && usesRmaGraphql(row)) { const error = rmaGraphqlBlockedReason(row); if (error) return error }
+  else if (!row.options.includes(actionOptions[action])) return action === 'refund' && row.options.includes('SELLER_RETRY_REFUND') ? '平台要求退款重试，请通过来源平台入口核实处理' : '当前申请不支持此操作'
   if (['refund', 'partial', 'label', 'provideRma', 'approve', 'offerReturn'].includes(action) && detail.readStatus.detail.status !== 'success') return '详情资料尚未完整刷新，请先核实后处理'
   if (action === 'refund') { const block = refundSubmissionBlock(detail.refund); if (block) return block }
   if (['refund', 'partial'].includes(action) && detail.refund.integrityIssues?.length) return '实际退款资料存在不一致，请先核实资金结果'
@@ -174,11 +186,21 @@ function addActivity(row: ReturnRecord, activity: string, text: string, at: stri
 function applyAccepted(row: ReturnRecord, action: ReturnAction, now: string) {
   // 以下仅构造固定虚构回查回执；生产状态须读取平台结果，不按本地勾选推导免退事实。
   const detail = getReturnDetail(row), draft = row.pendingDraft, body = row.pendingRequest?.body || {}, fromState = row.state
+  const modernRma = action === 'provideRma' && row.pendingRequest?.api === 'return-graphql'
+  if (modernRma) {
+    const result = resolveRmaGraphqlMutation(row, row.mock?.rmaResponse ?? demoRmaMutationResponse(row), now)
+    if (result.outcome !== 'confirmed') {
+      row.outcome = result.outcome; row.submissionError = result.error
+      if (result.outcome === 'failed') row.pendingAction = null
+      recordReturnOperation(row, '回查退货授权', result.error, result.outcome === 'unknown' ? '结果待核查，禁止重提' : '明确失败', now, '系统', true, true)
+      return
+    }
+  }
   if (['approve', 'offerReturn', 'provideRma'].includes(action)) {
     if (typeof body.RMANumber === 'string') detail.rmaNumber = body.RMANumber
     if (action !== 'provideRma' && typeof body.keepOriginalItem === 'boolean') row.keepItem = body.keepOriginalItem
     if (row.keepItem) { row.state = 'ITEM_KEPT'; row.shipping = '无需寄回'; setOptions(row, ['SELLER_ISSUE_REFUND', 'SELLER_SEND_MESSAGE']); setTasks(row, 'SELLER_ISSUE_REFUND', null) }
-    else if (detail.rmaRequired && !detail.rmaNumber) { row.state = 'RMA_PENDING'; row.status = 'WAITING_FOR_RMA'; setOptions(row, ['SELLER_PROVIDE_RMA', 'SELLER_SEND_MESSAGE']); setTasks(row, 'SELLER_PROVIDE_RMA', null) }
+    else if (detail.rmaRequired && !detail.rmaNumber && !rmaWasWaived(row)) { row.state = 'RMA_PENDING'; row.status = 'WAITING_FOR_RMA'; setOptions(row, ['SELLER_PROVIDE_RMA', 'SELLER_SEND_MESSAGE']); setTasks(row, 'SELLER_PROVIDE_RMA', null) }
     else { row.state = 'RETURN_LABEL_PENDING'; row.status = 'WAITING_FOR_RETURN_LABEL'; row.shipping = '等待提供退货面单'; setOptions(row, ['SELLER_PROVIDE_LABEL', 'SELLER_SEND_MESSAGE']); setTasks(row, 'SELLER_PROVIDE_LABEL', null) }
   }
   if (action === 'decline') { row.state = 'RETURN_REJECTED'; row.status = 'RETURN_REJECTED'; setOptions(row, ['SELLER_SEND_MESSAGE']); setTasks(row, null, null) }
@@ -203,9 +225,10 @@ function applyAccepted(row: ReturnRecord, action: ReturnAction, now: string) {
   if (typeof body.RMANumber === 'string') attributes.RMA = body.RMANumber
   if (typeof body.trackingNumber === 'string') attributes.updatedTrackingNumber = body.trackingNumber
   if (typeof body.reason === 'string' && action === 'escalate') attributes.escalateReason = body.reason
-  addActivity(row, actionOptions[action], action === 'message' ? row.pendingText : `${actionNames[action]}已获平台回执${draft?.text.trim() ? '；' + draft.text.trim() : ''}`, now, 'SELLER', attributes, fromState)
+  // 新版操作不伪造 Post-Order responseHistory；结果由 RMA 来源资料及本地操作日志追溯。
+  if (!modernRma) addActivity(row, actionOptions[action], action === 'message' ? row.pendingText : `${actionNames[action]}已获平台回执${draft?.text.trim() ? '；' + draft.text.trim() : ''}`, now, 'SELLER', attributes, fromState)
   updateReturnKeepItemInfo(row)
-  recordReturnOperation(row, '回查' + actionNames[action], `回查确认${actionNames[action]}已受理${action === 'partial' ? '；等待买家决定，尚未退款' : action === 'refund' ? '；退款处理中，尚未确认到账' : ''}`, '平台已确认受理', now, '系统', true)
+  recordReturnOperation(row, '回查' + actionNames[action], `回查确认${actionNames[action]}已受理${modernRma ? rmaWasWaived(row) ? '；本次已免除编号要求' : '；已提供编号' : ''}${action === 'partial' ? '；等待买家决定，尚未退款' : action === 'refund' ? '；退款处理中，尚未确认到账' : ''}`, '平台已确认受理', now, '系统', true)
   row.pendingAction = null; row.outcome = 'confirmed'; row.submissionError = ''
 }
 function applyRefundResult(row: ReturnRecord, now: string): boolean {
@@ -265,7 +288,7 @@ function returnSyncBusinessFacts(row: ReturnRecord): string {
   }, (key, value) => ['attemptedAt', 'succeededAt', 'eligibilityVersion', 'lastSyncedAt', 'updatedAt', 'keepItemInfo'].includes(key) ? undefined : value)
 }
 /** 仅回放固定虚构回执，无人工改成功入口；读取成功不等于操作成功。 */
-export function syncReturn(row: ReturnRecord, now = new Date().toISOString()): ReturnSyncResult {
+function syncReturnFacts(row: ReturnRecord, now: string): ReturnSyncResult {
   const detail = getReturnDetail(row), failure = row.mock?.readFailure, before = returnSyncBusinessFacts(row); detail.attemptedAt = now
   for (const key of ['summary', 'detail', 'files', 'tracking'] as const) { const read = detail.readStatus[key]; read.attemptedAt = now; if (failure === key || failure === 'all') { read.status = 'failed'; read.error = `${key.toUpperCase()}读取失败` } else { read.status = 'success'; read.succeededAt = now; read.error = '' } }
   if (failure === 'all' || failure === 'summary') { row.eligibilityKnown = false; recordReturnOperation(row, '刷新申请', '申请资格读取失败，保留原资料并暂停处理', failure === 'all' ? '读取失败' : '部分读取失败', now, row.outcome === 'pending' || row.outcome === 'unknown' ? '系统' : currentHandlerName.value, row.outcome === 'pending' || row.outcome === 'unknown', before === returnSyncBusinessFacts(row)); return { status: failure === 'all' ? 'failed' : 'partial', message: '申请资格读取失败，保留原资料并暂停处理' } }
@@ -286,6 +309,11 @@ export function syncReturn(row: ReturnRecord, now = new Date().toISOString()): R
   updateReturnKeepItemInfo(row)
   if (row.logs.length === previousLogCount && before !== returnSyncBusinessFacts(row)) recordReturnOperation(row, '刷新申请', '申请业务资料或读取结果已更新；退款和关闭结果分别按来源展示', '资料已更新', now, '系统')
   return { status: 'success', message: row.outcome === 'failed' ? row.submissionError || '已取得明确失败结果' : '申请资料已刷新' }
+}
+export function syncReturn(row: ReturnRecord, now = new Date().toISOString()): ReturnSyncResult {
+  const result = syncReturnFacts(row, now)
+  if (row.lastSubmission && row.outcome !== 'idle') row.lastSubmission.outcome = row.outcome
+  return result
 }
 export function addReturnNote(row: ReturnRecord, text: string, now = new Date().toISOString()): string {
   if (!text.trim() || text.trim().length > 500) return '内部备注须为 1～500 字'

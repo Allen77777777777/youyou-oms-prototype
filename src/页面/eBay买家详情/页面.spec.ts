@@ -28,10 +28,11 @@ describe('买家详情只读查看', () => {
     expect(JSON.stringify(mailSession.conversations)).toBe(before)
     await wrapper!.findAll('.buyer-tabs button').find(button => button.text().startsWith('沟通'))!.trigger('click')
     await flushPromises()
-    expect(wrapper!.get('.buyer-record-table').text()).toContain('conv-01')
-    await wrapper!.findAll('.buyer-record-table button').find(button => button.text() === '查看原单')!.trigger('click')
+    const originalConversation = wrapper!.findAll('.buyer-record-table tbody tr')
+      .find(row => row.find('.record-number').text() === 'conv-01')!
+    await originalConversation.findAll('button').find(button => button.text() === '查看原单')!.trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value.query).toMatchObject({ shopId: 'shop-us', conversationId: 'conv-01' })
+    expect(router.currentRoute.value.query).toMatchObject({ shopId: 'shop-us', conversationId: 'conv-01', messageId: 'msg-01-3' })
   })
   it('不存在的身份显示受控空态，不展示其他买家记录', async () => {
     await open('unknown', 'buyer_demo_01')

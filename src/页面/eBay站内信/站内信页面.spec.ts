@@ -7,6 +7,7 @@ import MailPage from './eBay站内信页面.vue'
 import { draftKey, mailSession as session, resetMailSession } from './会话'
 import { replyTemplates } from './数据'
 import MultiFilter from '@/组件/筛选/多选筛选.vue'
+import ReplyEditor from './回复编辑器.vue'
 import { resetMailTagDefinitions, saveMailTag, mailTagDefinitions } from './设置模型'
 import { resetTemplateSession, saveTemplate, templateSession } from '../消息模板管理/模型'
 
@@ -22,7 +23,23 @@ function button(text: string) {
   if (!target) throw new Error(`未找到按钮 ${text}`)
   return target
 }
-async function openBuyer(buyer: string) { await wrapper.get(`.mail-row-content[role="button"][aria-label$=" ${buyer}"]`).trigger('click'); await nextTick() }
+function rowsForBuyer(buyer: string) {
+  // 买家可有多条会话。旧场景以原会话样例为目标，不能由列表排序碰巧决定。
+  const target = session.conversations.find(c => c.buyerId === buyer)
+  if (!target) return []
+  const messageIds = new Set(target.messages.map(message => message.id))
+  return wrapper.findAll('.mail-list-row').filter(row => {
+    const content = row.find('.mail-row-content[role="button"]')
+    if (!content.exists()) return false
+    const messageId = row.attributes('data-message-id')
+    return messageId ? messageIds.has(messageId) : content.attributes('aria-label') === `打开${target.subject} ${buyer}`
+  })
+}
+async function openBuyer(buyer: string) {
+  const row = rowsForBuyer(buyer)[0]
+  if (!row) throw new Error(`未找到买家会话 ${buyer}`)
+  await row.get('.mail-row-content[role="button"]').trigger('click'); await nextTick()
+}
 function draftText() { return (wrapper.get('textarea[aria-label="回复正文"]').element as HTMLTextAreaElement).value }
 async function setRich(label: string, text: string) {
   const plain = wrapper.find(`textarea[aria-label="${label}"]`)
@@ -34,7 +51,7 @@ function conversation(id: string) { return session.conversations.find(c => c.id 
 function last<T>(values: T[]) { return values[values.length - 1] }
 function receivedCount(source?: 'buyer' | 'ebay') { return session.conversations.filter(c => !source || c.source === source).reduce((sum, c) => sum + c.messages.filter(m => m.kind === 'incoming').length, 0) }
 async function checkBuyer(buyer: string, checked = true) {
-  const row = wrapper.findAll('.mail-list-row').find(r => r.find(`.mail-row-content[role="button"][aria-label$=" ${buyer}"]`).exists())
+  const row = rowsForBuyer(buyer)[0]
   if (!row) throw new Error(`未找到买家行 ${buyer}`)
   await row.get('input[type="checkbox"]').setValue(checked)
 }
@@ -93,6 +110,74 @@ beforeEach(async () => {
 afterEach(() => { wrapper.unmount(); document.body.innerHTML = ''; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('站内信工作台', () => {
+  it('查看同会话的不同消息时订单与模板切换，待确认和多单不取最新订单', async () => {
+    const c = conversation('conv-message-orders')
+    session.conversations = [c]
+    await nextTick()
+    await wrapper.get('.mail-list-row[data-message-id="msg-order-a"] .mail-row-content').trigger('click')
+    const context = () => wrapper.findComponent(ReplyEditor).props('templateContext')
+    expect(context()?.orderNo).toBe('DEMO-1001')
+    await wrapper.get('[aria-label="查看消息订单 msg-order-b"]').trigger('click')
+    expect(context()?.orderNo).toBe('DEMO-1004')
+    await wrapper.get('[aria-label="查看消息订单 msg-order-pending"]').trigger('click')
+    expect(context()?.orderNo).toBeUndefined()
+    expect(wrapper.get('.mail-context-summary').text()).toContain('待确认')
+    await wrapper.get('[aria-label="查看消息订单 msg-order-multi"]').trigger('click')
+    expect(context()?.orderNo).toBeUndefined()
+    await selectValue('本次回复关联订单', 'order-01')
+    expect(context()?.orderNo).toBe('DEMO-1001')
+    await wrapper.get('[aria-label="查看消息订单 msg-order-b"]').trigger('click')
+    expect(context()?.orderNo).toBe('DEMO-1004')
+    await wrapper.get('[aria-label="查看消息订单 msg-order-multi"]').trigger('click')
+    expect(context()?.orderNo).toBe('DEMO-1001')
+    vi.useFakeTimers()
+    await wrapper.get('[aria-label="查看消息订单 msg-order-a"]').trigger('click')
+    await send('I will check the older order.')
+    expect(last(c.messages)).toMatchObject({ replyToMessageId: 'msg-order-a', replyOrderId: 'order-01' })
+    await vi.advanceTimersByTimeAsync(950)
+    expect(last(c.messages)?.delivery).toBe('success')
+    expect(c.status).toBe('pending')
+  })
+
+  it('只看我的仅应用处理人，保留未查询的店铺、标签和关键词', async () => {
+    const own = conversation('conv-01'), teammate = conversation('conv-02'), otherShop = conversation('conv-03')
+    for (const c of [own, teammate, otherShop]) {
+      c.status = 'pending'
+      c.assignment = undefined
+      c.assignee = c === teammate ? '客服02' : '客服01'
+      c.messages = c.messages.filter(message => message.kind === 'incoming').slice(0, 1)
+    }
+    teammate.shopId = own.shopId
+    teammate.shopName = own.shopName
+    otherShop.shopId = 'shop-filter-draft'
+    otherShop.shopName = '待查询店铺'
+    otherShop.tags = ['logistics']
+    session.conversations = [own, teammate, otherShop]
+    await nextTick()
+
+    const shopFilter = wrapper.findAllComponents(MultiFilter).find(item => item.props('placeholder') === '全部店铺')!
+    const tagFilter = wrapper.findAllComponents(MultiFilter).find(item => item.props('placeholder') === '全部标签')!
+    const query = wrapper.get<HTMLInputElement>('input[aria-label="站内信搜索内容"]')
+    const buyerRows = () => wrapper.findAll('.mail-row-content').map(row => row.attributes('aria-label')?.split(' ').pop())
+    shopFilter.vm.$emit('update:modelValue', [own.shopId])
+    await button('查询').trigger('click')
+    expect(buyerRows().sort()).toEqual([own.buyerId, teammate.buyerId].sort())
+    await checkBuyer(teammate.buyerId)
+
+    shopFilter.vm.$emit('update:modelValue', [otherShop.shopId])
+    tagFilter.vm.$emit('update:modelValue', ['logistics'])
+    await query.setValue(otherShop.buyerId)
+    await button('只看我的').trigger('click')
+    expect(buyerRows()).toEqual([own.buyerId])
+    expect(button('指派').attributes('disabled')).toBeDefined()
+    expect(shopFilter.props('modelValue')).toEqual([otherShop.shopId])
+    expect(tagFilter.props('modelValue')).toEqual(['logistics'])
+    expect(query.element.value).toBe(otherShop.buyerId)
+
+    await button('查询').trigger('click')
+    expect(buyerRows()).toEqual([otherShop.buyerId])
+  })
+
   it('点击列表买家 ID 不打开消息、不标读、不改变当前回复会话', async () => {
     const c = session.conversations.find(item => item.source === 'buyer' && item.unread)!
     const before = session.activeId
@@ -199,7 +284,7 @@ describe('站内信工作台', () => {
     expect(last(c.messages)?.delivery).toBe('success')
     expect(wrapper.get('.mail-reader').text()).not.toContain('模拟')
   })
-  it('同会话两封平台通知各自显示原文，正文全文查询与转发保持同源', async () => {
+  it('同会话两封平台通知各自显示原文，正文全文查询与展示保持同源', async () => {
     const c = conversation('notice-01'), first = c.messages[0]!
     first.notice = { heading: '第一通知标题', paragraphs: ['第一通知完整段落'], sections: [{ title: '第一通知章节', content: '第一通知正文深处唯一词' }], footer: '第一通知页脚' }
     c.messages.push({ id: 'notice-body-second', kind: 'incoming', sender: 'eBay', body: '短摘要不包含完整内容', at: '2026-10-28T12:00:00+08:00', notice: { heading: '第二通知标题', paragraphs: ['第二通知完整段落'], sections: [{ title: '第二通知章节', content: '第二通知正文深处唯一词' }], footer: '第二通知页脚' } })
@@ -216,10 +301,6 @@ describe('站内信工作台', () => {
     expect(wrapper.findAll('.mail-list-row')).toHaveLength(1)
     expect(wrapper.get('.mail-list-row').attributes('data-message-id')).toBe('notice-body-second')
     expect(wrapper.get('.mail-notice-document').attributes('data-message-id')).toBe('notice-body-second')
-    await currentAction('转发站内信')
-    const preview = wrapper.get('[data-title="转发站内信"] .mail-send-preview').text()
-    expect(preview).toContain('第一通知正文深处唯一词'); expect(preview).toContain('第一通知页脚')
-    expect(preview).toContain('第二通知正文深处唯一词'); expect(preview).toContain('第二通知页脚')
   })
   it.each(['source', 'canReply', 'unknown', 'ignored'] as const)('单条提交时复验发信资格：%s 变化不创建外发记录', async change => {
     const c = conversation('conv-01'), count = c.messages.length
@@ -235,6 +316,7 @@ describe('站内信工作台', () => {
   })
   it('店铺或买家身份为空时直接提交被拦截，保留正文且不创建外发记录', async () => {
     const c = conversation('conv-01'), count = c.messages.length
+    const originalDraftKey = draftKey(c.id, 'reply')
     await setRich('回复正文', 'Keep this draft until recipient identity is complete.')
     for (const field of ['shopId', 'buyerId'] as const) {
       const original = c[field]
@@ -243,7 +325,7 @@ describe('站内信工作台', () => {
       expect(c.messages).toHaveLength(count)
       expect(c.messages.some(m => m.delivery === 'sending')).toBe(false)
       expect(ElMessage.warning).toHaveBeenCalledWith('店铺或买家资料缺失，无法发送')
-      expect(session.drafts[draftKey(c.id, 'reply')]!.body).toBe('Keep this draft until recipient identity is complete.')
+      expect(session.drafts[originalDraftKey]!.body).toBe('Keep this draft until recipient identity is complete.')
       c[field] = original
       await nextTick()
     }
@@ -481,17 +563,19 @@ describe('站内信工作台', () => {
   it('批量勾选同一会话的两条来信只给该买家发送一次', async () => {
     vi.useFakeTimers()
     const c = conversation('conv-01'), count = c.messages.filter(m => m.kind === 'outgoing').length
-    const rows = wrapper.findAll('.mail-list-row').filter(row => row.find('.mail-row-content[role="button"][aria-label$=" buyer_demo_01"]').exists())
-    expect(rows.length).toBeGreaterThan(1)
+    const rows = rowsForBuyer(c.buyerId)
+    expect(rows).toHaveLength(2)
     for (const row of rows) await row.get('input[type="checkbox"]').setValue(true)
     await button('批量回复').trigger('click')
     await setRich('批量回复正文', 'One reply per buyer conversation')
     await nextTick()
     expect(wrapper.findAll('.mail-batch-review > div')).toHaveLength(1)
+    expect(button('批量发送').attributes('disabled')).toBeDefined()
+    await selectValue(`批量来源消息 ${c.id}`, 'msg-01-3')
     await button('批量发送').trigger('click')
     await vi.advanceTimersByTimeAsync(950); await nextTick()
     expect(c.messages.filter(m => m.kind === 'outgoing')).toHaveLength(count + 1)
-    expect(last(c.messages)).toMatchObject({ body: 'One reply per buyer conversation', delivery: 'success' })
+    expect(last(c.messages)).toMatchObject({ body: 'One reply per buyer conversation', delivery: 'success', replyToMessageId: 'msg-01-3' })
   })
   it('同一页切换通知阅读、买家对话和停靠资料栏，通知没有回复框', async () => {
     expect(wrapper.find('.mail-context').exists()).toBe(false)
@@ -570,14 +654,16 @@ describe('站内信工作台', () => {
     expect(wrapper.text()).toContain('没有匹配的信件')
   })
   it('多笔已确认关联不默认取第一笔；缺失关联显示待核实', async () => {
-    const c = session.conversations[0]!
-    c.relatedOrderIds.push('order-04')
+    const c = conversation('conv-01')
+    const message = c.messages.find(item => item.id === 'msg-01-3')!
+    await wrapper.get('.mail-list-row[data-message-id="msg-01-3"] .mail-row-content').trigger('click')
+    message.orderAssociation = { state: 'confirmed', orderIds: ['order-01', 'order-04'] }
     await nextTick()
-    expect(wrapper.get('.mail-context-summary').text()).toContain('多笔关联订单')
+    expect(wrapper.get('.mail-context-summary').text()).toContain('当前消息关联多笔订单')
     expect(wrapper.get('.mail-context-summary').text()).not.toContain('售后 1')
-    c.relatedOrderIds = ['missing-order']
+    message.orderAssociation = { state: 'confirmed', orderIds: ['missing-order'] }
     await nextTick()
-    expect(wrapper.get('.mail-context-summary').text()).toContain('关联资料待核实')
+    expect(wrapper.get('.mail-context-summary').text()).toContain('当前消息订单待确认')
   })
   it('重试明确失败消息成功后仅清空对应旧草稿，新草稿保持', async () => {
     confirmPrompts()
@@ -670,6 +756,7 @@ describe('站内信工作台', () => {
   })
   it('自动下一封关闭时成功后保留当前会话；开启时只在成功后前进', async () => {
     vi.useFakeTimers()
+    session.conversations = ['conv-01', 'conv-02'].map(conversation)
     await send('First successful reply')
     await vi.advanceTimersByTimeAsync(950)
     expect(session.activeId).toBe('conv-01')
@@ -697,6 +784,7 @@ describe('站内信工作台', () => {
   })
   it('自动下一封跳过已处理、已忽略、发送中、待核查与不可回复会话', async () => {
     vi.useFakeTimers()
+    session.conversations = ['conv-01', 'conv-02', 'conv-03', 'conv-04', 'conv-05', 'conv-06', 'conv-07'].map(conversation)
     conversation('conv-02').messages.push({ id: 'busy-next', kind: 'outgoing', sender: '客服01', body: 'Busy', at: conversation('conv-02').updatedAt, delivery: 'sending' })
     conversation('conv-04').status = 'ignored'
     conversation('conv-05').messages.push({ id: 'unknown-next', kind: 'outgoing', sender: '客服01', body: 'Unknown', at: conversation('conv-05').updatedAt, delivery: 'unknown' })
@@ -814,7 +902,7 @@ describe('站内信工作台', () => {
     await setRich('批量回复正文', 'Shared reply under review')
     await nextTick()
     expect(wrapper.get('[aria-label="批量回复资格统计"]').text()).toBe('可发送 3 · 排除 1')
-    expect(wrapper.get('.mail-batch-review').text()).toContain('结果待核查，禁止重复发送')
+    expect(wrapper.get('.mail-batch-review').text()).toContain('存在发送结果待核查的消息，核查前不能重复发送')
     await button('批量发送').trigger('click')
     expect(button('完成').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="批量回复结果统计"]').text()).toBe('成功 0 · 失败 0 · 待核查 0 · 未发送 1 · 发送中 3')
@@ -827,7 +915,7 @@ describe('站内信工作台', () => {
     expect(wrapper.get('.mail-batch-review').text()).toContain('已发送')
     expect(wrapper.get('.mail-batch-review').text()).toContain('发信失败，可单条重试')
     expect(wrapper.get('.mail-batch-review').text()).toContain('发信失败 · 待核查')
-    expect(wrapper.get('.mail-batch-review').text()).toContain('未发送：结果待核查')
+    expect(wrapper.get('.mail-batch-review').text()).toContain('未发送：存在发送结果待核查的消息')
     expect(session.drafts[draftKey(first.id, 'reply')]?.body).toBe('Personal draft must remain')
     expect(button('完成').attributes('disabled')).toBeUndefined()
   })
@@ -859,7 +947,7 @@ describe('站内信工作台', () => {
     expect(wrapper.get('.mail-reader-actions .mail-process-action').text()).toBe('标注已处理')
     expect(currentMenuItems().map(item => item.text()).filter(label => label.startsWith('标注'))).toEqual([])
     expect(wrapper.get('.mail-reader-actions').text()).not.toContain('转发')
-    expect(currentMenuItems().map(item => item.text())).toContain('转发站内信')
+    expect(currentMenuItems().map(item => item.text())).not.toContain('转发站内信')
     await processAction('标注已处理')
     expect(current).toMatchObject({ status: 'processed', lastHandledBy: '客服01', lastHandledAction: '标注已处理' })
     expect(wrapper.get('.mail-list-row.selected .mail-row-status').text()).toBe('已处理')
@@ -976,30 +1064,6 @@ describe('站内信工作台', () => {
     expect(notice.status).toBe('processed')
     expect(notice.lastHandledAction).toBe('取消忽略')
   })
-  it('转发只预览来信和成功外发，排除内部备注、未发送内容和订单资料', async () => {
-    const current = conversation('conv-01'), count = current.messages.length
-    current.messages.push({ id: 'private-note', kind: 'note', sender: '客服02', body: 'PRIVATE internal content', at: current.updatedAt })
-    current.messages.push({ id: 'unsent-failed', kind: 'outgoing', sender: '客服02', body: 'PRIVATE failed text', at: current.updatedAt, delivery: 'failed' })
-    current.messages.push({ id: 'unsent-unknown', kind: 'outgoing', sender: '客服02', body: 'PRIVATE unknown text', at: current.updatedAt, delivery: 'unknown' })
-    await nextTick(); await currentAction('转发站内信')
-    expect(wrapper.find('[data-title="转发站内信"] .mail-demo-disclosure').exists()).toBe(false)
-    const preview = wrapper.get('[data-title="转发站内信"] .mail-send-preview').text()
-    expect(preview).toContain(current.messages[0]!.body)
-    expect(preview).toContain('Could you share your vehicle model and year?')
-    expect(preview).not.toContain('PRIVATE')
-    expect(preview).not.toContain('DEMO-1001')
-    await wrapper.get('input[aria-label="转发收件邮箱"]').setValue('invalid-address')
-    await button('预览转发').trigger('click')
-    expect(wrapper.get('[data-title="转发站内信"] .mail-error').text()).toContain('有效的收件邮箱')
-    await wrapper.get('input[aria-label="转发收件邮箱"]').setValue('colleague@example.com')
-    await wrapper.get('textarea[aria-label="转发附言"]').setValue('Please review the public conversation.')
-    await button('预览转发').trigger('click')
-    await button('确认转发').trigger('click')
-    expect(current.messages).toHaveLength(count + 4)
-    expect(last(current.messages)).toMatchObject({ kind: 'note', forwardedTo: 'colleague@example.com' })
-    expect(current.lastHandledAction).toBe('转发')
-    expect(current.status).toBe('pending')
-  })
   it('通知所有标记已读覆盖查询结果其他分页，保留范围外通知和买家来信未读', async () => {
     const confirm = confirmPrompts()
     const template = conversation('notice-02')
@@ -1100,7 +1164,7 @@ describe('站内信工作台', () => {
     conversation('conv-01').updatedAt = '2020-01-01T00:00:00+08:00'
     conversation('conv-01').messages.filter(m => m.kind === 'incoming').forEach(m => { m.at = '2020-01-01T00:00:00+08:00' })
     await nextTick()
-    expect(wrapper.find('.mail-row-content[role="button"][aria-label$=" buyer_demo_01"]').exists()).toBe(false)
+    expect(rowsForBuyer('buyer_demo_01')).toHaveLength(0)
     expect(wrapper.find('.mail-selected-count').exists()).toBe(false)
     await wrapper.get('select[aria-label="会话排序"]').setValue('priority')
     await checkBuyer('buyer_demo_02'); await checkBuyer('buyer_demo_08')

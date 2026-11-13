@@ -13,13 +13,15 @@ import { formatMailTime, getBuyerHistory, getContextCount, getRelatedOrders } fr
 import { 格式化北京时间 } from '../订单处理/时间展示工具'
 import { 读取排序时刻 } from '@/组件/筛选/筛选工具'
 import { mailAnnotation } from './站内信标注'
-import type { ContextDataset, ContextTab, Conversation, RelatedOrder } from './类型'
+import { getMessageOrderContext } from './消息订单'
+import type { ContextDataset, ContextTab, Conversation, RelatedOrder, MailMessage } from './类型'
 
 const props = defineProps<{
   conversation: Conversation
   orders: RelatedOrder[]
   activeTab: ContextTab
   selectedOrderId: string
+  message?: MailMessage
   showIdentity?: boolean
 }>()
 const emit = defineEmits<{
@@ -41,10 +43,11 @@ const tabs: Array<{ value: ContextTab; label: string }> = [
   { value: 'disputes', label: '纠纷' }, { value: 'reviews', label: '评价' },
   { value: 'activity', label: '动态' },
 ]
-const linkedOrders = computed(() => getRelatedOrders(props.conversation, props.orders))
+const messageContext = computed(() => props.message ? getMessageOrderContext(props.conversation, props.message, props.orders) : undefined)
+const linkedOrders = computed(() => messageContext.value?.orders ?? getRelatedOrders(props.conversation, props.orders))
 const currentOrder = computed(() => linkedOrders.value.find(order => order.id === props.selectedOrderId)
   ?? (linkedOrders.value.length === 1 ? linkedOrders.value[0] : undefined))
-const historyOrders = computed(() => getBuyerHistory(props.conversation, props.orders))
+const historyOrders = computed(() => getBuyerHistory(props.conversation, props.orders, linkedOrders.value))
 const historyOpen = ref(false)
 const historyShopId = ref('')
 const historyOrderId = ref('')
@@ -64,19 +67,22 @@ const platformReturns = computed(() => afterSalesContext.value.returns)
 const sectionCount = (key: DatasetKey) => key === 'afterSales' ? afterSalesContext.value.count : getContextCount(displayOrder.value?.[key])
 const emptySections = computed(() => displayOrder.value ? sections.filter(section => sectionCount(section.key) === 0) : [])
 const overviewSections = computed(() => sections.filter(section => !emptySections.value.some(empty => empty.key === section.key)))
-const associationTitle = computed(() => props.conversation.association === 'pending' ? '订单关联待确认' : props.conversation.association === 'confirmed' ? '关联资料待核实' : '暂无关联订单')
+const associationState = computed(() => messageContext.value?.state ?? props.conversation.association)
+const associationTitle = computed(() => associationState.value === 'pending' ? '订单关联待确认' : associationState.value === 'confirmed' ? '关联资料待核实' : '暂无关联订单')
 const associationDescription = computed(() => {
-  if (props.conversation.association === 'pending') return '存在可能相关的交易，核实前不展示为当前订单的售后或评价。'
-  if (props.conversation.association === 'confirmed') return '当前会话关联资料暂不可用，请核实店铺、买家和订单对应关系。'
+  if (associationState.value === 'pending') return '当前消息对应的订单尚待确认，可查看买家其他订单核实。'
+  if (associationState.value === 'confirmed') return '当前消息关联资料暂不可用，请核实店铺、买家和订单对应关系。'
   return props.conversation.source === 'ebay' ? '此通知没有关联订单，可直接阅读通知正文。' : '售前沟通可以仅关联商品，无需指定订单。'
 })
 
 watch(() => props.conversation.id, () => { historyOpen.value = false; historyShopId.value = ''; returnToConversation() })
+watch(() => props.message?.id, () => { historyOpen.value = false; historyShopId.value = ''; returnToConversation() })
 watch(historyOrders, () => {
   if (!historyOrders.value.some(order => order.id === historyOrderId.value)) returnToConversation()
   if (historyShopId.value && !historyShops.value.some(shop => shop.id === historyShopId.value)) historyShopId.value = ''
 })
 watch(() => linkedOrders.value.map(order => order.id).join('|'), () => {
+  if (props.message) return
   if (!linkedOrders.value.some(order => order.id === props.selectedOrderId)) {
     emit('update:selectedOrderId', linkedOrders.value.length === 1 ? linkedOrders.value[0]!.id : '')
   }
@@ -154,9 +160,9 @@ function statusTone(value: string): 'success' | 'warning' | 'danger' | 'info' {
 
     <div id="mail-context-content" class="context-scroll" :role="displayOrder ? 'tabpanel' : undefined" :aria-labelledby="displayOrder ? `mail-context-tab-${displayTab}` : undefined" tabindex="0">
       <template v-if="!displayOrder">
-        <section v-if="linkedOrders.length > 1" class="context-empty"><ElIcon><Document /></ElIcon><h3>请选择当前订单</h3><p>此会话已关联多笔订单。选择后分别查看各笔交易的商品、物流和售后资料。</p></section>
+        <section v-if="linkedOrders.length > 1" class="context-empty"><ElIcon><Document /></ElIcon><h3>请选择当前订单</h3><p>当前消息已确认关联多笔订单。选择本次查看和回复使用的订单。</p></section>
         <section v-else class="context-empty"><ElIcon><Link /></ElIcon><h3>{{ associationTitle }}</h3><p>{{ associationDescription }}</p></section>
-        <section v-if="conversation.product" class="context-section standalone-product"><h3>关联商品</h3><div class="context-product"><div class="product-art"><ElIcon><Box /></ElIcon></div><div><strong>{{ conversation.product.title }}</strong><small>SKU {{ conversation.product.sku }}</small></div></div></section>
+        <section v-if="conversation.product && (!message || associationState === 'none')" class="context-section standalone-product"><h3>关联商品</h3><div class="context-product"><div class="product-art"><ElIcon><Box /></ElIcon></div><div><strong>{{ conversation.product.title }}</strong><small>SKU {{ conversation.product.sku }}</small></div></div></section>
         <section v-prototype="mailAnnotation('relatedTickets', '关联工单摘要')" class="context-section ticket-summary"><RelatedTickets :conversation="conversation" compact /></section>
       </template>
 

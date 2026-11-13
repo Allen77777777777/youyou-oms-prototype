@@ -3,6 +3,8 @@ import { mailSession } from './会话'
 import type { Conversation } from './类型'
 import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
 import { recordMailOperation } from './操作日志'
+import { currentHandlerName } from '@/组件/客服处理人/处理人'
+import { canAdminMailTags, canViewMail } from './权限与协作'
 
 export interface MailTagDefinition {
   id: string
@@ -45,6 +47,7 @@ export function validateMailTag(draft: MailTagDraft, editingId?: string): string
 }
 
 export function saveMailTag(draft: MailTagDraft, editingId?: string): { ok: true; tag: MailTagDefinition } | { ok: false; error: string } {
+  if (!canAdminMailTags()) return { ok: false, error: '没有业务标签字典维护权限' }
   const error = validateMailTag(draft, editingId)
   if (error) return { ok: false, error }
   const values = { label: draft.label.trim(), color: draft.color.trim().toUpperCase() }
@@ -53,31 +56,32 @@ export function saveMailTag(draft: MailTagDraft, editingId?: string): { ok: true
     if (tag.label === values.label && tag.color === values.color) return { ok: true, tag }
     const before = `${tag.label}（${tag.color}）`
     Object.assign(tag, values)
-    mailTagOperationLogs.push(createCustomerServiceLog('客服01', '编辑业务标签', `${editingId}：${before} → ${tag.label}（${tag.color}）`, '已完成'))
+    mailTagOperationLogs.push(createCustomerServiceLog(currentHandlerName.value, '编辑业务标签', `${editingId}：${before} → ${tag.label}（${tag.color}）`, '已完成'))
     return { ok: true, tag }
   }
   const id = `tag-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
   mailTagDefinitions.push(definition({ id, ...values }))
-  mailTagOperationLogs.push(createCustomerServiceLog('客服01', '新增业务标签', `${id}：${values.label}（${values.color}）`, '已完成'))
+  mailTagOperationLogs.push(createCustomerServiceLog(currentHandlerName.value, '新增业务标签', `${id}：${values.label}（${values.color}）`, '已完成'))
   return { ok: true, tag: mailTagDefinitions[mailTagDefinitions.length - 1]! }
 }
 
 export function countMailTagReferences(id: string, conversations: Conversation[] = mailSession.conversations): number {
-  return conversations.filter(conversation => conversation.tags?.includes(id)).length
+  return conversations.filter(conversation => canViewMail(conversation) && conversation.tags?.includes(id)).length
 }
 
 /** 删除前复核确认数量，避免确认期间引用范围变化而默默扩大影响。 */
 export function deleteMailTag(id: string, expectedAffected: number, conversations: Conversation[] = mailSession.conversations): { ok: true; affected: number } | { ok: false; error: string } {
+  if (!canAdminMailTags()) return { ok: false, error: '没有业务标签字典维护权限' }
   const index = mailTagDefinitions.findIndex(tag => tag.id === id)
   if (index < 0) return { ok: false, error: '标签已不存在' }
   const affected = countMailTagReferences(id, conversations)
   if (affected !== expectedAffected) return { ok: false, error: '关联会话数量已变化，请重新确认删除' }
   const tag = mailTagDefinitions[index]!
   for (const conversation of conversations) {
-    if (conversation.tags?.includes(id)) { conversation.tags = conversation.tags.filter(tagId => tagId !== id); recordMailOperation(conversation, '客服01', '移除已删除业务标签', `移除标签：${tag.label}（${id}）`) }
+    if (conversation.tags?.includes(id)) { conversation.tags = conversation.tags.filter(tagId => tagId !== id); recordMailOperation(conversation, currentHandlerName.value, '移除已删除业务标签', `移除标签：${tag.label}（${id}）`) }
   }
   mailTagDefinitions.splice(index, 1)
-  mailTagOperationLogs.push(createCustomerServiceLog('客服01', '删除业务标签', `${tag.label}（${id}）；移除 ${affected} 个会话引用`, '已完成'))
+  mailTagOperationLogs.push(createCustomerServiceLog(currentHandlerName.value, '删除业务标签', `${tag.label}（${id}）；移除 ${affected} 个会话引用`, '已完成'))
   return { ok: true, affected }
 }
 

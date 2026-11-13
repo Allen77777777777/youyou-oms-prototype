@@ -3,35 +3,44 @@ import { computed, reactive, ref, watch } from 'vue'
 import CustomerServiceLogList from '@/组件/客服日志/日志列表.vue'
 import { ElButton, ElDialog, ElEmpty, ElInput, ElMessage, ElMessageBox } from 'element-plus'
 import { countMailTagReferences, deleteMailTag, mailTagDefinitions, mailTagOperationLogs, mailTagPresetColors, MAX_MAIL_TAG_NAME_LENGTH, MAX_MAIL_TAGS, saveMailTag, tagStyle } from './设置模型'
+import { currentHandlerId } from '@/组件/客服处理人/处理人'
+import { canAdminMailTags } from './权限与协作'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const visible = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) })
 const editing = ref(false), editingId = ref<string>(), error = ref(''), deletingId = ref('')
 const draft = reactive({ label: '', color: mailTagPresetColors[0]! })
+const canManage = computed(() => canAdminMailTags())
 function cancelEdit() { editing.value = false; editingId.value = undefined; error.value = ''; draft.label = ''; draft.color = mailTagPresetColors[0]! }
 watch(() => props.modelValue, () => { cancelEdit() })
+watch(canManage, allowed => { if (!allowed) cancelEdit() })
 function beginEdit(id?: string) {
+  if (!canManage.value) return void ElMessage.warning('没有业务标签字典维护权限')
   if (!id && mailTagDefinitions.length >= MAX_MAIL_TAGS) return void ElMessage.warning(`最多可创建 ${MAX_MAIL_TAGS} 个标签`)
   const tag = id ? mailTagDefinitions.find(item => item.id === id) : undefined
   if (id && !tag) return
   editingId.value = id; draft.label = tag?.label ?? ''; draft.color = tag?.color ?? mailTagPresetColors[0]!; error.value = ''; editing.value = true
 }
 function save() {
+  if (!canManage.value) return void ElMessage.warning('没有业务标签字典维护权限')
   const result = saveMailTag(draft, editingId.value)
   if (!result.ok) { error.value = result.error; return }
   ElMessage.success(editingId.value ? '标签已更新' : '标签已新增')
   cancelEdit()
 }
 async function remove(id: string) {
+  if (!canManage.value) return void ElMessage.warning('没有业务标签字典维护权限')
   if (deletingId.value) return
   const tag = mailTagDefinitions.find(item => item.id === id)
   if (!tag) return
   const affected = countMailTagReferences(id)
+  const actor = currentHandlerId.value
   deletingId.value = id
   try {
     await ElMessageBox.confirm(`删除“${tag.label}”？当前有 ${affected} 个会话使用此标签，确认后会同时移除这些会话上的该标签，消息和其他标签保留。`, '删除标签', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
     if (!props.modelValue) return
+    if (actor !== currentHandlerId.value || !canManage.value) return void ElMessage.warning('操作身份或权限已变化，请重新确认删除')
     const result = deleteMailTag(id, affected)
     if (!result.ok) return void ElMessage.warning(result.error)
     if (editingId.value === id) cancelEdit()
@@ -44,15 +53,15 @@ async function remove(id: string) {
 <template>
   <ElDialog v-model="visible" title="站内信设置" width="min(720px, 94vw)" top="6vh" append-to-body :close-on-click-modal="false" destroy-on-close class="mail-settings-dialog">
     <section class="mail-tag-settings" aria-label="标签管理">
-      <header><div><h3>标签管理 <span>{{ mailTagDefinitions.length }} / {{ MAX_MAIL_TAGS }}</span></h3><p>维护业务标签名称与颜色，供信件分类使用。</p></div><ElButton type="primary" :disabled="mailTagDefinitions.length >= MAX_MAIL_TAGS" @click="beginEdit()">新增标签</ElButton></header>
+      <header><div><h3>标签管理 <span>{{ mailTagDefinitions.length }} / {{ MAX_MAIL_TAGS }}</span></h3><p>维护业务标签名称与颜色，供信件分类使用。</p></div><ElButton type="primary" :disabled="!canManage || mailTagDefinitions.length >= MAX_MAIL_TAGS" @click="beginEdit()">新增标签</ElButton></header>
       <section v-if="editing" class="mail-tag-form" :aria-label="editingId ? '编辑标签' : '新增标签'">
         <h4>{{ editingId ? '编辑标签' : '新增标签' }}</h4>
         <label class="mail-tag-label" for="mail-tag-name">标签名称</label><ElInput id="mail-tag-name" v-model="draft.label" aria-label="标签名称" :maxlength="MAX_MAIL_TAG_NAME_LENGTH" show-word-limit placeholder="请输入标签名称" @keyup.enter="save" />
         <span class="mail-tag-label">标签颜色</span><div class="mail-tag-color-options"><button v-for="color in mailTagPresetColors" :key="color" type="button" class="mail-tag-color-option" :class="{ selected: draft.color.toUpperCase() === color }" :style="{ backgroundColor: color }" :aria-label="`选择颜色 ${color}`" :aria-pressed="draft.color.toUpperCase() === color" @click="draft.color = color"><span v-if="draft.color.toUpperCase() === color">✓</span></button><label class="mail-tag-custom-color">自定义<input v-model="draft.color" type="color" aria-label="自定义标签颜色" /></label><span class="mail-tag-color-value">{{ draft.color.toUpperCase() }}</span></div>
         <p v-if="error" class="mail-tag-error" role="alert">{{ error }}</p><footer><ElButton @click="cancelEdit">取消编辑</ElButton><ElButton type="primary" @click="save">保存标签</ElButton></footer>
       </section>
-      <div class="mail-tag-list"><ElEmpty v-if="!mailTagDefinitions.length" description="暂无标签，可新增业务标签" :image-size="50" /><article v-for="tag in mailTagDefinitions" :key="tag.id" class="mail-tag-row" :data-tag-id="tag.id"><span class="mail-tag-preview" :style="tagStyle(tag.id)" :title="tag.label">{{ tag.label }}</span><span class="mail-tag-usage">{{ countMailTagReferences(tag.id) }} 个会话</span><div class="mail-tag-actions"><ElButton link type="primary" :aria-label="`编辑标签 ${tag.label}`" @click="beginEdit(tag.id)">编辑</ElButton><ElButton link type="danger" :loading="deletingId === tag.id" :disabled="!!deletingId && deletingId !== tag.id" :aria-label="`删除标签 ${tag.label}`" @click="remove(tag.id)">删除</ElButton></div></article></div>
-      <CustomerServiceLogList :entries="mailTagOperationLogs" />
+      <div class="mail-tag-list"><ElEmpty v-if="!mailTagDefinitions.length" description="暂无标签，可新增业务标签" :image-size="50" /><article v-for="tag in mailTagDefinitions" :key="tag.id" class="mail-tag-row" :data-tag-id="tag.id"><span class="mail-tag-preview" :style="tagStyle(tag.id)" :title="tag.label">{{ tag.label }}</span><span class="mail-tag-usage">{{ countMailTagReferences(tag.id) }} 个会话</span><div class="mail-tag-actions"><ElButton link type="primary" :disabled="!canManage" :aria-label="`编辑标签 ${tag.label}`" @click="beginEdit(tag.id)">编辑</ElButton><ElButton link type="danger" :loading="deletingId === tag.id" :disabled="!canManage || (!!deletingId && deletingId !== tag.id)" :aria-label="`删除标签 ${tag.label}`" @click="remove(tag.id)">删除</ElButton></div></article></div>
+      <CustomerServiceLogList v-if="canManage" :entries="mailTagOperationLogs" />
     </section>
     <template #footer><ElButton @click="visible = false">关闭</ElButton></template>
   </ElDialog>

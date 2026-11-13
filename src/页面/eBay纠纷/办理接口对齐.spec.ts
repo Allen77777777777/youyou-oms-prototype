@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createAlignedDisputeData, disputeRecords, availableActions, findRecord, recheckRefundEligibility, refreshRecord, submitAction, validateAction } from './模型'
-import { disputeShippingLocation, sellerHubFor } from './办理接口边界'
+import { disputeShippingLocation } from './办理接口边界'
 import { clearHandlingView } from './办理会话'
 import { initializeDisputeContext, resolveDisputeOrder } from './客服关联'
 import { 共享订单 } from '../订单处理/演示会话'
@@ -84,7 +84,7 @@ describe('逾期应答与退款回查的接口边界', () => {
   })
 })
 
-describe('原订单标发与后台办理定位', () => {
+describe('原订单标发定位', () => {
   it('只导航唯一匹配的同店原订单，重复或跨店不猜关联，不生成标发或出库', () => {
     const row = record('DEMO-PD-113')
     initializeDisputeContext(row, 'order')
@@ -94,9 +94,6 @@ describe('原订单标发与后台办理定位', () => {
     expect(disputeShippingLocation(row, [order, { ...order, systemOrderNo: 'duplicate' }])).toBeUndefined()
     expect(disputeShippingLocation(row, [{ ...order, storeId: 'another-shop' }])).toBeUndefined()
     expect(JSON.stringify(order)).toBe(before)
-    expect(sellerHubFor('德国')).toBe('https://www.ebay.de/sh/resolutions')
-    expect(sellerHubFor('澳大利亚')).toBe('https://www.ebay.com.au/sh/resolutions')
-    expect(sellerHubFor('unknown')).toBeUndefined()
   })
   it('详情可重新核验退款，逾期案显示可办操作，地址第二行和县郡进入本次提交', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div />' } }] })

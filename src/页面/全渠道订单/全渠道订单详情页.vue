@@ -10,6 +10,8 @@ import { 读取分配商品 } from './履约商品展示'
 import { 订单金额字段 } from './订单金额字段'
 import AmountFieldHelp from './金额字段帮助.vue'
 import OrderNotes from '../订单处理/订单备注组件.vue'
+import RuleSplitDraft from '../订单处理/规则拆单待分仓.vue'
+import RecipientProcessingResult from '../订单处理/收件信息处理结果.vue'
 import OrderProductImage from './商品缩略图.vue'
 import PlatformProductTitle from './平台商品标题.vue'
 import WarehouseInventoryDetails from '../订单处理/库存关联明细.vue'
@@ -17,6 +19,7 @@ import { 计算订单标志 } from '../订单处理/订单标志模型'
 import { 订单标志演示证据 } from '../订单处理/订单标志演示'
 import { 订单关联仓库执行 } from '../订单处理/操作功能模型'
 import { 共享订单 } from '../订单处理/演示会话'
+import { 获取订单处理人, 获取商品运营人员, 处理人姓名 } from '../订单处理/处理人模型'
 import { 共享标发单 } from '../订单标发/演示会话'
 import { 格式化北京时间, 计算剩余发货时间 } from '../订单处理/时间展示工具'
 import type { 作业行 } from '../订单处理/展示工具'
@@ -59,18 +62,21 @@ const 基础字段 = computed(() => props.order.manualOrder ? [
   字段('发货店铺', props.order.storeName), 字段('订单标签', props.order.tags.join('、'), true),
   字段('订单类型', props.order.orderType), 字段('履约模式', props.order.fulfillmentMode),
   字段('建单原因', props.order.manualOrder.reason, true),
+  字段('处理人', 处理人姓名(获取订单处理人(props.order))),
 ] : [
   字段('系统订单号', props.order.systemOrderNo), 字段('平台订单号', props.order.platformOrderNo),
   字段('平台订单 ID', props.order.platformOrderId), 字段('平台', props.order.platformCode),
   字段('店铺', props.order.storeName), 字段('店铺 ID', props.order.storeId),
   字段('订单类型', props.order.orderType), 字段('平台订单类型原值', props.order.platformOrderType),
   字段('买家 ID', props.order.buyerExternalId), 字段('履约模式', props.order.fulfillmentMode),
+  字段('处理人', props.order.fulfillmentMode === '自配送' ? 处理人姓名(获取订单处理人(props.order)) : '不适用'),
 ])
 const 收件字段 = computed(() => [
   字段('收件人', props.order.address.fullName), 字段('公司名称', props.order.address.companyName),
   字段('国家 / 地区', props.order.address.countryCode), 字段('省 / 州', props.order.address.stateProvince),
   字段('城市', props.order.address.city), 字段('县 / 区', props.order.address.district),
   字段('地址行 1', props.order.address.addressLine1, true), 字段('地址行 2', props.order.address.addressLine2, true),
+  ...(props.order.address.houseNumber ? [字段('来源门牌号', props.order.address.houseNumber)] : []),
   字段('邮政编码', props.order.address.postalCode), 字段('手机', props.order.address.mobilePhone),
   字段('电话', props.order.address.telephone), 字段('邮箱', props.order.address.email),
 ])
@@ -131,6 +137,8 @@ const 标注 = (id: string, 标题: string, 说明: string, 事实等级: 原型
   数据来源: ['共享标准订单、仓库执行、标发及备注会话；仅虚构评审数据，真实 API、生产权限和持久审计未接入。'],
 })
 const 本轮引用 = ['PRD/全渠道订单功能PRD.md#21-2026-10-10-订单详情排版与业务信息完整性', 'PRD/订单处理功能PRD.md#75-完整订单详情与履约执行摘要']
+const 处理人标注 = 标注('oms.all-order.detail.handlers', '订单处理人与商品运营人员', '处理人读取订单保存的人员名单，商品运营人员读取对应行的分配依据；员工 ID 去重，缺失显示未分配。查看不触发人员重分配，拆包不改变整单归属，操作日志另记实际办理人。', '已确认', ['PRD/订单处理功能PRD.md#104-运营人员与订单处理人', 'PRD/订单单据字段标准.md#66-运营人员与订单处理人'])
+处理人标注.版本 = '2026-11-13'
 const 详情标注 = 标注('oms.all-order.detail', '订单完整详情与分区导航', '订单处理与全渠道列表打开同一顶部详情页签。详情完整展示已有通用业务事实，分区导航只滚动定位，不卸载字段；长编号、地址、原因及商品标题完整换行。', '合理假设', 本轮引用, ['同一系统订单复用同一路径页签。', '完整性不表示展示数据库全部技术字段或平台专业字段，不恢复独立审核记录及已删除的按钮。'])
 const 状态标注 = 标注('oms.all-order.detail.statuses', '平台状态与 OMS 状态分离', '平台订单状态、OMS 六态、仓库状态、标发状态各自展示；不以其中任一状态推算或覆盖另一状态。', '已确认', ['PRD/订单单据字段标准.md#61-订单头-oms_order'])
 const 金额标注 = 标注('oms.all-order.detail.amount', '订单金额字段释义', '六项订单金额及页头总金额旁的小问号以《订单单据字段标准》第 6.4 节为依据，面向业务用户解释定义、费用范围及空值／零值，与订单处理列表共用文案。', '已确认', ['PRD/订单单据字段标准.md#64-订单金额明细-oms_order_amount'], ['悬停、聚焦或点击显示业务释义，不展示研发备注或 PRD 来源，Esc 关闭；不依赖原型标注开关，不修改金额或触发订单操作。'])
@@ -163,8 +171,8 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
     <main class="详情内容">
       <div v-if="处理说明.length" class="业务提示" :class="{ 阻断: Boolean(order.blockReason) }"><ElIcon><WarningFilled v-if="order.blockReason" /><InfoFilled v-else /></ElIcon><dl><div v-for="项 in 处理说明" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></div>
       <div class="概览网格">
-        <section data-section="basic" class="详情分区 基础卡"><div class="分区标题"><h2>订单信息</h2><span>{{ order.orderType }}</span></div><dl class="字段网格"><div v-for="项 in 基础字段" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></section>
-        <section data-section="recipient" v-prototype="敏感信息标注" class="详情分区 收件卡"><div class="分区标题"><h2>收件信息</h2><span class="锁定提示"><ElIcon><Lock /></ElIcon>默认脱敏</span></div><dl class="字段网格 收件字段"><div v-for="项 in 收件字段" :key="项.label" :class="{ 跨行: 项.wide }"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl><div class="买家留言"><span>买家留言</span><p>{{ order.address.buyerMessage || '—' }}</p></div></section>
+        <section data-section="basic" v-prototype="处理人标注" class="详情分区 基础卡"><div class="分区标题"><h2>订单信息</h2><span>{{ order.orderType }}</span></div><dl class="字段网格"><div v-for="项 in 基础字段" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></section>
+        <section data-section="recipient" v-prototype="敏感信息标注" class="详情分区 收件卡"><div class="分区标题"><h2>收件信息</h2><span class="锁定提示"><ElIcon><Lock /></ElIcon>默认脱敏</span></div><dl class="字段网格 收件字段"><div v-for="项 in 收件字段" :key="项.label" :class="{ 跨行: 项.wide }"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl><div class="买家留言"><span>买家留言</span><p>{{ order.address.buyerMessage || '—' }}</p></div><RecipientProcessingResult :order="order" /></section>
         <section data-section="amount" v-prototype="金额标注" class="详情分区 金额卡"><div class="分区标题"><h2>金额信息</h2></div><dl class="金额明细"><div v-for="(项, 索引) in 金额字段" :key="项.label" :class="{ 总金额: 索引 === 0 }"><dt>{{ 项.label }}<AmountFieldHelp :label="项.label" :description="项.description" /></dt><dd>{{ 格式化金额(项.value) }}</dd></div></dl></section>
       </div>
 
@@ -174,7 +182,7 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
         <ElTable :data="order.items" row-key="externalLineId" table-layout="fixed" class="明细表 商品表" empty-text="暂无订单商品">
           <ElTableColumn type="index" label="序号" width="52" />
           <ElTableColumn :label="order.manualOrder ? '商品信息' : '商品 / 平台信息'" min-width="330"><template #default="{ row }"><div class="商品资料"><OrderProductImage :src="row.itemImageUrl" hover-preview /><div class="复合信息"><PlatformProductTitle :order="order" :item="row as 订单商品行" fallback="—" /><dl class="单元字段"><div><dt>平台 SKU</dt><dd>{{ row.platformSku || '—' }}</dd></div><div><dt>规格</dt><dd>{{ row.platformVariant || '—' }}</dd></div><div><dt>平台商品 ID</dt><dd>{{ row.platformItemId || '—' }}</dd></div><div><dt>{{ order.manualOrder ? '订单行标识' : '平台订单行 ID' }}</dt><dd>{{ row.externalLineId || '—' }}</dd></div></dl></div></div></template></ElTableColumn>
-          <ElTableColumn label="系统商品 / 映射" min-width="205"><template #default="{ row }"><div class="复合信息"><strong>{{ row.systemItemName || '—' }}</strong><span class="等宽">{{ row.systemSku || '—' }}</span><b class="状态徽标" :class="'tone-' + 获取SKU状态说明(row.skuResolutionStatus).tone">{{ 获取SKU状态说明(row.skuResolutionStatus).text }}</b></div></template></ElTableColumn>
+          <ElTableColumn label="系统商品 / 映射" min-width="205"><template #default="{ row }"><div class="复合信息"><strong>{{ row.systemItemName || '—' }}</strong><span class="等宽">{{ row.systemSku || '—' }}</span><span v-prototype="处理人标注" class="商品运营人员">运营人员：{{ 处理人姓名(获取商品运营人员(order, row as 订单商品行)) }}</span><b class="状态徽标" :class="'tone-' + 获取SKU状态说明(row.skuResolutionStatus).tone">{{ 获取SKU状态说明(row.skuResolutionStatus).text }}</b></div></template></ElTableColumn>
           <ElTableColumn label="数量" width="110" align="right"><template #default="{ row }"><dl class="单元字段 数量金额"><div><dt>下单</dt><dd>{{ row.orderedQuantity }}</dd></div><div><dt>可履约</dt><dd>{{ row.fulfillableQuantity ?? '—' }}</dd></div></dl></template></ElTableColumn>
           <ElTableColumn label="商品金额" min-width="225" align="right"><template #default="{ row }"><dl class="单元字段 数量金额"><div><dt>商品单价</dt><dd>{{ 格式化金额(row.unitPrice) }}</dd></div><div><dt>行金额</dt><dd>{{ 格式化金额(row.itemTotal) }}</dd></div><div><dt>商品实收金额</dt><dd>{{ 格式化金额(row.actualReceived) }}</dd></div></dl><span v-if="row.actualReceived" class="实收来源">实收来源：{{ row.actualReceivedSource === 'PLATFORM' ? '平台返回' : row.actualReceivedSource === 'OMS_ALLOCATED' ? 'OMS 已有分摊' : '—' }}</span></template></ElTableColumn>
         </ElTable>
@@ -183,6 +191,7 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
       <section data-section="fulfillment" v-prototype="路由标注" class="详情分区"><div class="分区标题"><h2>履约与物流</h2><ElButton v-if="order.fulfillmentMode === '自配送'" link type="primary" @click="库存打开 = true">查看仓库库存</ElButton><span v-else>平台履约</span></div>
         <dl class="履约概览"><div><dt>发货方式</dt><dd>{{ 发货方式 }}</dd></div><div><dt>当前履约单数量</dt><dd>{{ order.fulfillmentMode === '自配送' ? `${当前履约.length} 张` : '不适用' }}</dd></div><div><dt>已发货进度</dt><dd>{{ 已发货进度 }}</dd></div></dl>
         <p v-if="order.fulfillmentMode === '平台履约'" class="空态">平台负责仓储与配送，OMS 自配送履约链路不适用。</p>
+        <RuleSplitDraft v-if="order.ruleSplitDraft" :order="order" />
         <template v-if="显示待审核包裹">
           <h3 class="子标题">待审核包裹 <span>{{ 待审核包裹.length }} 个 · 尚未生成当前履约单</span></h3>
           <ElTable :data="待审核包裹" row-key="key" class="明细表 待审核包裹表" table-layout="fixed" empty-text="暂无包裹商品，请核对发货安排">
@@ -191,7 +200,7 @@ const 追溯标注 = 标注('oms.all-order.detail.trace', '同步信息与时间
             <ElTableColumn label="仓储物流" min-width="280"><template #default="{ row }"><dl class="单元字段"><div v-for="项 in 路由字段(row.route)" :key="项.label"><dt>{{ 项.label }}</dt><dd>{{ 项.value }}</dd></div></dl></template></ElTableColumn>
           </ElTable>
         </template>
-        <template v-if="!显示待审核包裹 || order.fulfillmentOrders.length">
+        <template v-if="(!显示待审核包裹 && !order.ruleSplitDraft) || order.fulfillmentOrders.length">
           <h3 class="子标题">履约单 <span>{{ order.fulfillmentOrders.length }} 张</span></h3>
           <ElTable :data="履约展示列表" row-key="fulfillmentOrderNo" class="明细表 履约表" table-layout="fixed" empty-text="尚未创建履约单">
             <ElTableColumn label="履约单 / 范围" min-width="200"><template #default="{ row }"><div class="复合信息"><strong class="等宽">{{ row.fulfillmentOrderNo }}</strong><div class="内联状态"><b class="状态徽标" :class="row.isActive ? 'tone-info' : 'tone-neutral'">{{ row.status }}</b><span>{{ row.isActive ? '当前有效' : '历史版本' }}</span></div><span v-if="履约来源(row.fulfillmentOrderNo).length > 1" class="范围提示">共享履约 · 以下数量为整张履约单</span><span v-for="来源 in 履约来源(row.fulfillmentOrderNo)" :key="来源" class="等宽">来源：{{ 来源 }}</span></div></template></ElTableColumn>

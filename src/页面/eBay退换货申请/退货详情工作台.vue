@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { handlerNames } from '@/组件/客服处理人/处理人'
-import { getReturnHandlerIds, getReturnSystemSkus } from './处理人'
+import { getReturnHandlerPresentation, getReturnSystemSkus } from './处理人'
 import { useBuyerPageActive } from '@/组件/买家/页面活跃'
 import BuyerLink from '@/组件/买家/买家链接.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
@@ -22,7 +21,7 @@ import { resolveReturnOrder, resolveReturnOutbound, resolveReturnItem } from './
 import { actionNames, actionOptions, addReturnNote, createReturnActionDraft, escalationReasons, formatReturnTime, getReturnApprovalAction, getReturnBlockedReason, getReturnDetail, isEscalated, prepareReturnAction, returnKey, stateNames, submitPreparedReturnAction, type ReturnAction, type ReturnRecord } from './模型'
 import PlatformStatus from './平台状态资料.vue'
 import { afterSaleReasons, afterSaleReturnSummary, canViewAfterSale, recordsForReturn, validateAfterSale } from '../售后单管理/会话'
-import { createReturnSaleDraft, isSaleAction, prepareDirectSale, submitReturnAndSale, syncReturnWithSales, validateSaleQuantity } from './售后联动'
+import { createReturnSaleDraft, isSaleAction, prepareDirectSale, retryReturnSale, submitReturnAndSale, syncReturnWithSales, validateSaleQuantity } from './售后联动'
 import ReturnSaleFields from './售后联填.vue'
 import ReshipForm from './重发办理.vue'
 import { activityNames, noLabelReasons, formatMinor, parseMoney, type ReturnAddress } from './接口契约'
@@ -32,6 +31,7 @@ import ReturnData from './退货资料.vue'
 import ReturnItemData from './申请商品资料.vue'
 import ReturnHistoryAttributes from './历史属性资料.vue'
 import ReturnActionForm from './处理表单.vue'
+import { usesRmaGraphql } from './RMA授权'
 import { returnAnnotation as annotation } from './标注'
 const props = defineProps<{ row: ReturnRecord }>()
 const router = useRouter(), route = useRoute(), active = computed(() => props.row)
@@ -72,9 +72,9 @@ type WorkbenchAction = ReturnAction | 'reship'
 const actionList = computed<WorkbenchAction[]>(() => {
   const extra: ReturnAction[] = ['provideRma', 'receive', 'label']
   return ['approve', 'partial', 'refund', 'message', 'decline', 'reship', 'escalate',
-    ...extra.filter(value => active.value.options.includes(actionOptions[value]))]
+    ...extra.filter(value => (value === 'provideRma' && usesRmaGraphql(active.value)) || active.value.options.includes(actionOptions[value]))]
 })
-const permissionError = (row: ReturnRecord, value: ReturnAction) => isSaleAction(value, false) && !canViewAfterSale(row) ? '当前人员没有该店铺的售后办理权限' : ''
+const permissionError = (row: ReturnRecord, _value: ReturnAction) => !canViewAfterSale(row) ? '当前人员没有该店铺的办理权限' : ''
 const blocked = (row: ReturnRecord, value: ReturnAction) => permissionError(row, value) || getReturnBlockedReason(row, value === 'approve' ? getReturnApprovalAction(row) : value, now.value)
 const requiresSale = computed(() => isSaleAction(action.value, actionDraft.value?.keepOriginalItem))
 watch(requiresSale, () => {
@@ -97,8 +97,9 @@ function chooseAction(value: ReturnAction) {
   closeAction()
   const actual = value === 'approve' ? getReturnApprovalAction(active.value) : value
   action.value = actual
-  actionDraft.value = createReturnActionDraft(active.value, actual)
-  if (requiresSale.value) view.saleDraft = createReturnSaleDraft(active.value)
+  actionDraft.value = retryReturnSale(active.value, actual) && active.value.pendingDraft
+    ? JSON.parse(JSON.stringify(active.value.pendingDraft)) : createReturnActionDraft(active.value, actual)
+  if (requiresSale.value) view.saleDraft = createReturnSaleDraft(active.value, undefined, actual)
   void nextTick(() => { if (operationPane.value) operationPane.value.scrollTop = 0; actionPanel.value?.querySelector<HTMLInputElement | HTMLTextAreaElement>('input,textarea')?.focus({ preventScroll: true }) })
 }
 function prepare() {
@@ -158,7 +159,7 @@ const buyerPageActive = useBuyerPageActive()
 <div v-if="active" v-prototype="annotation('detail')" class="return-detail">
 <div class="return-reading" ref="readingPane">
         <header class="detail-heading"><div><div class="detail-id"><span>ReturnID</span><strong><CopyNumber :value="active.id" label="ReturnID" /></strong></div><p class="muted">{{ active.shopName }} · {{ active.site }} · <BuyerLink :shop-id="active.shopId" :buyer-id="active.buyerId" /></p></div><div class="detail-heading-status"><PlatformStatus :row="active" /></div></header>
-        <div class="detail-meta"><span>处理人 {{ handlerNames(getReturnHandlerIds(active)) }}</span><span>{{ active.site }}</span><span>最近完整刷新 {{ time(active.lastSyncedAt, active) }}</span></div>
+        <div class="detail-meta"><span :title="getReturnHandlerPresentation(active).issues.join('；')">处理人 {{ getReturnHandlerPresentation(active).label }}</span><span>{{ active.site }}</span><span>最近完整刷新 {{ time(active.lastSyncedAt, active) }}</span></div>
         <p v-if="internalHint(active)" class="business-hint" role="status">{{ internalHint(active) }}</p>
         <section v-if="active.submissionError" v-prototype="annotation('execution')" class="execution-panel"><ElAlert :title="active.outcome === 'unknown' ? '处理结果待核实' : '上次处理未成功'" :description="active.submissionError" :type="active.outcome === 'unknown' ? 'warning' : 'error'" :closable="false" show-icon /></section><ReturnData :row="active" area="status" />
         <div class="detail-workspace">
@@ -228,10 +229,10 @@ const buyerPageActive = useBuyerPageActive()
       <div v-if="active && prepared" class="return-confirm"><p>退货申请：<strong>{{ active.id }}</strong></p><p>店铺：{{ active.shopName }} · 买家：<BuyerLink :shop-id="active.shopId" :buyer-id="active.buyerId" /></p><p>操作：<strong>{{ actionNames[prepared.action] }}</strong></p>
         <p v-if="prepared.action === 'partial'">报价金额：<strong>{{ active.currency }} {{ prepared.draft.partialAmount }}</strong>，需等待买家决定。</p>
         <template v-if="prepared.action === 'refund'"><div v-for="item in prepared.draft.refundItems.filter(item => item.selected)" :key="item.refundFeeType" class="confirm-refund-item"><span>{{ activeDetail?.refund.items.find(line => line.refundFeeType === item.refundFeeType)?.label || item.refundFeeType }}</span><strong>{{ item.currency }} {{ item.value }}</strong></div><p>本次退款合计：<strong>{{ confirmationTotal }}</strong></p></template>
-        <p v-if="['approve','offerReturn'].includes(prepared.action)">商品安排：{{ prepared.draft.keepOriginalItem ? '允许买家保留，无需寄回' : '按退货安排寄回' }}</p><p v-if="prepared.request.body.RMANumber">退货授权编号：{{ prepared.draft.rmaNumber }}</p>
+        <p v-if="['approve','offerReturn'].includes(prepared.action)">商品安排：{{ prepared.draft.keepOriginalItem ? '允许买家保留，无需寄回' : '按退货安排寄回' }}</p><p v-if="prepared.request.api === 'return-graphql'">退货授权编号：{{ prepared.draft.rmaNumber.trim() || '不提供，本次免除编号要求' }}</p><p v-else-if="prepared.request.body.RMANumber">退货授权编号：{{ prepared.draft.rmaNumber }}</p>
         <p v-if="prepared.action === 'escalate'">介入原因：{{ escalationReasons.find(item => item.value === prepared!.draft.reason)?.label }}</p>
         <template v-if="prepared.action === 'label'"><p>面单处理：{{ { UPLOAD_LABEL: '提供已上传的面单', MARK_AS_SENT: '面单已通过其他方式提供', NO_LABEL: '不提供面单，说明退回安排' }[prepared.draft.label.labelAction] }}</p><p v-if="prepared.draft.label.labelAction === 'UPLOAD_LABEL' && prepared.draft.label.fileId">文件：{{ activeDetail?.files.find(file => file.fileId === prepared!.draft.label.fileId)?.fileName }}</p><p v-if="prepared.draft.label.labelAction !== 'NO_LABEL' && prepared.draft.label.trackingNumber">{{ prepared.draft.label.carrierEnum }} · {{ prepared.draft.label.trackingNumber }}</p><p v-if="prepared.draft.label.labelAction === 'MARK_AS_SENT' && prepared.draft.label.labelSentDate">发送时间：{{ time(prepared.draft.label.labelSentDate, active) }}</p><p v-if="prepared.draft.label.labelAction === 'NO_LABEL' && prepared.draft.label.noLabelReason">原因：{{ noLabelReasons.find(item => item.value === prepared!.draft.label.noLabelReason)?.label }}</p><p v-if="prepared.draft.label.returnLabelCost">面单费用：{{ active.currency }} {{ prepared.draft.label.returnLabelCost }}</p></template>
-        <section v-if="view.preparedSale" class="sale-summary"><strong>同时创建售后单 · 无需审核</strong><p>{{ view.preparedSale.kind }} · {{ view.preparedSale.items[0]?.title }} × {{ view.preparedSale.items[0]?.quantity }}</p><p>系统原因：{{ view.preparedSale.items[0]?.reason }}</p><p v-if="view.preparedSale.note">售后单备注：{{ view.preparedSale.note }}</p></section>
+        <section v-if="view.preparedSale" class="sale-summary"><strong>{{ retryReturnSale(active, prepared.action) ? `继续办理售后单 ${retryReturnSale(active, prepared.action)!.no}` : '同时创建售后单 · 无需审核' }}</strong><p>{{ view.preparedSale.kind }} · {{ view.preparedSale.items[0]?.title }} × {{ view.preparedSale.items[0]?.quantity }}</p><p>系统原因：{{ view.preparedSale.items[0]?.reason }}</p><p v-if="view.preparedSale.note">售后单备注：{{ view.preparedSale.note }}</p></section>
         <p v-if="prepared.draft.text" class="confirm-message">{{ prepared.draft.text }}</p><ElAlert title="请核对本次提交内容。资格或来源金额变化后须重新确认；退款以平台资金结果为准。" type="info" :closable="false" />
       </div>
       <template #footer><ElButton @click="confirmation = false">返回修改</ElButton><ElButton type="primary" @click="submit">确认提交</ElButton></template>

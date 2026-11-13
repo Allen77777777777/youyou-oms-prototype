@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { 渠道会话 } from '../仓配管理/渠道状态'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
 import { 是未匹配审单异常 } from '../全渠道订单/类型'
 import type { 全渠道订单, 订单路由, 人工发货方案, 审核记录 } from '../全渠道订单/类型'
@@ -16,6 +17,10 @@ import { 关联人工发货订单号, 人工发货组完整阻断原因, 校验�
 import { 核查发货仓库SKU, 查询人工方案库存 } from './拆合发货库存'
 import { 是手工订单, 手工发货条件阻断 } from '../手工订单/来源规则'
 import { 创建手工订单演示 } from '../手工订单/演示数据'
+import { 初始化订单处理人 } from './处理人模型'
+import { 订单正在等单 } from './自动合单状态'
+import { 共享规则 } from '../订单规则/演示会话'
+import { 准备包裹收件请求, 保存包裹收件请求, 创建包裹收件请求标识, 读取共同履约请求路由, 校验推仓请求收件资料, type 包裹收件请求准备 } from './请求收件准备'
 
 // 所有写操作只在本次浏览器会话内演示；订单详情与作业工作台引用同一主事实。
 export const 演示路由: 订单路由[] = [
@@ -100,6 +105,8 @@ export const 共享订单 = ref<全渠道订单[]>([
   创建拆单重拆详情演示(创建作业样例, 演示路由),
   ...创建手工订单演示(演示路由[0]!),
 ])
+// 固定样例完整组装后只保存一次分配依据；后续读取和 SKU 主数据变化均不重算存量。
+for (const 订单 of 共享订单.value) 初始化订单处理人(订单, '2026-11-13T00:00:00Z')
 
 export interface 仓库执行 {
   履约单号: string
@@ -113,6 +120,8 @@ export interface 仓库执行 {
   原因: string
   更新时间: string
   出库快照?: 出库快照
+  /** 每次确已提交的本地请求快照；已提交／待核查的请求不重算或覆盖。 */
+  收件请求历史?: 包裹收件请求准备[]
   出库事实?: { planned: number | null; shipped: number | null; tracking: string | null; shippedAt: string | null }
 }
 export const 仓库执行记录 = ref<仓库执行[]>(共享订单.value.flatMap((订单) => 订单.fulfillmentOrders
@@ -157,6 +166,8 @@ function 可发数量有效(订单: 全渠道订单): boolean {
 }
 
 export function 审核资格原因(订单: 全渠道订单): string {
+  if (订单.ruleSplitDraft) return '拆分结果尚未完成逐包分仓，请先完成分仓再审核'
+  if (订单正在等单(订单.systemOrderNo)) return '订单正在等单，请先结束合单等待；放单后仍须完成分仓及发货条件校验'
   if (订单.initialReviewPending) return '平台新单尚未完成首轮审单规则，请先完成首轮处理'
   if (订单.fulfillmentMode !== '自配送' || 订单.processingStatus !== '待审核') return '当前对象不在待审核自配送队列'
   if (订单.reviews.some(记录 => 记录.status === '审核中')) return '本轮审核尚未结束，请查看当前结果'
@@ -212,7 +223,13 @@ export function 审核阻断原因(订单: 全渠道订单, 库存: string = '�
   if (!订单.manualShippingPlan) return 审核单项阻断原因(订单, 库存)
   const 方案 = 订单.manualShippingPlan
   const 来源 = 共享订单.value.filter(单 => 方案.orderNos.includes(单.systemOrderNo))
-  return [...new Set([...校验人工发货方案(人工发货上下文(), 方案), ...来源.flatMap(单 => 审核单项阻断原因(单, 单.systemOrderNo === 订单.systemOrderNo ? 库存 : 演示库存.value[单.systemOrderNo] ?? '充足').map(原因 => `${单.systemOrderNo}：${原因}`))])]
+  const 当前渠道阻断: string[] = []
+  if (方案.kind === '拆分发货' && 方案.createdByRule) for (const [index, parcel] of 方案.packages.entries()) {
+    const matches = 渠道会话.value.filter(channel => channel.id === parcel.route.shippingChannelId)
+    const channel = matches[0]
+    if (matches.length !== 1 || !channel?.enabled || channel.labelMode !== '仓库回传' || channel.provider !== parcel.route.warehouseProvider || channel.account !== parcel.route.warehouseAccount || channel.warehouse !== parcel.route.warehouse || channel.code !== parcel.route.shippingChannelCode || channel.name !== parcel.route.shippingChannel) 当前渠道阻断.push(`包裹 ${index + 1} 的物流渠道已停用、失效或身份发生变化，请重新核实仓库物流`)
+  }
+  return [...new Set([...当前渠道阻断, ...校验人工发货方案(人工发货上下文(), 方案), ...来源.flatMap(单 => 审核单项阻断原因(单, 单.systemOrderNo === 订单.systemOrderNo ? 库存 : 演示库存.value[单.systemOrderNo] ?? '充足').map(原因 => `${单.systemOrderNo}：${原因}`))])]
 }
 
 export { 是未匹配审单异常 }
@@ -297,6 +314,7 @@ export function 提交审核轮次(订单号: string, 期望版本: number, 审�
   const 来源号 = 关联人工发货订单号(人工发货上下文(), [订单号])
   const 来源 = 共享订单.value.filter(单 => 来源号.includes(单.systemOrderNo))
   if (规则轮次 && 来源.some(是售后重发订单)) return { 成功: false, 信息: '售后重发订单须人工审核，请在订单处理中核对后审核' }
+  if (来源.some(单 => 订单正在等单(单.systemOrderNo))) return { 成功: false, 信息: '来源订单正在等单或等待整组分仓，请先完成合单放单及分仓，再重新审核' }
   if (!专项) {
     const 关联错误 = 人工发货组完整阻断原因(人工发货上下文(), 来源号)
     if (关联错误.length) return { 成功: false, 信息: 关联错误.join('；') }
@@ -429,8 +447,19 @@ export function 执行演示推单(订单号: string, 履约单号: string, 期�
   if (原因.length) return { 成功: false, 信息: 原因.join('；') }
   const 出库单号 = `CK-${履约单号}`
   const 提交时间 = 演示时间()
+  const 本次路由 = 读取共同履约请求路由(来源, 履约单号)
+  if (!本次路由) return { 成功: false, 信息: '本次履约的全部来源实际路由缺失或不一致，请先核实' }
+  const 收件请求 = 准备包裹收件请求({ requestId: 创建包裹收件请求标识(出库单号, 来源), trigger: 'warehouse_push',
+    orders: 来源, route: 本次路由, rules: 共享规则.value, channels: 渠道会话.value, processedAt: 提交时间,
+  })
+  if (收件请求.blocked) return { 成功: false, 信息: 收件请求.reason }
+  const 收件错误 = 校验推仓请求收件资料(收件请求.address)
+  if (收件错误) return { 成功: false, 信息: 收件错误 }
   const 出库快照 = 创建推单出库快照(来源, 履约单号, 提交时间)
-  仓库执行记录.value.push({ 履约单号, 订单号: 来源.map(项 => 项.systemOrderNo), 出库单号, 状态: '下单中', 待核查: true, 原因: '演示请求已受理，等待读取仓库结果；提交受理不代表建仓成功。', 更新时间: 提交时间, 出库快照, 出库事实: { planned: 出库快照.quantitySummary.plannedQuantity, shipped: 0, tracking: null, shippedAt: null } })
+  if (!出库快照.snapshotReliable) return { 成功: false, 信息: 出库快照.compositionReason || '本次出库来源及商品范围未核实，不能推仓' }
+  出库快照.recipient = JSON.parse(JSON.stringify(收件请求.address))
+  仓库执行记录.value.push({ 履约单号, 订单号: 来源.map(项 => 项.systemOrderNo), 出库单号, 状态: '下单中', 待核查: true, 原因: '演示请求已受理，等待读取仓库结果；提交受理不代表建仓成功。', 更新时间: 提交时间, 出库快照, 收件请求历史: [JSON.parse(JSON.stringify(收件请求))], 出库事实: { planned: 出库快照.quantitySummary.plannedQuantity, shipped: 0, tracking: null, shippedAt: null } })
+  保存包裹收件请求(来源, 收件请求)
   for (const 单 of 来源) 记录操作(单, '提交仓库', `创建 ${出库单号}；全部来源：${来源.map(项 => 项.systemOrderNo).join('、')}；状态为下单中，订单保持待推单。演示不调用外部接口。`, true, 操作人)
   return { 成功: true, 信息: '推单已受理，订单保持待推单；请同步仓库状态查看结果。', 对象号: 出库单号, 待核查: true }
 }

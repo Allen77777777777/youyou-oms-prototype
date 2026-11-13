@@ -5,8 +5,11 @@ import { actionNames, escalationReasons, getReturnDetail, formatReturnTime, type
 import { formatMinor, moneyText, noLabelReasons, parseMoney, refundAmountFixed, refundRangeText, type ReturnAction, type ReturnActionDraft } from './接口契约'
 import { beijingWallTimeToISO } from './展示工具'
 import AttachmentUpload from './附件上传.vue'
+import { canWaiveRma, usesRmaGraphql } from './RMA授权'
 const props = defineProps<{ row: ReturnRecord; action: ReturnAction; draft: ReturnActionDraft; error: string }>()
 defineEmits<{ prepare: []; cancel: [] }>()
+const modernRma = computed(() => props.action === 'provideRma' && usesRmaGraphql(props.row))
+const optionalRma = computed(() => props.action === 'provideRma' && canWaiveRma(props.row))
 const detail = computed(() => getReturnDetail(props.row))
 const refundRows = computed(() => props.draft.refundItems.map(item => ({ item, source: detail.value.refund.items.find(line => line.refundFeeType === item.refundFeeType) })))
 const uploading = ref(false)
@@ -32,7 +35,9 @@ const saleAction = computed(() => ['approve', 'offerReturn', 'refund', 'partial'
 <template>
   <div class="action-form"><h4>{{ actionNames[action] }}</h4><p class="form-description">{{ descriptions[action] }}</p>
     <div v-if="action === 'approve' || action === 'offerReturn'" class="return-arrangement"><label class="required-label">商品处理方式</label><ElRadioGroup v-model="draft.keepOriginalItem" aria-label="接受退货商品处理方式" aria-required="true"><ElRadio :value="false">买家退回商品</ElRadio><ElRadio :value="true">买家保留商品，无需寄回</ElRadio></ElRadioGroup></div>
-    <div v-if="action === 'provideRma' || (action === 'approve' && detail.rmaRequired && !draft.keepOriginalItem)" class="form-row"><label for="return-rma">退货授权编号</label><ElInput id="return-rma" v-model="draft.rmaNumber" aria-label="退货授权编号" placeholder="填写提供给买家的 RMA" maxlength="100" /></div>
+    <div v-if="action === 'provideRma' || (action === 'approve' && detail.rmaRequired && !draft.keepOriginalItem)" class="form-row"><label for="return-rma">退货授权编号<span v-if="optionalRma">（选填）</span></label><ElInput id="return-rma" v-model="draft.rmaNumber" aria-label="退货授权编号" :placeholder="optionalRma ? '可留空，不要求买家提供编号' : '填写提供给买家的 RMA'" maxlength="100" /></div>
+    <p v-if="optionalRma" class="rma-help">留空确认后，本次退货无需提供 RMA 编号；店铺的退货设置不变。</p>
+    <p v-if="action === 'provideRma'" class="rma-help">如需更改退货地址，请在 eBay 后台办理，完成后刷新数据。</p>
     <div v-if="action === 'partial'" class="partial-fields">
       <label class="required-label" for="return-partial-amount">部分退款金额</label>
       <ElInput id="return-partial-amount" v-model="draft.partialAmount" inputmode="decimal" aria-label="部分退款金额" aria-required="true" placeholder="输入报价金额">
@@ -63,13 +68,14 @@ const saleAction = computed(() => ['approve', 'offerReturn', 'refund', 'partial'
       <div class="form-row"><label>面单费用（可选）</label><ElInput v-model="draft.label.returnLabelCost" inputmode="decimal" aria-label="退货面单费用" placeholder="未提供则留空" /><span>{{ row.currency }}</span></div>
     </template>
     <AttachmentUpload v-if="action === 'message' || action === 'decline'" :key="action" :row="row" :mode="action" @busy="uploading = $event" />
-    <label class="comment-label" :class="{ 'required-label': action === 'message' || action === 'escalate' }">{{ saleAction ? '对客说明（选填）' : fieldText }}</label>
-    <ElInput v-model="draft.text" type="textarea" :autosize="{ minRows: saleAction ? 1 : 3, maxRows: 6 }" :maxlength="2000" :show-word-limit="!saleAction" :placeholder="saleAction ? '随本次操作提交至 eBay' : action === 'message' ? '输入发送给买家的消息' : '填写随本次操作提交的说明'" aria-label="退货退款处理说明" />
+    <label v-if="!modernRma" class="comment-label" :class="{ 'required-label': action === 'message' || action === 'escalate' }">{{ saleAction ? '对客说明（选填）' : fieldText }}</label>
+    <ElInput v-if="!modernRma" v-model="draft.text" type="textarea" :autosize="{ minRows: saleAction ? 1 : 3, maxRows: 6 }" :maxlength="2000" :show-word-limit="!saleAction" :placeholder="saleAction ? '随本次操作提交至 eBay' : action === 'message' ? '输入发送给买家的消息' : '填写随本次操作提交的说明'" aria-label="退货退款处理说明" />
     <slot name="after-sale" />
     <p v-if="error" class="inline-error" role="alert">{{ error }}</p><div class="form-actions"><ElButton @click="$emit('cancel')">取消</ElButton><ElButton type="primary" :disabled="uploading" @click="$emit('prepare')">确认内容</ElButton></div>
   </div>
 </template>
 <style scoped>
+.rma-help{color:#737e8c;font-size:12px;line-height:1.7;margin:8px 0 14px;overflow-wrap:anywhere}
 .required-label::before{content:'*';color:var(--el-color-danger);margin-right:4px}
 .partial-fields{display:grid;gap:6px;margin:12px 0}
 .partial-fields label{color:#546170}

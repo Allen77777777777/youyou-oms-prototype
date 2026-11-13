@@ -11,7 +11,10 @@ import type { ReviewRecord } from './类型'
 const { push, source } = vi.hoisted(() => ({ push: vi.fn(), source: { orders: [] as AwaitingReviewOrder[] } }))
 vi.mock('vue-router', async importOriginal => ({ ...await importOriginal<typeof import('vue-router')>(), useRouter: () => ({ push }) }))
 vi.mock('./未收到评价会话', () => ({ getAwaitingReviewOrders: () => source.orders }))
-vi.mock('./联系买家模型', () => ({ getReviewContactBlockedReason: () => undefined }))
+vi.mock('./联系买家模型', async importOriginal => ({
+  ...await importOriginal<typeof import('./联系买家模型')>(),
+  getReviewContactBlockedReason: () => undefined,
+}))
 
 const FloatingShell = { props: ['modelValue', 'title'], emits: ['update:modelValue'], template: '<section v-if="modelValue" class="测试浮层" :data-title="title"><slot /><footer><slot name="footer" /></footer></section>' }
 let wrapper: VueWrapper

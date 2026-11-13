@@ -5,12 +5,14 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { ElDrawer, ElDropdown, ElDropdownItem, ElMessage, ElMessageBox, type MessageBoxData } from 'element-plus'
 import RulePage from './订单规则页面.vue'
 import PricingResult from './比价试算结果.vue'
+import MergeSettings from './合单统一设置.vue'
 import MultiSelectFilter from '@/组件/筛选/多选筛选.vue'
 import { 共享规则, 共享规则日志, 记录规则操作 } from './演示会话'
 import { 当前规则分类 } from './规则编辑会话'
 import { 共享订单, 仓库执行记录, 操作核查证据, 演示库存, 订单版本 } from '../订单处理/演示会话'
 import { 渠道会话 } from '../仓配管理/仓配会话'
 import { 中台比价汇率快照 } from './比价汇率资料'
+import { 创建默认拆单动作 } from './拆单规则模型'
 
 // 只替换浮层外壳，表单、表格及规则编辑组件仍使用实际组件和事件。
 const 浮层桩 = {
@@ -74,12 +76,31 @@ beforeEach(() => {
 afterEach(() => { 页面?.unmount(); 页面 = undefined; 恢复(); 当前规则分类.value = '审单规则'; document.body.innerHTML = ''; vi.restoreAllMocks() })
 
 describe('订单规则工作台的草稿与只读边界', () => {
+  it('合单页上方统一配置，列表和规则详情仅说明进入公共池，其他分类不显示统一设置', async () => {
+    const page = await 打开()
+    expect(page.findComponent(MergeSettings).exists()).toBe(false)
+    await 按钮(page, '合单规则').trigger('click'); await 稳定()
+    expect(page.findComponent(MergeSettings).exists()).toBe(true)
+    expect(page.get('.合单规则列表说明').text()).toContain('同一合单池')
+    const rule = 共享规则.value.find(项 => 项.type === '合单规则')!
+    const row = 规则行(page, rule.name)
+    expect(row.get('.动作摘要').text()).toBe('进入合单池')
+    expect(row.text()).not.toContain('每组最多')
+    await 按钮(row, rule.name).trigger('click'); await 稳定()
+    const detail = 浮层(page, '规则详情')
+    expect(detail.text()).toContain('本规则仅筛选订单')
+    expect(detail.find('.merge-action').exists()).toBe(false)
+    await 按钮(detail, '关闭').trigger('click'); await 稳定()
+    await 按钮(page, '审单规则').trigger('click'); await 稳定()
+    expect(page.findComponent(MergeSettings).exists()).toBe(false)
+  })
   it('分类只显示名称，列表状态只用开关，规则说明为空时不显示占位', async () => {
     const 空说明 = 共享规则.value.find(项 => 项.type === '审单规则')!
     const 有说明 = 共享规则.value.find(项 => 项.type === '审单规则' && 项.id !== 空说明.id)!
     空说明.note = '  '; 有说明.note = '需要展示的规则说明'
     const page = await 打开()
-    expect(page.findAll('.规则页签 [role="tab"]').map(项 => 项.text())).toEqual(['审单规则', '分仓规则', '订单标发规则'])
+    expect(page.findAll('.规则页签 [role="tab"]').map(项 => 项.text())).toEqual(['拆单规则', '合单规则', '分仓规则', '审单规则', '收件信息规则', '订单标发规则'])
+    expect(page.get('.规则页签 [role="tab"][aria-selected="true"]').text()).toBe('审单规则')
     expect(规则行(page, 空说明.name).find('.规则说明').exists()).toBe(false)
     expect(规则行(page, 有说明.name).get('.规则说明').text()).toBe('需要展示的规则说明')
     expect(page.findAll('.状态文字')).toHaveLength(0)
@@ -108,6 +129,29 @@ describe('订单规则工作台的草稿与只读边界', () => {
     expect(确认).toHaveBeenCalledOnce()
     expect(确认.mock.calls[0]![0]).toContain('停用 1 条')
     expect(JSON.stringify({ rules: 共享规则.value, logs: 共享规则日志.value })).toBe(前快照)
+  })
+
+  it.each(['basis', 'condition'] as const)('旧仓库 SKU %s 配置允许停用和删除，但不能重新启用', async kind => {
+    const 原规则: typeof 共享规则.value[number] = { id: 'LEGACY-SPLIT', name: '旧仓库拆单规则', type: '拆单规则', enabled: true, priority: 1, mode: '全部满足', conditions: [{ field: 'platformCode', operator: '等于', value: 'eBay' }], action: '按规则拆分包裹', splitAction: 创建默认拆单动作(), version: 1, updatedAt: '', note: '' }
+    if (kind === 'basis') Object.assign(原规则.splitAction!, { basis: 'warehouse', warehouseScopeId: 'OLD-SCOPE' })
+    else 原规则.conditions.push({ field: 'warehouseSku', operator: '等于', value: 'OLD-SKU' })
+    共享规则.value.push(原规则)
+    当前规则分类.value = '拆单规则'
+    const 确认 = vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue(Object.assign('confirm' as const, { value: '', action: 'confirm' as const }))
+    const 提示错误 = vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: vi.fn() }))
+    const page = await 打开()
+    const 来源 = 共享规则.value.find(rule => rule.id === 原规则.id)!
+    await 规则身份行(page, 来源.id).get('[role="switch"]').trigger('click'); await 稳定()
+    expect(来源.enabled).toBe(false)
+    expect(确认).toHaveBeenCalledOnce()
+    const 停用快照 = JSON.stringify({ rule: 来源, logs: 共享规则日志.value })
+    await 规则身份行(page, 来源.id).get('[role="switch"]').trigger('click'); await 稳定()
+    expect(提示错误).toHaveBeenCalledWith(expect.stringContaining('不能启用'))
+    expect(确认).toHaveBeenCalledOnce()
+    expect(JSON.stringify({ rule: 来源, logs: 共享规则日志.value })).toBe(停用快照)
+    await 更多菜单(规则身份行(page, 来源.id), 'delete')
+    expect(共享规则.value.some(rule => rule.id === 来源.id)).toBe(false)
+    expect(确认).toHaveBeenCalledTimes(2)
   })
 
   it('列表手柄方向键即时移动并保留既有优先级数值，边界不写入且只更新实际变化项', async () => {

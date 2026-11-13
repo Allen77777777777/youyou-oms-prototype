@@ -2,6 +2,7 @@ import type { 全渠道订单, 订单路由 } from '../全渠道订单/类型'
 import type { 渠道配置 } from '../仓配管理/物流渠道配置'
 import { 解析来源时刻 } from '../订单处理/时间展示工具'
 import type { 规则类型 } from './规则逻辑'
+import { 读取收件路由身份, type 收件信息匹配上下文 } from './规则渠道条件'
 
 // 与现有分仓仓库键采用相同编码；不运行时导入规则路由，避免条件字典初始化循环。
 function 仓库身份键(channel: 渠道配置): string { return JSON.stringify([channel.providerId, channel.accountId, channel.warehouseId]) }
@@ -27,7 +28,11 @@ export function 创建发货仓库选项(channels: readonly 渠道配置[]): { v
  * 只按唯一渠道 ID 关联稳定仓库三元组；名称仅展示，不能作为兜底身份。
  * 来源中的任一路由无法识别时整体未知，防止否定条件从部分已知仓库误得出结论。
  */
-export function 读取发货仓库来源(order: 全渠道订单, type: 规则类型, channels: readonly 渠道配置[], action?: string): string[] | undefined {
+export function 读取发货仓库来源(order: 全渠道订单, type: 规则类型, channels: readonly 渠道配置[], action?: string, context?: 收件信息匹配上下文): string[] | undefined {
+  if (type === '收件信息规则') {
+    const identity = 读取收件路由身份(context?.route, channels)
+    return identity ? [identity.warehouseKey] : undefined
+  }
   if (type !== '审单规则' && type !== '订单标发规则') return undefined
   const active = order.fulfillmentOrders.filter(项 => 项.isActive === true)
   // 终止状态与仍有效标志冲突时不自行借默认仓消解。

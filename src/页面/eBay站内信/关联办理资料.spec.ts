@@ -12,6 +12,8 @@ import { returnSession, createReturnData } from '../eBay退换货申请/数据'
 import { afterSaleRecords, activeAfterSaleActor, afterSaleActors } from '../售后单管理/会话'
 import { initializeAfterSaleDemo } from '../售后单管理/演示数据'
 import { 共享订单 } from '../订单处理/演示会话'
+import { disputeRecords } from '../eBay纠纷/模型'
+import { disputeTicketSource } from '../eBay纠纷/导航'
 
 const snapshot = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const initialTickets = snapshot(tickets.value)
@@ -79,7 +81,36 @@ describe('站内信相关办理资料的精确关联', () => {
     expect(getRelatedTicketGroups(undefined, { ...order, shopId: 'shop-uk' }).order).toEqual([])
   })
 
-  it('另一会话工单仅在其订单唯一时归入本订单，多订单会话不泛挂', () => {
+  it('同店同单同买家的旧 Case 工单可关联，同号其他纠纷类型和重复来源不会被误关联', () => {
+    const previousDisputes = disputeRecords.value
+    const caseRecord = previousDisputes.find(row => row.kind === 'EBAY_CASE')!
+    const source = disputeTicketSource(caseRecord)
+    const order = { ...mailSession.orders[0]!, shopId: caseRecord.shopId, orderNo: caseRecord.orderId, buyerId: caseRecord.buyer }
+    const sameIdInquiry = { ...caseRecord, kind: 'INR_REQUEST' as const, orderId: 'OTHER-ORDER' }
+    try {
+      disputeRecords.value = [sameIdInquiry, caseRecord]
+      tickets.value = [
+        task('GD-CASE-OLD', source),
+        task('GD-CASE-EMPTY', { ...source, contextId: '' }),
+        task('GD-CASE-TYPED', { ...source, contextId: 'EBAY_CASE' }),
+        task('GD-INR', disputeTicketSource(sameIdInquiry)),
+        task('GD-UNKNOWN', { ...source, contextId: 'UNKNOWN' }),
+        task('GD-OTHER-SHOP', { ...source, shopId: 'other-shop' }),
+      ]
+      expect(getRelatedTicketGroups(undefined, order).order.map(row => row.id)).toEqual(['GD-CASE-EMPTY', 'GD-CASE-OLD', 'GD-CASE-TYPED'])
+      expect(getRelatedTicketGroups(undefined, { ...order, orderNo: 'OTHER-ORDER' }).order.map(row => row.id)).toEqual(['GD-INR'])
+      expect(getRelatedTicketGroups(undefined, { ...order, buyerId: 'other-buyer' }).order).toEqual([])
+
+      disputeRecords.value = [sameIdInquiry, caseRecord, { ...caseRecord, shopId: 'other-shop' }]
+      expect(getRelatedTicketGroups(undefined, order).order).toHaveLength(3)
+      disputeRecords.value.push({ ...caseRecord, orderId: 'OTHER-ORDER' })
+      expect(getRelatedTicketGroups(undefined, order).order).toEqual([])
+    } finally {
+      disputeRecords.value = previousDisputes
+    }
+  })
+
+  it('另一会话工单按具体消息唯一订单归入，多单或待确认消息不泛挂', () => {
     const order = mailSession.orders.find(row => row.id === 'order-02')!
     const conversation = mailSession.conversations.find(row => row.id === 'conv-02')!
     const message = conversation.messages.find(row => row.kind === 'incoming')!
@@ -87,6 +118,10 @@ describe('站内信相关办理资料的精确关联', () => {
     expect(getRelatedTicketGroups(undefined, order).order.map(row => row.id)).toEqual(['GD-A'])
     mailSession.orders.push({ ...snapshot(order), id: 'other-order', orderNo: 'OTHER-ORDER' })
     conversation.relatedOrderIds.push('other-order')
+    expect(getRelatedTicketGroups(undefined, order).order.map(row => row.id)).toEqual(['GD-A'])
+    message.orderAssociation = { state: 'confirmed', orderIds: [order.id, 'other-order'] }
+    expect(getRelatedTicketGroups(undefined, order).order).toEqual([])
+    message.orderAssociation = { state: 'pending', orderIds: [] }
     expect(getRelatedTicketGroups(undefined, order).order).toEqual([])
   })
 

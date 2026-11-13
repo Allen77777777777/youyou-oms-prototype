@@ -1,4 +1,6 @@
 import { ref, watch } from 'vue'
+import { activeAfterSaleActor, canViewAfterSale, type AfterSaleActor } from './权限'
+export { afterSaleActors, activeAfterSaleActor, canViewAfterSale, type AfterSaleActor } from './权限'
 import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
 import type { 订单路由, 金额 } from '../全渠道订单/类型'
 import { 创建手工订单, 创建手工订单草稿, 原订单关联阻断原因, 校验手工订单, 手工订单路由, type 手工订单草稿 } from '../手工订单/模型'
@@ -51,13 +53,6 @@ export interface AfterSaleRecord extends AfterSaleInput {
   /** 仅记录本单真实发生的本地操作及来源结果更新，历史缺失不补造。 */
   logs?: CustomerServiceLog[]
 }
-export interface AfterSaleActor { id: string; name: string; canApprove: boolean; shopIds: 'all' | string[] }
-export const afterSaleActors: AfterSaleActor[] = [
-  { id: 'ops-01', name: '运营01', canApprove: true, shopIds: 'all' },
-  { id: 'support-01', name: '客服01', canApprove: false, shopIds: 'all' },
-  { id: 'ops-02', name: '运营02', canApprove: true, shopIds: ['shop-us'] },
-]
-export const activeAfterSaleActor = ref<AfterSaleActor>(afterSaleActors[0]!)
 export const afterSaleRecords = ref<AfterSaleRecord[]>([])
 function addLog(record: AfterSaleRecord, operator: string, action: string, content: string, result: string, at?: string) {
   ;(record.logs ??= []).push(createCustomerServiceLog(operator, action, content, result, at))
@@ -76,9 +71,6 @@ watch(() => afterSaleRecords.value.filter(record => record.manualOrderNo).map(re
 }, { flush: 'sync' })
 export interface AfterSaleResult { ok: boolean; message: string; record?: AfterSaleRecord; reused?: boolean }
 
-export function canViewAfterSale(input: Pick<AfterSaleInput, 'shopId'>, actor = activeAfterSaleActor.value): boolean {
-  return actor.shopIds === 'all' || actor.shopIds.includes(input.shopId)
-}
 export function canApproveReship(record: AfterSaleRecord, actor = activeAfterSaleActor.value): boolean {
   return record.kind === '重发' && record.approval === '待审核' && actor.canApprove && canViewAfterSale(record, actor) && canViewAfterSale({ shopId: record.reshipDraft?.storeId || record.shopId }, actor)
 }

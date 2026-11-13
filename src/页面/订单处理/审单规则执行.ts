@@ -7,6 +7,9 @@ import { 人工发货上下文, 共享订单, 当前版本, 提交审核轮次, 
 import { 追加订单备注 } from './订单备注模型'
 import { 共享审单执行设置 } from '../业务配置/规则执行设置'
 import { 读取审单重跑状态, 记录已完成审单 } from './审单重跑'
+import { 初始化订单处理人 } from './处理人模型'
+import { 订单正在等单, 读取订单合单进度 } from './自动合单状态'
+import { 共享自动合单设置 } from '../业务配置/自动合单设置'
 
 type 执行明细 = { 订单号: string; 结果: 规则分流结果 | '跳过'; 原因: string }
 export interface 审单规则执行结果 { 总数: number; 人工截留: number; 审核通过: number; 未匹配转异常: number; 发货条件拦截: number; 跳过: number; 明细: 执行明细[] }
@@ -25,6 +28,10 @@ function 执行审单(待审: 全渠道订单[], 来源: 规则轮次来源): �
     const 来源单 = 待审.filter(订单 => 关联号.includes(订单.systemOrderNo))
     for (const 订单 of 来源单) 已处理.add(订单.systemOrderNo)
     const 资格 = [...人工发货组完整阻断原因(上下文, 关联号)]
+    if (来源单.some(订单 => 订单.ruleSplitDraft)) 资格.push('拆分结果尚未完成逐包分仓，跳过审单且不消耗重跑次数')
+    if (来源单.some(订单 => 订单正在等单(订单.systemOrderNo))) 资格.push('订单正在等单，跳过审单且不消耗重跑次数')
+    // 节点已到但入池条件未知/资料受阻时不能借“没有等待记录”抢跑首轮审单。
+    if (共享自动合单设置.value.enabled && 来源单.some(订单 => 订单.initialReviewPending && 订单.mergeNodeArrival && !读取订单合单进度(订单.systemOrderNo))) 资格.push('订单已到合单节点，等待合单资格核实，暂不执行首轮审单')
     if (来源单.length !== 关联号.length) 资格.push('发货安排部分来源缺失或不在本轮审单范围')
     if (来源单.some(订单 => 订单.reviews.some(项 => 项.status === '审核中'))) 资格.push('本轮审核尚未结束，请查看当前结果')
     if (来源单.some(是售后重发订单)) 资格.push('售后重发订单须人工审核，请在订单处理中核对后审核')
@@ -44,6 +51,10 @@ function 执行审单(待审: 全渠道订单[], 来源: 规则轮次来源): �
       let 配置拦截 = ''
       for (const 项 of 规则) {
         const 候选 = 评估审单候选(项, 共享规则.value, 订单, 渠道会话.value)
+        if (订单.manualShippingPlan?.kind === '拆分发货' && 订单.manualShippingPlan.createdByRule && 候选.pending) {
+          配置拦截 = `拆单后审单规则「${项.name}」条件资料待核实，暂不继续匹配后续规则。`
+          break
+        }
         if (候选.configBlocks) {
           配置拦截 = `审单规则「${项.name}」配置待核实：${候选.configError}。本轮未完成，请修复后重新执行。`
           break
@@ -112,6 +123,13 @@ export function 执行待审核规则轮次(来源: '立即执行' | '定时执�
   return 执行审单(共享订单.value.filter(单 => 单.fulfillmentMode === '自配送' && (单.processingStatus === '待审核' || 是未匹配审单异常(单))), 来源)
 }
 
+/** 放单并完成路由后接续首轮；完整来源一起进入审核，不把放单当作审核通过。 */
+export function 执行合单后首轮审单(订单号: string[]): 审单规则执行结果 {
+  const 范围 = new Set(关联人工发货订单号(人工发货上下文(), 订单号))
+  const 来源单 = 共享订单.value.filter(单 => 范围.has(单.systemOrderNo) && 单.fulfillmentMode === '自配送' && 单.processingStatus === '待审核')
+  return 执行审单(来源单.some(单 => 单.initialReviewPending) ? 来源单 : [], '新单首轮')
+}
+
 /** 本地接入已通过准入及 SKU 前置解析的平台样例；在同一同步调用中完成首轮，之后才开放作业。 */
 export function 初始化新单首轮样例() {
   for (const [索引, 国家] of ['US', 'GB', 'CA'].entries()) {
@@ -119,6 +137,7 @@ export function 初始化新单首轮样例() {
     if (共享订单.value.some(单 => 单.systemOrderNo === 订单号)) continue
     const 新单 = 创建作业样例(40 + 索引, { systemOrderNo: 订单号, initialReviewPending: true, admissionReason: '平台订单已通过准入，已读取中台 SKU 映射。' })
     新单.address.countryCode = 国家
+    初始化订单处理人(新单)
     共享订单.value.unshift(新单)
     执行审单([共享订单.value[0]!], '新单首轮')
   }

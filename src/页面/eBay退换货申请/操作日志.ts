@@ -1,5 +1,6 @@
 import { currentHandlerName } from '@/组件/客服处理人/处理人'
 import { createCustomerServiceLog, type CustomerServiceLog } from '@/组件/客服日志/日志工具'
+import type { ReturnApiRequest } from './接口契约'
 
 export interface ReturnOperationLog extends Partial<CustomerServiceLog> {
   at: string
@@ -8,7 +9,12 @@ export interface ReturnOperationLog extends Partial<CustomerServiceLog> {
   submissionId?: string
   submittedBy?: string
 }
-export interface ReturnSubmission { id: string; operator: string; action: string }
+export interface ReturnSubmission {
+  id: string; operator: string; action: string
+  confirmationId?: string; confirmationIntegrity?: string; identity?: string
+  requestSnapshot?: ReturnApiRequest; submittedAt?: string
+  outcome?: 'pending' | 'unknown' | 'confirmed' | 'failed'; businessId?: string
+}
 interface LoggedReturn { logs: ReturnOperationLog[]; lastSubmission?: ReturnSubmission }
 
 export function recordReturnOperation(row: LoggedReturn, action: string, content: string, result: string, now: string, operator = currentHandlerName.value, related = false, deduplicate = false) {

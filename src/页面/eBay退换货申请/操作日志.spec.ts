@@ -40,6 +40,7 @@ describe('退货退款申请操作日志', () => {
 
   it('备注正文与日志摘要分开，旧日志不补人，同ReturnID跨店不串写', () => {
     const row = createReturnData()[0]!, other = { ...createReturnData()[0]!, shopId: 'another-shop' }
+    const otherLogs = JSON.parse(JSON.stringify(other.logs))
     row.logs = [{ at: now, text: '原历史记录' }]
     currentHandlerId.value = 'staff-02'
     expect(addReturnNote(row, '内部核查的详细原文', now)).toBe('')
@@ -48,7 +49,7 @@ describe('退货退款申请操作日志', () => {
     expect(row.logs.slice(-1)[0]?.content).not.toContain('内部核查的详细原文')
     expect(returnOperationEntries(row)[0]?.content).toBe('原历史记录')
     expect(returnOperationEntries(row)[0]?.operator).toBeUndefined()
-    expect(other.logs).toEqual([])
+    expect(other.logs).toEqual(otherLogs)
   })
 
   it('读取失败单独记录，保留可信资料及上次成功时间', () => {
@@ -61,13 +62,15 @@ describe('退货退款申请操作日志', () => {
   })
   it('无变化刷新只更新技术时间，平台业务推进只记一次', () => {
     const ordinary = createReturnData()[0]!
+    const originalLogs = JSON.parse(JSON.stringify(ordinary.logs))
     syncReturn(ordinary, now); syncReturn(ordinary, '2026-10-29T07:00:00Z')
-    expect(ordinary.logs).toHaveLength(0); expect(ordinary.lastSyncedAt).toBe('2026-10-29T07:00:00Z')
+    expect(ordinary.logs).toEqual(originalLogs); expect(ordinary.lastSyncedAt).toBe('2026-10-29T07:00:00Z')
     const advanced = createReturnData()[17]!
+    const initialCount = advanced.logs.length
     syncReturn(advanced, now)
-    expect(advanced.logs).toHaveLength(1); expect(advanced.logs[0]?.result).toBe('资料已更新')
+    expect(advanced.logs).toHaveLength(initialCount + 1); expect(advanced.logs[initialCount]?.result).toBe('资料已更新')
     syncReturn(advanced, '2026-10-29T07:00:00Z')
-    expect(advanced.logs).toHaveLength(1)
+    expect(advanced.logs).toHaveLength(initialCount + 1)
   })
   it('同一提交重复待核查只记一次，新提交仍独立留痕', () => {
     const row = createReturnData()[0]!
@@ -85,9 +88,10 @@ describe('退货退款申请操作日志', () => {
   })
   it('相同读取失败不重复记，恢复后再次失败保留新的失败事件', () => {
     const row = createReturnData()[0]!
+    const initialCount = row.logs.length
     row.mock = { readFailure: 'all' }
     syncReturn(row, now); syncReturn(row, '2026-10-29T07:00:00Z')
-    expect(row.logs).toHaveLength(1)
+    expect(row.logs).toHaveLength(initialCount + 1)
     delete row.mock.readFailure; syncReturn(row, now)
     const recovered = row.logs.length
     syncReturn(row, '2026-10-29T07:00:00Z'); expect(row.logs).toHaveLength(recovered)

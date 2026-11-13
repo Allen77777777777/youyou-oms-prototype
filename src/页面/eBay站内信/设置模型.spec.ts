@@ -3,10 +3,20 @@ import { createConversations } from './数据'
 import { mailSession, resetMailSession } from './会话'
 import { defaultMailPriority, mailTags, tagOptions } from './邮箱模型'
 import { countMailTagReferences, deleteMailTag, mailTagDefinitions, MAX_MAIL_TAGS, resetMailTagDefinitions, saveMailTag, tagStyle, validateMailTag } from './设置模型'
+import { currentHandlerId } from '@/组件/客服处理人/处理人'
+import { resetMailAccessProfiles } from './权限与协作'
 
-beforeEach(() => { resetMailSession(); resetMailTagDefinitions() })
+beforeEach(() => { currentHandlerId.value = 'staff-01'; resetMailAccessProfiles(); resetMailSession(); resetMailTagDefinitions() })
 
 describe('站内信标签设置', () => {
+  it('使用会话标签与维护字典分别授权，直接调用也不能越过维护权限', () => {
+    const before = JSON.stringify(mailTagDefinitions)
+    currentHandlerId.value = 'staff-02'
+    expect(saveMailTag({ label: '无权新增', color: '#409EFF' })).toMatchObject({ ok: false, error: '没有业务标签字典维护权限' })
+    expect(deleteMailTag('logistics', countMailTagReferences('logistics'))).toMatchObject({ ok: false, error: '没有业务标签字典维护权限' })
+    expect(JSON.stringify(mailTagDefinitions)).toBe(before)
+  })
+
   it('所有初始会话默认普通，字典和筛选共用同一响应式数组', () => {
     expect(createConversations().every(conversation => conversation.priority === 'normal')).toBe(true)
     expect(defaultMailPriority).toBe('normal')

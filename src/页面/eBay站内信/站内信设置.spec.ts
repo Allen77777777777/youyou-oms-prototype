@@ -4,6 +4,8 @@ import { ElMessageBox } from 'element-plus'
 import Settings from './站内信设置.vue'
 import { mailSession, resetMailSession } from './会话'
 import { countMailTagReferences, mailTagDefinitions, resetMailTagDefinitions } from './设置模型'
+import { currentHandlerId } from '@/组件/客服处理人/处理人'
+import { mailAccessProfiles, resetMailAccessProfiles } from './权限与协作'
 
 const wrappers: VueWrapper[] = []
 const DialogShell = { props: ['modelValue', 'title'], emits: ['update:modelValue'], template: '<section v-if="modelValue" role="dialog" :aria-label="title"><slot /><footer><slot name="footer" /></footer></section>' }
@@ -17,10 +19,24 @@ function button(wrapper: VueWrapper, label: string) {
   if (!result) throw new Error(`找不到 ${label}`)
   return result
 }
-beforeEach(() => { resetMailSession(); resetMailTagDefinitions() })
+beforeEach(() => { currentHandlerId.value = 'staff-01'; resetMailAccessProfiles(); resetMailSession(); resetMailTagDefinitions() })
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = ''; vi.restoreAllMocks() })
 
 describe('站内信设置弹窗', () => {
+  it('无字典维护权显示只读，删除确认期间撤权后仍保留字典和引用', async () => {
+    const wrapper = settings(), affected = countMailTagReferences('logistics')
+    let approve!: () => void
+    vi.spyOn(ElMessageBox, 'confirm').mockImplementationOnce(() => new Promise(resolve => { approve = () => resolve('confirm' as never) }))
+    await wrapper.get('[aria-label="删除标签 物流查询"]').trigger('click')
+    mailAccessProfiles['staff-01']!.actions = mailAccessProfiles['staff-01']!.actions.filter(action => action !== 'tagsAdmin')
+    approve()
+    await flushPromises()
+    expect(mailTagDefinitions.some(tag => tag.id === 'logistics')).toBe(true)
+    expect(countMailTagReferences('logistics')).toBe(affected)
+    expect(button(wrapper, '新增标签').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="删除标签 物流查询"]').attributes('disabled')).toBeDefined()
+  })
+
   it('编辑和自定义颜色先写草稿，取消不改变共享标签，确认后稳定ID更新', async () => {
     const wrapper = settings(), original = { ...mailTagDefinitions[0]! }
     await wrapper.get('[aria-label="编辑标签 物流查询"]').trigger('click')

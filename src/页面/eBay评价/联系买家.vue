@@ -5,7 +5,10 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElButton, ElDialog, ElMessage, ElTag } from 'element-plus'
 import ReplyEditor from '../eBay站内信/回复编辑器.vue'
+import MailVerificationLink from '../eBay站内信/发送核查入口.vue'
 import { mailSession } from '../eBay站内信/会话'
+import { canViewMail } from '../eBay站内信/权限与协作'
+import { getVisibleBlockingMailVerifications, getVisibleContactMailVerifications } from '../eBay站内信/发送核查'
 import type { ReplyDraft } from '../eBay站内信/类型'
 import type { TemplateContext } from '../消息模板管理/模型'
 import { formatReviewTime } from './模型'
@@ -47,7 +50,17 @@ const templateContext = computed<TemplateContext>(() => {
   const order = r.orderId ? mailSession.orders.find(item => item.id === r.orderId && item.shopId === r.shopId && item.buyerId === r.buyerId) : undefined
   return { buyerId: r.buyerId, orderNo: r.orderNo, productName: order?.product.title, platformProductName: r.title, platformSku: r.platformSku }
 })
-const history = computed(() => conversation.value?.messages.filter(m => m.kind === 'outgoing').slice(-4).reverse() ?? [])
+const history = computed(() => {
+  const c = conversation.value
+  return c && canViewMail(c) ? c.messages.filter(m => m.kind === 'outgoing').slice(-4).reverse() : []
+})
+const blockingChecks = computed(() => {
+  const selection = target.value
+  if (typeof selection !== 'string') return getVisibleContactMailVerifications(selection)
+  const source = props.application
+  return source && !source.blockedReason && source.buyerId ? getVisibleBlockingMailVerifications({ shopId: source.shopId, buyerId: source.buyerId, originApplication: source }) : []
+})
+const checksOutsideHistory = computed(() => blockingChecks.value.filter(({ message }) => !history.value.includes(message)))
 function prepareWindow() {
   discardWindow()
   if (!props.modelValue || typeof target.value === 'string') return
@@ -107,10 +120,25 @@ const buyerPageActive = useBuyerPageActive()
         </select>
       </label>
       <ReplyEditor v-if="draft && editorConversation" :key="`${sourceKey}:${identity}`" :purpose="application ? 'application-contact' : 'review-contact'" :application-kind="application?.kind" :conversation="editorConversation" :draft="draft" mode="reply" :sending="sending" :uncertain="uncertain" :mark-processed-on-send="false" :template-context="templateContext" @send="send" />
-      <p v-if="blocked && !sending" role="alert" class="review-contact-error">{{ blocked }}</p>
+      <div v-if="blocked && !sending" class="review-contact-blocked">
+        <p role="alert" class="review-contact-error">{{ blocked }}</p>
+        <MailVerificationLink :targets="checksOutsideHistory" @resolved="error = ''" />
+      </div>
       <p v-if="error" role="alert" class="review-contact-error">{{ error }}</p>
       <p v-if="success" role="status" class="review-contact-success">{{ success }}</p>
-      <details v-if="history.length" class="review-contact-history" :open="!!success || !!error"><summary>最近发送记录（{{ history.length }}）</summary><article v-for="message in history" :key="message.id"><header><ElTag :type="message.delivery === 'success' ? 'success' : message.delivery === 'sending' ? 'info' : 'danger'" size="small">{{ message.delivery ? deliveryLabel[message.delivery] : '已记录' }}</ElTag><span>{{ message.sender }} · {{ formatReviewTime(message.at) }}</span></header><strong v-if="message.subject">{{ message.subject }}</strong><p :title="message.body">{{ message.body }}</p><small v-if="message.failureReason">{{ message.failureReason }}</small></article></details>
+      <details v-if="conversation && history.length" class="review-contact-history" :open="!!success || !!error || blockingChecks.length > 0">
+        <summary>最近发送记录（{{ history.length }}）</summary>
+        <article v-for="message in history" :key="message.id">
+          <header>
+            <ElTag :type="message.delivery === 'success' ? 'success' : message.delivery === 'sending' ? 'info' : 'danger'" size="small">{{ message.delivery ? deliveryLabel[message.delivery] : '已记录' }}</ElTag>
+            <span>{{ message.sender }} · {{ formatReviewTime(message.at) }}</span>
+            <MailVerificationLink :targets="[{ conversation, message }]" @resolved="error = ''" />
+          </header>
+          <strong v-if="message.subject">{{ message.subject }}</strong>
+          <p :title="message.body">{{ message.body }}</p>
+          <small v-if="message.failureReason">{{ message.failureReason }}</small>
+        </article>
+      </details>
     </div>
     <template #footer><div class="review-contact-footer"><ElButton v-if="conversation" link type="primary" @click="openMail">查看站内信</ElButton><span /><ElButton @click="opened = false">关闭</ElButton></div></template>
   </ElDialog>

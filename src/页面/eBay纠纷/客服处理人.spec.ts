@@ -51,14 +51,14 @@ it('共同处理人共用一次取消结果，切换人员不会覆盖原提交�
   } finally { currentHandlerId.value = original }
 })
 
-it('退货归属只取本次匹配行，交易身份失配后不采用商品卡仍可见的 SKU', () => {
+it('退货责任快照在交易身份失配后保留，来源恢复也不静默重算', () => {
   initializeReturnDemoContext()
   const row = createReturnData()[0]!
   expect(getReturnHandlerIds(row)).toEqual(['staff-01'])
   const { itemId, transactionId } = row.detail!
   expect(() => applyReturnFull(row, { detail: { itemDetail: { itemId, transactionId: 'another-transaction' } } })).toThrow('交易身份冲突')
   expect(row.sku).toBe('HOME-RACK-01')
-  expect(getReturnHandlerIds(row)).toEqual([])
+  expect(getReturnHandlerIds(row)).toEqual(['staff-01'])
   applyReturnFull(row, { detail: { itemDetail: { itemId, transactionId } } })
   expect(getReturnHandlerIds(row)).toEqual(['staff-01'])
 })

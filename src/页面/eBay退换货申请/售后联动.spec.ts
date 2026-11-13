@@ -23,6 +23,36 @@ beforeEach(() => {
 })
 
 describe('退货申请与售后单按本次办理联动', () => {
+  it('明确失败后重新确认新增尝试并复用原售后单，重复点击不再执行', () => {
+    const row = createReturnData()[0]!, { prepared, input } = prepare(row, 'partial')
+    row.mock = { submit: 'failed' }
+    const first = submitReturnAndSale(row, prepared, input, now)
+    const firstAttempt = row.lastSubmission!.id
+    expect(row.outcome).toBe('failed')
+    expect(submitReturnAndSale(row, prepared, input, now)).toEqual(first)
+    expect(row.lastSubmission!.id).toBe(firstAttempt)
+    const fields = createReturnSaleDraft(row, undefined, 'partial')
+    expect(fields).toMatchObject({ requestId: input.requestId, reason: '破损', note: '客服内部核实依据' })
+    const next = prepareReturnAction(row, 'partial', prepared.draft, now).prepared!
+    expect(next.confirmationId).not.toBe(prepared.confirmationId)
+    const second = submitReturnAndSale(row, next, prepareDirectSale(row, next, fields), now)
+    expect(second).toEqual(first)
+    expect(afterSaleRecords.value).toHaveLength(1)
+    expect(row.submissionAttempts).toHaveLength(2)
+    expect(row.lastSubmission!.id).not.toBe(firstAttempt)
+    expect(row.lastSubmission!.businessId).toBe(input.requestId)
+    expect(row.outcome).toBe('pending')
+    expect(submitReturnAndSale(row, next, input, now)).toEqual(second)
+    expect(row.submissionAttempts).toHaveLength(2)
+  })
+  it('保存尝试失败不建售后单、不执行平台回放', () => {
+    const row = createReturnData()[0]!, { prepared, input } = prepare(row, 'approve')
+    row.mock = { saveFailure: true }
+    expect(submitReturnAndSale(row, prepared, input, now).error).toContain('保存失败')
+    expect(afterSaleRecords.value).toHaveLength(0)
+    expect(row.lastSubmission).toBeUndefined()
+    expect(row.outcome).toBe('idle')
+  })
   it('免寄回使用原平台请求防重，未知回执不会改写同申请的历史退货单', () => {
     const row = createReturnData()[0]!, { input } = prepare(row, 'approve')
     const prior = createAfterSale(input).record!
@@ -38,7 +68,10 @@ describe('退货申请与售后单按本次办理联动', () => {
     row.mock = { submit: 'unknown' }
     expect(submitPreparedReturnAction(row, prepared, now)).toBe('')
     expect(row.afterSaleSubmission).toBeUndefined()
-    expect(submitPreparedReturnAction(row, prepared, now)).toContain('待核查')
+    const originalAttempt = row.lastSubmission!.id
+    expect(submitPreparedReturnAction(row, prepared, now)).toBe('')
+    expect(row.lastSubmission!.id).toBe(originalAttempt)
+    expect(row.outcome).toBe('unknown')
     syncReturnWithSales(row, now)
     expect(row.outcome).toBe('unknown')
     row.mock.resolve = 'success'

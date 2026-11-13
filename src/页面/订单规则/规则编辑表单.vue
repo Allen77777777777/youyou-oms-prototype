@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
-import { ElButton, ElInput, ElInputNumber, ElForm, ElFormItem, ElSelect, ElOption, ElCheckbox, ElRadioGroup, ElRadio, ElTag, ElIcon } from 'element-plus'
+import { ElButton, ElInput, ElInputNumber, ElForm, ElFormItem, ElSelect, ElOption, ElCheckbox, ElRadioGroup, ElRadio, ElTag, ElIcon, ElDrawer } from 'element-plus'
 import type { 全渠道订单 } from '../全渠道订单/类型'
 import { 条件字段名, 规则动作, 读取审单动作, eBay平台订单状态选项, 有效规则优先级, 规则优先级上限, 校验规则配置, type 订单规则, type 条件字段 } from './规则逻辑'
 import { 规则标注 } from './规则标注'
@@ -11,6 +11,16 @@ import ConditionValue from './规则条件输入.vue'
 import SizeHelp from './尺寸材积帮助.vue'
 import ShippingAction from './标发动作输入.vue'
 import WarehouseAction from './分仓动作输入.vue'
+import SplitAction from './拆单动作输入.vue'
+import SplitPreview from './拆单试算结果.vue'
+import MergePreview from './合单试算抽屉.vue'
+import { 拆单标注 } from './拆单规则标注'
+import RecipientAction from './收件信息动作.vue'
+import RecipientPreview from './收件信息试算.vue'
+import { 创建默认收件信息动作, 校验收件信息动作 } from './收件信息规则模型'
+import { 收件信息标注 } from './收件信息规则标注'
+import { 创建默认拆单动作, 校验拆单动作 } from './拆单规则模型'
+import { 校验拆单平台SKU选择 } from './拆单平台SKU'
 import { 初始化分仓策略, 校验分仓策略, 读取分仓路由 } from './规则路由'
 import { 初始化标发动作, 校验标发动作 } from './标发动作'
 import { 规则基础选项, 中台系统用户资料 } from './规则基础选项'
@@ -19,16 +29,26 @@ import { 订单备注字数上限 } from '../订单处理/订单备注模型'
 const props = defineProps<{ draft: 订单规则; rules: 订单规则[]; orders: 全渠道订单[] }>()
 const emit = defineEmits<{ cancel: []; save: [rule: 订单规则] }>()
 const 编辑 = props.draft
+if (编辑.type === '收件信息规则' && !编辑.recipientAction) 编辑.recipientAction = 创建默认收件信息动作()
 编辑.mode = '全部满足'
 if (编辑.type === '审单规则') 编辑.action = 读取审单动作(编辑.action) ?? 编辑.action
 初始化标发动作(编辑)
 初始化分仓策略(编辑)
+if (编辑.type === '拆单规则' && !编辑.splitAction) 编辑.splitAction = 创建默认拆单动作()
+if (编辑.type === '拆单规则' && 编辑.splitAction) delete (编辑.splitAction as { routing?: unknown }).routing
+delete (编辑 as { mergeAction?: unknown }).mergeAction
+if (编辑.type === '合单规则') 编辑.action = '进入合单池'
 const 错误 = reactive<Record<string, string>>({})
 const 尝试保存 = ref(false)
+const 拆单草稿试算打开 = ref(false)
+const 合单草稿试算打开 = ref(false)
 const 优先级错误 = computed(() => 尝试保存.value && !有效规则优先级(编辑.priority) ? `请输入 1～${规则优先级上限} 的整数` : '')
 watch(() => 编辑.conditions, () => { delete 错误.conditions }, { deep: true })
 const 已选字段 = computed(() => [...new Set(编辑.conditions.map(项 => 项.field))])
 const 可选条件分组 = computed(() => 读取可选条件分组(编辑.type))
+function 当前类型条件已移除(field: 条件字段): boolean {
+  return 是否已移除条件(field) || (编辑.type === '拆单规则' && field === 'warehouseSku')
+}
 function 选项(field: 条件字段): { value: string; label: string }[] {
   if (是否多选条件字段(field)) return 规则基础选项(field, props.orders, 渠道会话.value)
   if (field === 'salesOwner') return 中台系统用户资料.value
@@ -46,10 +66,14 @@ function 保存() {
   Object.keys(错误).forEach(key => delete 错误[key])
   if (!编辑.name.trim()) { 错误.name = '请输入规则名称'; return }
   if (优先级错误.value) return
+  if (编辑.type === '拆单规则' && 编辑.splitAction) {
+    编辑.splitAction.selectedSkus = [...new Set(编辑.splitAction.selectedSkus.map(value => value.trim()).filter(Boolean))]
+    编辑.splitAction.mixing.skus = [...new Set(编辑.splitAction.mixing.skus.map(value => value.trim()).filter(Boolean))]
+  }
   const message = 校验规则配置(编辑, props.rules, 渠道会话.value)
   if (message) {
     // 动作配置由动作区即时展示错误，避免条件区残留重复提示。
-    if (message !== 校验标发动作(编辑) && message !== 校验分仓策略(编辑)) 错误.conditions = message
+    if (message !== 校验标发动作(编辑) && message !== 校验分仓策略(编辑) && (编辑.type !== '拆单规则' || message !== 校验拆单动作(编辑.splitAction)) && (编辑.type !== '收件信息规则' || message !== 校验收件信息动作(编辑.recipientAction))) 错误.conditions = message
     return
   }
   for (const 条件 of 编辑.conditions) {
@@ -57,10 +81,16 @@ function 保存() {
     const allowed = new Set(选项(条件.field).map(项 => 项.value))
     if (读取条件多选值(条件).some(value => !allowed.has(value))) { 错误.conditions = `${条件字段名[条件.field]}包含已失效的选项，请重新选择`; return }
   }
+  if (编辑.type === '拆单规则' && 校验拆单平台SKU选择(编辑.splitAction, props.orders)) return
   const 保存项 = JSON.parse(JSON.stringify(编辑)) as 订单规则
   if (保存项.type === '审单规则' && 保存项.orderNote?.trim()) 保存项.orderNote = 保存项.orderNote.trim()
   else delete 保存项.orderNote
   if (保存项.type !== '订单标发规则' || 保存项.action === '无需标发') delete 保存项.shippingAction
+  if (保存项.type !== '拆单规则') delete 保存项.splitAction
+  else if (保存项.splitAction) delete 保存项.splitAction.warehouseScopeId
+  if (保存项.type !== '收件信息规则') delete 保存项.recipientAction
+  delete (保存项 as { mergeAction?: unknown }).mergeAction
+  if (保存项.type === '合单规则') 保存项.action = '进入合单池'
   if (保存项.type !== '分仓规则') delete 保存项.warehouseAction
   else 保存项.action = 保存项.warehouseAction?.mode === 'age' ? '按所选批次口径优先分配库龄合计较高的仓库' : 保存项.warehouseAction?.mode === 'price' ? (保存项.warehouseAction.priceComparison === 'priceAge' ? '按价格与库龄综合匹配仓库及渠道' : '优先分配接口试算总费用最低的仓库及渠道') : 读取分仓路由(保存项, 渠道会话.value)!.warehouse
   emit('save', 保存项)
@@ -86,32 +116,36 @@ function 保存() {
         <p class="侧栏帮助">勾选左侧条件，在右侧填写适用范围。</p>
       </aside>
       <div class="编辑正文">
-        <section class="编辑分区" v-prototype="规则标注('conditions', '匹配条件配置')"><div class="分区标题"><h3>规则条件</h3><ElTag size="small" type="info">{{ 编辑.conditions.length }} 项条件</ElTag></div>
+        <section class="编辑分区" v-prototype="编辑.type === '收件信息规则' ? 收件信息标注('conditions', '收件信息匹配条件') : 规则标注('conditions', '匹配条件配置')"><div class="分区标题"><h3>规则条件</h3><ElTag size="small" type="info">{{ 编辑.conditions.length }} 项条件</ElTag></div>
           <div v-if="!编辑.conditions.length" class="空条件">请从左侧选择至少一项条件</div>
           <div v-for="(条件, index) in 编辑.conditions" :key="`${条件.field}-${index}`" class="编辑条件行">
             <div class="条件标签"><span class="条件序号">{{ String(index + 1).padStart(2, '0') }}</span><strong>{{ 条件字段名[条件.field] }}</strong><SizeHelp v-if="条件.field === 'productDimensions' || 条件.field === 'volume'" :type="条件.field === 'volume' ? 'volume' : 'dimensions'" /></div>
-            <div class="条件控件" :class="{ 整行条件: 是否已移除条件(条件.field) || 条件.field === 'orderAddress' || ['range', 'dimensions', 'volume', 'dimensionRange'].includes(条件定义[条件.field]?.kind), 多行条件: 是否多行文本字段(条件.field) }"><ElSelect v-if="!是否已移除条件(条件.field) && 条件.field !== 'orderAddress' && !['range', 'dimensions', 'volume', 'dimensionRange'].includes(条件定义[条件.field]?.kind)" v-model="条件.operator" :aria-label="`第${index + 1}项比较方式`"><ElOption v-for="操作符 in 条件操作符(条件.field)" :key="操作符" :label="操作符" :value="操作符" /></ElSelect><div v-if="是否已移除条件(条件.field)" class="字段帮助">{{ 格式化条件值(条件) || '未填写' }} · 此条件已移除，请删除后保存规则。</div><ConditionValue v-else :condition="条件" :index="index" :options="选项(条件.field)" :validate="尝试保存" /><ElButton :icon="Delete" text :aria-label="`删除第${index + 1}项条件`" @click="编辑.conditions.splice(index, 1)" /></div>
+            <div class="条件控件" :class="{ 整行条件: 当前类型条件已移除(条件.field) || 条件.field === 'orderAddress' || ['range', 'dimensions', 'volume', 'dimensionRange'].includes(条件定义[条件.field]?.kind), 多行条件: 是否多行文本字段(条件.field) }"><ElSelect v-if="!当前类型条件已移除(条件.field) && 条件.field !== 'orderAddress' && !['range', 'dimensions', 'volume', 'dimensionRange'].includes(条件定义[条件.field]?.kind)" v-model="条件.operator" :aria-label="`第${index + 1}项比较方式`"><ElOption v-for="操作符 in 条件操作符(条件.field)" :key="操作符" :label="操作符" :value="操作符" /></ElSelect><div v-if="当前类型条件已移除(条件.field)" class="字段帮助">{{ 格式化条件值(条件) || '未填写' }} · {{ 编辑.type === '拆单规则' && 条件.field === 'warehouseSku' ? '仓库 SKU 条件已从拆单规则移除，请删除后重新配置。' : '此条件已移除，请删除后保存规则。' }}</div><ConditionValue v-else :condition="条件" :index="index" :options="选项(条件.field)" :validate="尝试保存" /><ElButton :icon="Delete" text :aria-label="`删除第${index + 1}项条件`" @click="编辑.conditions.splice(index, 1)" /></div>
             <p v-if="条件.field === 'salesOwner' && 条件.value && !选项('salesOwner').some(项 => 项.value === 条件.value)" class="字段帮助">原值：{{ 条件.value }}，请重新选择系统用户。</p>
             <p v-if="条件.field === 'siteCode' && !条件.values && 条件.value.trim()" class="字段帮助">原站点条件需重新选择。</p>
             <p v-if="条件.field === 'platformOrderStatus'" class="字段帮助">当前支持 eBay 履约状态，需同时设置“订单平台等于 eBay”。</p>
+            <p v-if="编辑.type === '收件信息规则' && ['shippingWarehouse', 'shippingChannel'].includes(条件.field)" class="字段帮助">按本次请求的{{ 条件字段名[条件.field] }}匹配；运费试算逐一使用候选路线，物流下单及推仓使用实际发货路线。</p>
           </div>
           <p v-if="错误.conditions" class="校验错误" role="alert">{{ 错误.conditions }}</p>
         </section>
         <section class="编辑分区" v-prototype="规则标注('actions', '按类型设定动作')"><div class="分区标题"><h3>执行动作</h3></div>
-          <ElForm label-position="top"><ShippingAction v-if="编辑.type === '订单标发规则'" :rule="编辑" :validate="尝试保存" /><WarehouseAction v-else-if="编辑.type === '分仓规则'" :rule="编辑" :validate="尝试保存" @change="错误.conditions = ''" /><ElFormItem v-else label="命中后执行" required>
+          <ElForm label-position="top"><ElFormItem v-if="编辑.type === '合单规则'" label="命中后执行" v-prototype="规则标注('merge', '订单池筛选规则')"><div class="合单固定动作"><strong>进入合单池</strong><p class="字段帮助">本规则只筛选进入公共合单池的订单。处理模式、等单、放单与合并限制在合单规则页上方统一设置。</p></div></ElFormItem><RecipientAction v-else-if="编辑.type === '收件信息规则'" :rule="编辑" :validate="尝试保存" /><SplitAction v-else-if="编辑.type === '拆单规则'" :rule="编辑" :orders="orders" :validate="尝试保存" /><ShippingAction v-else-if="编辑.type === '订单标发规则'" :rule="编辑" :validate="尝试保存" /><WarehouseAction v-else-if="编辑.type === '分仓规则'" :rule="编辑" :validate="尝试保存" @change="错误.conditions = ''" /><ElFormItem v-else label="命中后执行" required>
             <ElRadioGroup v-model="编辑.action" class="动作选项" aria-label="执行动作"><ElRadio v-for="动作 in 规则动作[编辑.type]" :key="动作" :value="动作">{{ 动作 }}</ElRadio></ElRadioGroup>
           </ElFormItem></ElForm>
-          <div v-if="编辑.type !== '订单标发规则'" class="动作帮助"><ElIcon><component :is="Plus" /></ElIcon><p v-if="编辑.type === '审单规则'">{{ 编辑.action === '自动审核' ? '首条命中本规则时，系统校验发货条件。通过后生成或确认履约，订单进入待推单。' : '首条命中本规则时，订单留在待审核，交人工核对。' }}</p><p v-else>在待审核阶段分配发货仓库和物流渠道；更换仓库后须重新选择渠道。</p></div>
+          <div v-if="编辑.type !== '订单标发规则' && 编辑.type !== '拆单规则' && 编辑.type !== '合单规则' && 编辑.type !== '收件信息规则'" class="动作帮助"><ElIcon><component :is="Plus" /></ElIcon><p v-if="编辑.type === '审单规则'">{{ 编辑.action === '自动审核' ? '首条命中本规则时，系统校验发货条件。通过后生成或确认履约，订单进入待推单。' : '首条命中本规则时，订单留在待审核，交人工核对。' }}</p><p v-else>在待审核阶段分配发货仓库和物流渠道；更换仓库后须重新选择渠道。</p></div>
           <ElForm v-if="编辑.type === '审单规则' && (编辑.action === '人工审核' || 编辑.orderNote?.trim())" label-position="top" class="订单备注配置">
             <ElFormItem :label="编辑.action === '自动审核' ? '人工截留备注（仅人工审核时追加）' : '订单备注'">
               <ElInput v-model="编辑.orderNote" aria-label="订单备注" :readonly="编辑.action === '自动审核'" placeholder="选填，实际截留订单时追加" type="textarea" :rows="3" :maxlength="订单备注字数上限" show-word-limit />
             </ElFormItem>
           </ElForm>
         </section>
+        <section v-if="编辑.type === '收件信息规则'" class="编辑分区" v-prototype="收件信息标注('preview', '门牌解析预览')"><RecipientPreview :rule="编辑" /></section>
         <section class="编辑分区"><div class="分区标题"><h3>规则说明</h3><span>选填</span></div><ElInput v-model="编辑.note" aria-label="规则说明" placeholder="填写规则适用场景，便于团队维护" type="textarea" :rows="3" maxlength="300" show-word-limit /></section>
       </div>
     </div>
-    <footer class="编辑底栏"><span>保存后可在规则试算中检查命中结果</span><div><ElButton @click="emit('cancel')">取消</ElButton><ElButton type="primary" @click="保存">保存规则</ElButton></div></footer>
+    <footer class="编辑底栏"><span>{{ ['拆单规则', '合单规则'].includes(编辑.type) ? '可先试算当前草稿，验证后再保存或启用' : '保存后可在规则试算中检查命中结果' }}</span><div><ElButton @click="emit('cancel')">取消</ElButton><ElButton v-if="编辑.type === '拆单规则'" v-prototype="拆单标注('draft', '试算当前拆单草稿')" @click="拆单草稿试算打开 = true">试算当前草稿</ElButton><ElButton v-if="编辑.type === '合单规则'" @click="合单草稿试算打开 = true">试算当前草稿</ElButton><ElButton type="primary" @click="保存">保存规则</ElButton></div></footer>
+    <ElDrawer v-if="编辑.type === '拆单规则'" v-model="拆单草稿试算打开" title="试算当前拆单草稿" size="min(1120px, calc(100vw - 100px))" class="拆单规则试算抽屉 拆单草稿试算抽屉" append-to-body destroy-on-close><SplitPreview v-if="拆单草稿试算打开" :draft="编辑" @close="拆单草稿试算打开 = false" /></ElDrawer>
+    <MergePreview v-if="编辑.type === '合单规则'" v-model="合单草稿试算打开" :draft-rule="编辑" />
   </div>
 </template>
 
@@ -123,5 +157,10 @@ function 保存() {
 .编辑布局{overflow:hidden}.条件侧栏,.编辑正文{overflow:auto;min-height:0}.可选分组{padding-top:18px}.可选分组 .el-checkbox{height:28px}.范围帮助{margin:9px 0 0 110px;font-size:12px;line-height:1.7;color:var(--yy-text-secondary)}
 .订单备注配置{margin-top:20px}.订单备注配置 :deep(.el-form-item){margin-bottom:0}.订单备注配置 :deep(.el-form-item__label){font-size:12px}
 .条件控件.整行条件{grid-template-columns:minmax(0,1fr) 32px;align-items:start}.条件控件.多行条件{align-items:start}
+.合单固定动作 strong{color:var(--yy-text-heading);font-weight:500}.合单固定动作 .字段帮助{color:var(--yy-text-secondary)}
+:global(.拆单草稿试算抽屉 .el-drawer__header){margin-bottom:0;padding:20px 22px 18px;border-bottom:1px solid var(--yy-border-light)}
+:global(.拆单草稿试算抽屉 .el-drawer__title){font-size:16px;color:var(--yy-text-heading);font-weight:600}
+:global(.拆单草稿试算抽屉 .el-drawer__body){padding:20px 0 0;overflow:hidden;display:flex;flex-direction:column}
+:global(.拆单草稿试算抽屉 .el-drawer__body>.拆单试算){flex:1;min-height:0}
 </style>
 

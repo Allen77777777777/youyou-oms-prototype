@@ -1,7 +1,9 @@
-import { draftKey } from './会话'
+import { draftKey, getPersonalMailStar } from './会话'
 import { 命中字段搜索 } from '@/组件/筛选/筛选工具'
 import { richHtmlToText, sanitizeRichHtml } from '../消息模板管理/富文本'
-import type { Conversation, MailFilters, MailMessage, MailPriority, ReplyDraft } from './类型'
+import type { Conversation, MailFilters, MailMessage, MailPriority, ReplyDraft, RelatedOrder } from './类型'
+import { getMessageOrders } from './消息订单'
+import { canOperateMail, canViewMail } from './权限与协作'
 export { mailTagDefinitions as mailTags, mailTagDefinitions as tagOptions, tagStyle } from './设置模型'
 
 export const mailboxFolders = [
@@ -42,7 +44,12 @@ export function getMessageBodyText(message: MailMessage): string {
 }
 
 /** 会话预筛选后再次匹配具体信件，避免同会话另一条标题或正文带入无关消息。 */
-export function matchesEntryTextSearch(entry: MailboxEntry, filters: MailFilters): boolean {
+export function matchesEntryTextSearch(entry: MailboxEntry, filters: MailFilters, orders?: RelatedOrder[]): boolean {
+  if (filters.field === 'orderNo' && orders) {
+    const messages = entry.message ? [entry.message] : entry.conversation.messages.filter(message => message.kind !== 'note')
+    const numbers = messages.flatMap(message => getMessageOrders(entry.conversation, message, orders).map(order => order.orderNo))
+    return 命中字段搜索(numbers, filters.query, filters.mode, 'identifier')
+  }
   if (filters.field !== 'subject' && filters.field !== 'body') return true
   const { conversation, message } = entry
   if (message?.kind === 'note') return false
@@ -67,8 +74,9 @@ function matchingMessages(conversation: Conversation, folderId: string): MailMes
 
 function matchesConversationFolder(conversation: Conversation, folderId: string, drafts: Record<string, ReplyDraft>): boolean {
   switch (folderId) {
-    case 'starred': return conversation.flagged
+    case 'starred': return getPersonalMailStar(conversation)
     case 'drafts': return (['reply', 'note'] as const).some(mode => {
+      if (!canOperateMail(conversation, mode === 'note' ? 'note' : 'send')) return false
       const draft = drafts[draftKey(conversation.id, mode)]
       return Boolean(draft && (draft.body.trim() || draft.attachments.length))
     })
@@ -80,13 +88,14 @@ function matchesConversationFolder(conversation: Conversation, folderId: string,
 /** 收发目录逐条引用原消息；关注、草稿和忽略保留会话聚合，不复制或搬移记录。 */
 export function mailboxEntries(conversations: Conversation[], folderId: string, drafts: Record<string, ReplyDraft> = {}): MailboxEntry[] {
   return conversations.flatMap(conversation => {
+    if (!canViewMail(conversation)) return []
     if (matchesConversationFolder(conversation, folderId, drafts)) return [{ id: JSON.stringify([conversation.id]), conversation }]
     return matchingMessages(conversation, folderId).map(message => ({ id: JSON.stringify([conversation.id, message.id]), conversation, message }))
   })
 }
 
 export function matchesFolder(conversation: Conversation, folderId: string, drafts: Record<string, ReplyDraft> = {}): boolean {
-  return matchesConversationFolder(conversation, folderId, drafts) || matchingMessages(conversation, folderId).length > 0
+  return canViewMail(conversation) && (matchesConversationFolder(conversation, folderId, drafts) || matchingMessages(conversation, folderId).length > 0)
 }
 
 export function isEntryUnread(entry: MailboxEntry): boolean {

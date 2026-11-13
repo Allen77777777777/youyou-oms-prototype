@@ -47,6 +47,8 @@ afterEach(() => { wrapper?.unmount(); wrapper = undefined; ElMessage.closeAll();
 
 describe('退货详情应用内独立页签', () => {
   it('从工单定位同店退货申请，可在详情新增独立工单且维持申请状态', async () => {
+    // 只渲染本用例实际操作的首行；另一笔仍通过工单来源直达，验证不受列表条件限制。
+    returnListView.applied.query = 'DEMO-RT-001'
     const row = returnSession.records.find(item => item.id === 'DEMO-RT-012')!
     const source = { kind: 'return' as const, id: row.id, shopId: row.shopId, shopName: row.shopName, summary: row.title }
     const count = relatedTickets(source).length

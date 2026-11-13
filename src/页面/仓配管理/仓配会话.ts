@@ -3,12 +3,12 @@ import { 共享订单, 仓库执行记录, 操作核查证据, 预置仓库评�
 import { 同步演示仓库状态, 同步仓库状态阻断原因, 重新推单阻断原因, 执行演示重新推单, 仓单期望版本, 仓单来源订单, 截单阻断原因, 执行演示截单 } from '../订单处理/操作功能模型'
 import { 创建仓配样例, 取得操作拦截, 执行样例动作, 演示时间, type 仓配单据 } from './仓配模型'
 import { 创建出库工作台样例, 创建历史出库快照, 创建推单出库快照, 取得出库详情, 命中截单能力样例, type 出库快照, type 出库作业动作, type 出库截单影响范围 } from './三方仓出库模型'
-import { 创建渠道配置样例, 创建标发联动渠道样例, type 渠道配置, type 渠道操作记录 } from './物流渠道配置'
+import { type 渠道配置, type 渠道操作记录 } from './物流渠道配置'
+import { 渠道会话, 渠道会话审计 } from './渠道状态'
+export { 渠道会话, 渠道会话审计 } from './渠道状态'
 
 export const 仓库会话单据 = ref<仓配单据[]>(创建出库工作台样例())
 export const 物流会话单据 = ref<仓配单据[]>(创建仓配样例('物流'))
-export const 渠道会话 = ref<渠道配置[]>([...创建渠道配置样例(), ...创建标发联动渠道样例()])
-export const 渠道会话审计 = ref<渠道操作记录[]>([])
 // 只收敛领域初始化时固化的旧预置评审对象，领域事实仍用于原门禁。
 // 会话模块首次加载或HMR前已新推的对象不属于该固定集合，仍会正常投影。
 const 启动评审执行 = new Set(预置仓库评审执行身份)
@@ -23,7 +23,12 @@ export function 创建仓库执行投影(execution: 仓库执行, existing?: 仓
     const sources = execution.订单号.map(no => 共享订单.value.find(order => order.systemOrderNo === no)).filter((order): order is NonNullable<typeof order> => !!order)
     const id = `shared-${execution.出库单号}`
     // 路由、收件、来源、计划和逐商品组成在提交时固定；刷新只更新仓库已知执行事实。
-    const snapshot = existing?.outboundDetail ? 复制快照(existing.outboundDetail) : (execution.出库快照 ? 复制快照(execution.出库快照) : 创建历史出库快照(sources, execution.履约单号))
+    // 旧对象可能只有未核实历史投影；本次明确失败后重提形成的已提交快照应取代它，不能继续丢失新推仓时间和范围。
+    const 新提交快照 = execution.收件请求历史?.length && execution.出库快照?.submittedAt ? execution.出库快照 : undefined
+    const snapshot = 新提交快照 && !existing?.outboundDetail?.submittedAt ? 复制快照(新提交快照)
+      : existing?.outboundDetail ? 复制快照(existing.outboundDetail) : (execution.出库快照 ? 复制快照(execution.出库快照) : 创建历史出库快照(sources, execution.履约单号))
+    const 本次收件请求 = execution.收件请求历史?.slice(-1)[0]
+    if (本次收件请求?.address) snapshot.recipient = JSON.parse(JSON.stringify(本次收件请求.address))
     if (snapshot.submittedAt) snapshot.submittedAt = 标准时间(snapshot.submittedAt)
     const route = snapshot.route
     const facts = execution.出库事实

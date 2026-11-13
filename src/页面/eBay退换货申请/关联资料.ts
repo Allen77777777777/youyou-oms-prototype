@@ -7,6 +7,7 @@ import { createReturnData } from './数据'
 import { resolveReturnOrder, resolveReturnItem } from './关联导航'
 import { returnKey, type ReturnRecord } from './模型'
 import { demoReturnItemLinks, type DemoReturnItemLink } from './虚构商品关联'
+import { 初始化订单处理人 } from '../订单处理/处理人模型'
 
 const money = (cents: number, currency: string) => ({ currency, value: `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}` })
 // 固定虚构订单单价，与Return预计退款额独立，不从退款字段反算订单价格。
@@ -108,6 +109,7 @@ export function initializeReturnDemoContext(onlyOrderNo?: string): void {
     if (!resolveReturnOrder(source, [order])) continue
     const link = linkFixtureItem(source, order)
     if (link) demoReturnItemLinks.push(link)
+    初始化订单处理人(order)
     共享订单.value.push(order)
     for (const execution of executions) {
       if (仓库执行记录.value.some(existing => existing.出库单号 === execution.出库单号)) continue

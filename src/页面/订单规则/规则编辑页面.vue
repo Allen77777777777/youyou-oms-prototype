@@ -9,7 +9,11 @@ import { 共享订单 } from '../订单处理/演示会话'
 import { 渠道会话 } from '../仓配管理/仓配会话'
 import { 校验规则配置, type 订单规则 } from './规则逻辑'
 import { 格式化标发动作 } from './标发动作'
+import { 收件信息动作摘要 } from './收件信息规则模型'
 import { 分仓配置摘要 } from './规则路由'
+import { 拆单配置摘要 } from './拆单配置展示'
+import { 初始化拆单规则演示 } from './拆单规则会话'
+import { 确认合单规则退出 } from './合单规则影响'
 import { 创建规则草稿, 读取规则草稿, 丢弃规则草稿, 当前规则分类, type 规则编辑模式, type 规则草稿会话 } from './规则编辑会话'
 import { 关闭业务页签 } from '@/布局/页签操作'
 
@@ -18,6 +22,7 @@ const 模式 = computed(() => route.meta.ruleEditorMode as 规则编辑模式)
 const 标题 = computed(() => 模式.value === 'edit' ? '编辑规则' : 模式.value === 'copy' ? '复制规则' : '新增规则')
 watch(() => route.fullPath, () => {
   const id = String(route.params.sessionId || '')
+  if (模式.value === 'edit' && id.startsWith('RULE-SPLIT-')) 初始化拆单规则演示()
   if (模式.value === 'edit' && !读取规则草稿('edit', id)) {
     const source = 共享规则.value.find(项 => 项.id === id)
     if (source) 创建规则草稿(source.type, 共享规则.value, 'edit', source)
@@ -36,6 +41,8 @@ async function 结束编辑(session: 规则草稿会话 | undefined, editorPath:
 }
 function 取消编辑() { return 结束编辑(会话.value, route.path) }
 async function 保存(保存项: 订单规则) {
+  delete (保存项 as { mergeAction?: unknown }).mergeAction
+  if (保存项.type === '合单规则') 保存项.action = '进入合单池'
   const session = 会话.value, editorPath = route.path
   if (!session) return
   const 会话仍有效 = () => 读取规则草稿(session.mode, session.id) === session
@@ -44,8 +51,10 @@ async function 保存(保存项: 订单规则) {
   let error = 校验规则配置(保存项, 共享规则.value, 渠道会话.value)
   if (error) return void ElMessage.warning(error)
   const 原项 = session.mode === 'edit' ? 共享规则.value.find(项 => 项.id === session.sourceId) : undefined
-  if (保存项.enabled || (原项 && 原项.enabled !== 保存项.enabled)) {
-    try { await ElMessageBox.confirm(`保存后“${保存项.name}”将${保存项.enabled ? '参与' : '不再参与'}后续${保存项.type === '审单规则' ? '审单规则执行及试算' : '规则试算'}。`, 保存项.enabled ? '保存启用规则' : '保存并停用规则', { confirmButtonText: 保存项.enabled ? '保存并启用' : '保存并停用', cancelButtonText: '继续编辑', type: 'warning' }) } catch { return }
+  if (保存项.type === '合单规则' && 原项?.enabled && !保存项.enabled) {
+    if (!await 确认合单规则退出([原项.id], { message: `保存后“${保存项.name}”将停止筛选新订单进入公共合单池。`, title: '保存并停用合单规则', confirmButtonText: '保存并结束相关等待', cancelButtonText: '继续编辑' })) return
+  } else if (保存项.enabled || (原项 && 原项.enabled !== 保存项.enabled)) {
+    try { await ElMessageBox.confirm(`保存后“${保存项.name}”将${保存项.enabled ? '参与' : '不再参与'}后续${保存项.type === '收件信息规则' ? '新建订单的收件信息处理及试算' : 保存项.type === '审单规则' ? '审单规则执行及试算' : 保存项.type === '拆单规则' ? '拆单规则执行及试算' : 保存项.type === '合单规则' ? '公共合单池订单筛选及试算' : '规则试算'}。`, 保存项.enabled ? '保存启用规则' : '保存并停用规则', { confirmButtonText: 保存项.enabled ? '保存并启用' : '保存并停用', cancelButtonText: '继续编辑', type: 'warning' }) } catch { return }
   }
   if (!会话仍有效()) return void ElMessage.warning('编辑已结束，本次保存已取消')
   if (!检查版本()) return void ElMessage.warning('确认期间规则已变化，请重新打开编辑')
@@ -54,6 +63,8 @@ async function 保存(保存项: 订单规则) {
   保存项.name = 保存项.name.trim(); 保存项.note = 保存项.note.trim()
   if (保存项.type === '审单规则' && 保存项.orderNote?.trim()) 保存项.orderNote = 保存项.orderNote.trim()
   else delete 保存项.orderNote
+  if (保存项.type !== '拆单规则') delete 保存项.splitAction
+  if (保存项.type !== '收件信息规则') delete 保存项.recipientAction
   if (保存项.type !== '订单标发规则' || 保存项.action === '无需标发') delete 保存项.shippingAction
   保存项.updatedAt = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) + ' UTC+8'
   保存项.version = 原项 ? 原项.version + 1 : 1
@@ -61,14 +72,14 @@ async function 保存(保存项: 订单规则) {
   写入规则配置(保存项)
   const action = 原项 ? '编辑' : session.mode === 'copy' ? '复制' : '新增'
   const 优先级记录 = 原项 && 原项.priority !== 保存项.priority ? `优先级 ${原项.priority} → ${保存项.priority}` : `优先级 ${保存项.priority}`
-  记录规则操作(保存项, action, `${action}规则「${保存项.name}」；${保存项.enabled ? '启用' : '停用'}；${优先级记录}；${保存项.conditions.length} 项条件全部满足${保存项.type === '订单标发规则' ? `；${格式化标发动作(保存项)}` : 保存项.type === '分仓规则' ? `；${分仓配置摘要(保存项, 渠道会话.value).join('；')}` : `；${保存项.action}`}${原项 && 原项.name !== 保存项.name ? `；原名称：${原项.name}` : ''}`, 保存项.updatedAt)
-  ElMessage.success('规则已保存到本次会话')
+  记录规则操作(保存项, action, `${action}规则「${保存项.name}」；${保存项.enabled ? '启用' : '停用'}；${优先级记录}；${保存项.conditions.length} 项条件全部满足${保存项.type === '收件信息规则' ? `；${原项 ? `原配置：${收件信息动作摘要(原项.recipientAction)}；新配置：` : ''}${收件信息动作摘要(保存项.recipientAction)}` : 保存项.type === '拆单规则' ? `；${拆单配置摘要(保存项.splitAction, 渠道会话.value).join('；')}` : 保存项.type === '订单标发规则' ? `；${格式化标发动作(保存项)}` : 保存项.type === '分仓规则' ? `；${分仓配置摘要(保存项, 渠道会话.value).join('；')}` : `；${保存项.action}`}${原项 && 原项.name !== 保存项.name ? `；原名称：${原项.name}` : ''}`, 保存项.updatedAt)
+  ElMessage.success('规则已保存')
   await 结束编辑(session, editorPath)
 }
 </script>
 
 <template>
-  <main class="规则编辑页">
+  <main class="规则编辑页" :class="{ 拆单规则编辑页: 会话?.draft.type === '拆单规则', 收件规则编辑页: 会话?.draft.type === '收件信息规则' }">
     <header class="编辑页标题"><div><ElButton link :icon="ArrowLeft" @click="返回列表">返回规则列表</ElButton><i /><h1>{{ 标题 }}</h1><ElTag v-if="会话" size="small" type="info">{{ 会话.draft.type }}</ElTag></div><span v-if="会话?.draft.type === '分仓规则'">设置发货仓库与物流渠道</span></header>
     <RuleForm v-if="会话" :key="会话.key" :draft="会话.draft" :rules="共享规则" :orders="共享订单" @save="保存" @cancel="取消编辑" />
     <ElEmpty v-else description="未找到规则或草稿已失效"><ElButton type="primary" @click="取消编辑">返回规则列表</ElButton></ElEmpty>
@@ -77,4 +88,5 @@ async function 保存(保存项: 订单规则) {
 
 <style scoped>
 .规则编辑页{display:flex;flex-direction:column;height:100%;min-height:0;background:#fff}.编辑页标题{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-shrink:0;padding:16px 24px;border-bottom:1px solid var(--yy-border-light)}.编辑页标题>div{display:flex;align-items:center;gap:14px;min-width:0}.编辑页标题 h1{font-size:16px;margin:0;font-weight:600}.编辑页标题 i{height:16px;width:1px;background:var(--yy-border)}.编辑页标题 .el-button{font-size:12px;color:var(--yy-text-secondary)}.编辑页标题>span{font-size:12px;color:var(--yy-text-secondary)}.规则编辑页>:last-child{flex:1;min-height:0}
+.拆单规则编辑页 :deep(.编辑正文),.收件规则编辑页 :deep(.编辑正文){max-width:none}
 </style>

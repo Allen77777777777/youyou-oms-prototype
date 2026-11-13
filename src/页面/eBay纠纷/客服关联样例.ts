@@ -3,6 +3,7 @@ import { 共享订单 } from '../订单处理/演示会话'
 import { mailSession } from '../eBay站内信/会话'
 import { demoMailRecipient } from '../eBay站内信/申请收件身份'
 import type { DisputeRecord } from './类型'
+import { 初始化订单处理人 } from '../订单处理/处理人模型'
 
 // 独立的虚构已发货订单和来信。打开纠纷时只补齐当前样例，金额及物流取自订单样例。
 const fixtures = [
@@ -77,7 +78,9 @@ export function initializeDisputeFixture(row: DisputeRecord, area?: 'order' | 'm
   const systemOrderNo = 'OMS-DEMO-DS-' + f.suffix
   if (area !== 'mail' && !共享订单.value.some(item => item.systemOrderNo === systemOrderNo ||
       (item.platformCode === 'eBay' && item.storeId === shopId && (item.platformOrderNo === f.orderNo || item.platformOrderId === f.orderNo)))) {
-    共享订单.value.push(createOrder(f))
+    const order = createOrder(f)
+    初始化订单处理人(order)
+    共享订单.value.push(order)
   }
   if (area === 'order' || f.suffix !== '101') return
   const id = 'DEMO-MAIL-DS-101'

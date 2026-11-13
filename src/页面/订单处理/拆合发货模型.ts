@@ -1,4 +1,5 @@
 import { 是未匹配审单异常 } from '../全渠道订单/类型'
+import { 订单正在等单 } from './自动合单状态'
 import type { 人工发货包裹, 人工发货方案, 全渠道订单, 订单路由 } from '../全渠道订单/类型'
 
 /** 仅供本地原型评审。真实平台条件、库存与渠道适用性仍须由审核复验。 */
@@ -18,6 +19,10 @@ export interface 拆合发货上下文 {
   当前时间?: () => string
   可选路由?: readonly 订单路由[]
   库存检查?: (方案: 人工发货方案) => string[]
+  /** 自动处理主链在首轮审单之前生成拆分安排；不豁免任何发货安全或库存检查。 */
+  规则拆单?: boolean
+  /** 合单阶段只豁免首轮尚未完成的编排限制；其余安全检查继续执行。 */
+  规则合单?: boolean
 }
 
 export interface 拆合发货结果 { 成功: boolean; 信息: string; 方案?: 人工发货方案 }
@@ -132,9 +137,10 @@ function 合并订单匹配阻断原因(来源: 全渠道订单[]): string[] {
   return 唯一(原因)
 }
 
-function 发货执行安全阻断原因(上下文: 拆合发货上下文, 单: 全渠道订单): string[] {
+export function 发货执行安全阻断原因(上下文: 拆合发货上下文, 单: 全渠道订单): string[] {
   const 号 = 单.systemOrderNo
   const 原因: string[] = []
+  if (单.ruleSplitDraft) 原因.push('已有待分仓拆分结果，请先完成分仓或撤销该结果；已拆分订单不参与合单')
   if (单.fulfillmentOrders.some(项 => 项.isActive)) 原因.push(`${号} 已有有效履约，请先安全结束原方案并退回待审核`)
   if (单.fulfillmentOrders.some(项 => !Number.isInteger(项.shippedQuantity) || 项.shippedQuantity !== 0 || 项.shippedAt || 项.status === '已发货')) 原因.push(`${号} 已有出库事实或历史出库数量未核实，不能重新拆合`)
   const 履约号 = new Set(单.fulfillmentOrders.map(项 => 项.fulfillmentOrderNo))
@@ -165,7 +171,8 @@ export function 人工发货撤销阻断原因(上下文: 拆合发货上下文,
 function 人工发货来源阻断原因(上下文: 拆合发货上下文, 单: 全渠道订单, 类型: 人工发货方案['kind']): string[] {
   const 号 = 单.systemOrderNo
   const 原因: string[] = []
-  if (单.initialReviewPending) 原因.push('平台新单尚未完成首轮审单规则，暂不能编排发货安排')
+  if (单.initialReviewPending && !(上下文.规则拆单 && 类型 === '拆分发货') && !(上下文.规则合单 && 类型 === '合并发货')) 原因.push('平台新单尚未完成首轮审单规则，暂不能编排发货安排')
+  if (订单正在等单(号) && !上下文.规则合单) 原因.push('订单正在等单，请先结束合单等待再编排发货安排')
   if (单.fulfillmentMode !== '自配送' || 单.processingStatus !== '待审核') 原因.push(`${号} 仅待审核自配送订单可编排发货安排`)
   if (单.blockReason || 单.cancelledAt) 原因.push(`${号} ${单.blockReason || '已确认最终取消，禁止继续发货'}`)
   if (单.reviews.some(项 => 项.status === '审核中')) 原因.push(`${号} 尚有审核未结束，请稍后刷新`)

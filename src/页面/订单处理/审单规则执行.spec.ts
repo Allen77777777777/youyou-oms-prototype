@@ -203,6 +203,7 @@ describe('正式审单三种去向', () => {
     共享规则.value = 初始规则
     初始化新单首轮样例()
     初始化新单首轮样例()
+    expect(共享订单.value.every(单 => 单.handlerAssignment?.handlerIds.join(',') === 'staff-01')).toBe(true)
     expect(共享订单.value.map(单 => [单.address.countryCode, 单.processingStatus, 单.reviews.length])).toEqual([['CA', '异常', 1], ['GB', '待推单', 1], ['US', '待审核', 1]])
     共享订单.value = []
     共享规则.value = [{ ...人工, action: '非法动作' }]

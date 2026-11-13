@@ -5,6 +5,7 @@ import { 查找所选仓库物流 } from '../订单处理/仓库物流选择模�
 import { 追加订单备注, 订单备注字数上限 } from '../订单处理/订单备注模型'
 import { 渠道会话 } from '../仓配管理/仓配会话'
 import { 是手工订单, 校验手工原订单关联 } from './来源规则'
+import { 初始化订单处理人 } from '../订单处理/处理人模型'
 
 export const 手工订单场景 = ['线下销售', '寄样赠送', '售后补寄', '其他'] as const
 export type 手工订单场景类型 = typeof 手工订单场景[number]
@@ -199,6 +200,7 @@ export function 创建手工订单(输入: 手工订单草稿, 售后单号?: st
     }),
     fulfillmentOrders: [], reviews: [], sync: { latestAttempt: '', message: '人工创建，无平台下载或同步任务。' }, operationLogs: [],
   }
+  初始化订单处理人(订单, 时间)
   共享订单.value.unshift(订单)
   const 已保存 = 共享订单.value.find(单 => 单.systemOrderNo === 单号)!
   if (草稿.note) 追加订单备注(单号, 草稿.note)

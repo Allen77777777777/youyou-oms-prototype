@@ -27,6 +27,7 @@ const 地址 = computed(() => [props.address.addressLine1, props.address.address
     <dt>电话：</dt><dd>{{ 电话 }}</dd>
     <dt>邮箱：</dt><dd>{{ address.email || '—' }}</dd>
     <template v-if="showAddress"><dt>地址：</dt><dd>{{ 地址 }}</dd></template>
+    <template v-if="showAddress && address.houseNumber"><dt>来源门牌：</dt><dd>{{ address.houseNumber }}</dd></template>
   </dl>
 </template>
 

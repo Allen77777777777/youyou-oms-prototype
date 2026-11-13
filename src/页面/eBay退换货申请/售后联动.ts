@@ -3,7 +3,7 @@ import { afterSaleRecords, createAfterSale, createPlatformAfterSale, updateAfter
 import { resolveReturnItem, resolveReturnOrder } from './关联导航'
 import { formatMinor, parseMoney, type PreparedReturnAction, type ReturnAction, type ReturnActionDraft, type ReturnMoney } from './接口契约'
 import { captureReturnHandlers } from './处理人'
-import { isReturnClosed, syncReturn, submitPreparedReturnAction, validatePreparedReturnAction, type ReturnRecord } from './模型'
+import { hasReturnRefundSuccess, isReturnClosed, syncReturn, submitPreparedReturnAction, validatePreparedReturnAction, type ReturnRecord } from './模型'
 
 export interface ReturnSaleDraft {
   requestId: string
@@ -37,8 +37,15 @@ export function returnSaleItem(row: ReturnRecord) {
   const sourceLineId = detail?.itemId && detail.transactionId ? JSON.stringify([detail.itemId, detail.transactionId]) : ''
   return { lineId: item?.externalLineId || sourceLineId, sku: item?.systemSku, title: title || '申请商品' }
 }
-export function createReturnSaleDraft(row: ReturnRecord, requestId: string = crypto.randomUUID()): ReturnSaleDraft {
-  return { requestId, quantity: row.quantity ?? undefined, reason: '', note: '', refundScope: '' }
+export function retryReturnSale(row: ReturnRecord, action: ReturnAction) {
+  const previous = row.afterSaleSubmission
+  if (row.outcome !== 'failed' || previous?.action !== action) return undefined
+  return afterSaleRecords.value.find(record => record.no === previous.no && record.shopId === row.shopId && record.returnId === row.id && record.requestId === previous.requestId)
+}
+export function createReturnSaleDraft(row: ReturnRecord, requestId?: string, action?: ReturnAction): ReturnSaleDraft {
+  const retry = !requestId && action ? retryReturnSale(row, action) : undefined
+  return { requestId: requestId || retry?.requestId || crypto.randomUUID(), quantity: retry?.items[0]?.quantity ?? row.quantity ?? undefined,
+    reason: retry?.items[0]?.reason || '', note: retry?.note || '', refundScope: retry?.kind === '全额退款' || retry?.kind === '部分退款' ? retry.kind : '' }
 }
 export function validateSaleQuantity(row: ReturnRecord, draft: Pick<ReturnSaleDraft, 'quantity'>): string {
   if (row.detail?.quantityConflict || !Number.isSafeInteger(row.quantity) || !row.quantity || row.quantity < 1) return '申请商品数量待核实，请先刷新资料'
@@ -69,7 +76,11 @@ export function prepareDirectSale(row: ReturnRecord, prepared: PreparedReturnAct
 /** 二次确认后先复验资格及联填资料。两项校验通过才落单并沿用原本唯一的提交入口。 */
 export function submitReturnAndSale(row: ReturnRecord, prepared: PreparedReturnAction, input: AfterSaleInput, now = new Date().toISOString()) {
   if (input.shopId !== row.shopId || input.returnId !== row.id || !isSaleAction(prepared.action, prepared.draft.keepOriginalItem)) return { error: '请核对申请和售后处理方式' }
-  if (afterSaleRecords.value.some(record => record.shopId === row.shopId && record.returnId === row.id && record.requestId === input.requestId)) {
+  const priorAttempt = row.submissionAttempts?.find(attempt => attempt.confirmationId === prepared.confirmationId)
+  if (priorAttempt && priorAttempt.businessId !== input.requestId) return { error: '本次确认已关联原办理，请勿改为另一笔售后单' }
+  const existingDoc = afterSaleRecords.value.find(record => record.shopId === row.shopId && record.returnId === row.id && record.requestId === input.requestId)
+  const retry = retryReturnSale(row, prepared.action)
+  if (existingDoc && (retry?.no !== existingDoc.no || row.submissionAttempts?.some(attempt => attempt.confirmationId === prepared.confirmationId))) {
     const existing = createAfterSale(input)
     return existing.ok && existing.record ? { error: '', no: existing.record.no } : { error: existing.message }
   }
@@ -86,11 +97,12 @@ export function submitReturnAndSale(row: ReturnRecord, prepared: PreparedReturnA
   const created = createAfterSale(input)
   if (!created.ok || !created.record) return { error: created.message }
   const no = created.record.no
-  if (created.reused) return { error: '', no }
   const error = submitPreparedReturnAction(row, prepared, now)
   if (error) { updateAfterSaleResult(no, '未提交：' + error); return { error, no } }
   row.afterSaleSubmission = { no, requestId: input.requestId, action: prepared.action }
-  updateAfterSaleResult(no, row.outcome === 'failed' ? '平台提交失败' : row.outcome === 'unknown' ? '平台结果待核实' : '已提交，待平台回查')
+  if (row.lastSubmission) row.lastSubmission.businessId = input.requestId
+  if (prepared.action === 'refund' && hasReturnRefundSuccess(row)) row.afterSaleRefundNo = no
+  updateAfterSaleResult(no, prepared.action === 'refund' && hasReturnRefundSuccess(row) ? '平台已确认退款，实退金额待核实' : row.outcome === 'failed' ? '平台提交失败' : row.outcome === 'unknown' ? '平台结果待核实' : '已提交，待平台回查')
   return { error: '', no }
 }
 export function prepareReship(row: ReturnRecord, fields: ReturnSaleDraft): AfterSaleInput {

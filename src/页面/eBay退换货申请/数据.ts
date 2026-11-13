@@ -1,8 +1,10 @@
 import { reactive } from 'vue'
 import { emptyReturnDetail, formatMinor, parseMoney, type ReturnAddress, type ReturnRecord } from './模型'
 import { syncReturnWithSales } from './售后联动'
+import { applyRmaGraphqlQuery } from './RMA授权'
 import { completeReturnFieldSamples } from './字段补齐样例'
 import { demoMailRecipient } from '../eBay站内信/申请收件身份'
+import { initializeReturnHandlers } from './处理人'
 export const returnShops = [
   { value: 'shop-us', label: '演示店铺-US' }, { value: 'demo-outdoor-uk', label: '户外精选店 UK' },
   { value: 'demo-parts-us', label: '汽配专营店 US' }, { value: 'demo-new-us', label: '生活精选新店 US' },
@@ -35,7 +37,7 @@ export function createReturnData(): ReturnRecord[] {
     make(12, { title: '厨房收纳篮', state: 'ITEM_SHIPPED', status: 'ITEM_SHIPPED', options: ['SELLER_MARK_AS_RECEIVED', 'SELLER_SEND_MESSAGE'], shipping: '物流显示已送达，待卖家确认', tracking: 'DEMO-RET-TRACK-012' }),
     make(13, { title: '便携保温杯', state: 'REFUND_FAILED', status: 'ITEM_DELIVERED', options: ['SELLER_RETRY_REFUND', 'SELLER_SEND_MESSAGE'], received: true, shipping: '已退回，退款失败待核实' }),
     make(14, { title: '旅行收纳包 · 留言核查', outcome: 'unknown', pendingAction: 'message', pendingText: 'Please keep the packaging.', mock: { resolve: 'success' } }),
-    make(15, { title: '宠物食盆 · 退款核查', state: 'ITEM_KEPT', keepItem: true, options: ['SELLER_ISSUE_REFUND', 'SELLER_SEND_MESSAGE'], outcome: 'unknown', pendingAction: 'refund', mock: { resolve: 'failed' } }),
+    make(15, { title: '宠物食盆 · 退款核查', state: 'ITEM_KEPT', keepItem: true, options: ['SELLER_ISSUE_REFUND', 'SELLER_SEND_MESSAGE'], outcome: 'unknown', pendingAction: 'refund', mock: { resolve: 'failed', issueRefundResponse: { refundStatus: 'SUCCESS' }, issueRefundHttpStatus: 200 } }),
     make(16, { title: '户外折叠凳 · 提交拒绝', options: ['SELLER_SEND_MESSAGE'], mock: { submit: 'failed', error: '平台明确拒绝本次留言，请刷新当前资格后重试' } }),
     make(17, { title: '收纳箱 · 部分读取失败', mock: { readFailure: 'detail' } }),
     make(18, { title: '宠物旅行垫 · 自动批准', afterSaleEventReasons: { [JSON.stringify(['autoApprove', 'DEMO-ACT-018'])]: '不合适' }, mock: { externalEvent: 'autoApprove', externalEventId: 'DEMO-ACT-018', externalKeepOriginalItem: false } }),
@@ -114,7 +116,15 @@ export function createReturnData(): ReturnRecord[] {
     }
   }
   completeReturnFieldSamples(records)
+  for (const [index, row] of records.entries()) initializeReturnHandlers(row, {
+    at: row.createdAt, actorId: 'system',
+    lines: [{ sourceId: JSON.stringify([row.detail!.itemId, row.detail!.transactionId]), verified: index < 3,
+      ...(index < 3 ? { systemSku: row.sku } : { issue: '申请商品与系统 SKU 关联尚未核实' }) }],
+  })
   for (const row of records) row.mailRecipient = demoMailRecipient(row.shopId, row.buyerId)
+  // 此样例额外提供新版接口的独立虚构资格；其他样例继续使用 Post-Order。
+  const rmaDemo = records[9]!
+  applyRmaGraphqlQuery(rmaDemo, { data: { orderReturn: { __typename: 'OrderReturn', returnId: rmaDemo.id, status: { code: 'OPEN' }, sellerAvailableActions: { respondByAction: { respondAction: { code: 'PROVIDE_RMA_NUMBER' } }, secondaryActions: [] }, returnFulfillment: { rmaDetails: [] } } } }, { shopId: rmaDemo.shopId, returnId: rmaDemo.id, marketplaceId: rmaDemo.marketplaceId!, enabled: true })
   return records
 }
 export const returnSession = reactive({ records: createReturnData() })
@@ -127,7 +137,10 @@ export function syncReturnList(records: ReturnRecord[], shopIds: string[], now =
       const first = createReturnData()[0]!
       // 首次拉取的新买家尚未核实站内信收件身份，不能沿用示例申请的映射。
       delete first.mailRecipient
-      first.id = 'DEMO-RT-NEW-001'; first.shopId = shop.value; first.shopName = shop.label; first.orderNo = 'DEMO-NEW-ORDER-001'; first.buyerId = 'demo_new_buyer'; first.systemOrderNo = undefined; first.outbounds = null; first.orderProducts = null; first.detail!.files = []; first.detail!.orderAddress = null; records.push(first); added++
+      delete first.handlerAssignment
+      first.id = 'DEMO-RT-NEW-001'; first.shopId = shop.value; first.shopName = shop.label; first.orderNo = 'DEMO-NEW-ORDER-001'; first.buyerId = 'demo_new_buyer'; first.systemOrderNo = undefined; first.outbounds = null; first.orderProducts = null; first.detail!.files = []; first.detail!.orderAddress = null
+      initializeReturnHandlers(first, { at: now, actorId: 'system', lines: [{ sourceId: first.id, verified: false, issue: '申请商品与系统 SKU 关联尚未核实' }] })
+      records.push(first); added++
     }
     for (const row of records.filter(item => item.shopId === shop.value)) { const result = syncReturnWithSales(row, now); if (result.status === 'success') succeeded++; else failed++ }
   }

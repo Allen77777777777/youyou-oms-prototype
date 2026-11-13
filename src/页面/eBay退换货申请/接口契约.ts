@@ -2,6 +2,8 @@
 import { 读取排序时刻 } from '@/组件/筛选/筛选工具'
 import { actionNames, actionOptions, escalationReasons, getReturnBlockedReason, getReturnDetail, isEscalated, isReturnClosed, knownReturnStates, knownReturnStatuses, returnKey, type ReturnRecord } from './模型'
 import { recordReturnOperation, startReturnSubmission } from './操作日志'
+import { buildRmaGraphqlRequest, usesRmaGraphql, type RmaGraphqlSource } from './RMA授权'
+import { getReturnWritePermissionError } from './权限'
 export type ReturnAction = 'approve' | 'decline' | 'offerReturn' | 'partial' | 'refund' | 'message' | 'escalate' | 'provideRma' | 'receive' | 'label'
 export interface ReturnMoney { value: string; currency: string; convertedFromValue?: string; convertedFromCurrency?: string; exchangeRate?: string }
 export interface ReturnAddress { name: string; addressLine1: string; addressLine2?: string; city: string; stateOrProvince: string; postalCode: string; country: string }
@@ -33,6 +35,7 @@ export interface ReturnDetailData {
   files: ReturnAttachment[]; shipments: ReturnShipment[]; refund: ReturnRefundInfo;
   sellerDue: ReturnDue | null; buyerDue: ReturnDue | null; timeoutAt: string | null;
   rmaRequired: boolean | null; rmaNumber: string | null; shippingPayer: string | null;
+  rmaGraphql?: RmaGraphqlSource;
   availableActions: Array<{ actionType: string; actionURL?: string }>;
   closeInfo: { at: string | null; reason: string; buyerReason: string; buyerComment: string } | null;
   holdInfo: { status: string; reason: string; until: string | null; createdAt?: string | null; referenceId?: string; transactionId?: string } | null; contentOnHold: boolean;
@@ -46,10 +49,12 @@ export interface ReturnActionDraft {
   refundItems: Array<{ refundFeeType: string; currency: string; value: string; selected: boolean }>;
   label: { labelAction: 'UPLOAD_LABEL' | 'MARK_AS_SENT' | 'NO_LABEL'; fileId: string; carrierEnum: string; trackingNumber: string; noLabelReason: string; labelSentDate: string; returnLabelCost: string };
 }
-export interface ReturnApiRequest { method: 'POST'; path: string; body: Record<string, unknown> }
-export interface PreparedReturnAction { action: ReturnAction; request: ReturnApiRequest; draft: ReturnActionDraft; identity: string; sourceSignature: string; integrity: string; preparedAt: string }
+export interface ReturnApiRequest { method: 'POST'; path: string; body: Record<string, unknown>; api?: 'return-graphql'; headers?: Record<string, string> }
+export interface PreparedReturnAction { action: ReturnAction; request: ReturnApiRequest; draft: ReturnActionDraft; identity: string; sourceSignature: string; integrity: string; preparedAt: string; confirmationId: string }
+export interface ReturnRefundEvidence { shopId: string; returnId: string; submissionId: string; status: 'SUCCESS'; observedAt: string; source: 'issue_refund' }
+export interface IssueRefundResponseContext { shopId: string; returnId: string; submissionId: string; httpStatus: number; request: ReturnApiRequest }
 export interface ReturnRefundResult { status: 'SUCCESS' | 'FAILED' | 'PENDING'; sellerActual: ReturnMoney | null; buyerActual: ReturnMoney | null; actualItems: Array<{ refundFeeType: string; amount: ReturnMoney }>; issuedAt: string | null; initiator: string; state: string; returnStatus: string; closeAt?: string; closeReason?: string; error?: string; actualTotal?: ReturnMoney | null; netChargeAmount?: ReturnMoney | null; feeCreditAmount?: ReturnMoney | null; fundings?: ReturnFunding[] }
-export interface ReturnMockScenario { submit?: 'accepted' | 'failed' | 'unknown'; resolve?: 'success' | 'failed' | 'unknown'; readFailure?: 'summary' | 'detail' | 'files' | 'tracking' | 'all'; externalEvent?: 'buyerAccept' | 'buyerDecline' | 'autoApprove' | 'autoRefund' | 'buyerClose' | 'systemClose' | 'caseClose'; externalEventId?: string; externalKeepOriginalItem?: boolean; externalRefundKind?: '全额退款' | '部分退款'; externalRequestId?: string; consumed?: boolean; error?: string; refundResult?: ReturnRefundResult; refundResultConsumed?: boolean }
+export interface ReturnMockScenario { submit?: 'accepted' | 'failed' | 'unknown'; resolve?: 'success' | 'failed' | 'unknown'; readFailure?: 'summary' | 'detail' | 'files' | 'tracking' | 'all'; externalEvent?: 'buyerAccept' | 'buyerDecline' | 'autoApprove' | 'autoRefund' | 'buyerClose' | 'systemClose' | 'caseClose'; externalEventId?: string; externalKeepOriginalItem?: boolean; externalRefundKind?: '全额退款' | '部分退款'; externalRequestId?: string; consumed?: boolean; error?: string; refundResult?: ReturnRefundResult; refundResultConsumed?: boolean; rmaResponse?: unknown; issueRefundResponse?: unknown; issueRefundHttpStatus?: number; saveFailure?: boolean }
 
 const currencyDigits: Record<string, number> = { USD: 2, GBP: 2, EUR: 2, AUD: 2, CAD: 2, CNY: 2, HKD: 2, TWD: 2, NZD: 2, CHF: 2, SGD: 2, PLN: 2, SEK: 2, NOK: 2, DKK: 2, CZK: 2, HUF: 2, ILS: 2, MYR: 2, PHP: 2, MXN: 2, BRL: 2, INR: 2, JPY: 0, KRW: 0 }
 export function moneyDigits(currency: string): number | null { return currencyDigits[currency] ?? null }
@@ -276,6 +281,7 @@ export function createReturnActionDraft(row: ReturnRecord, action: ReturnAction)
   return { text: '', partialAmount: '', keepOriginalItem: ['approve', 'offerReturn'].includes(action) ? false : row.keepItem, rmaNumber: detail.rmaNumber || '', reason: '', refundItems: detail.refund.items.map(item => ({ refundFeeType: item.refundFeeType, currency: item.currency, value: item.estimated, selected: !item.optional })), label: { labelAction: 'UPLOAD_LABEL', fileId: '', carrierEnum: '', trackingNumber: '', noLabelReason: '', labelSentDate: '', returnLabelCost: '' } }
 }
 export function buildReturnRequest(row: ReturnRecord, action: ReturnAction, draft: ReturnActionDraft): { error: string; request?: ReturnApiRequest } {
+  if (action === 'provideRma' && usesRmaGraphql(row)) return buildRmaGraphqlRequest(row, draft.rmaNumber)
   const detail = getReturnDetail(row), text = draft.text.trim(), base = `/post-order/v2/return/${encodeURIComponent(row.id)}`
   if (text.length > 2000) return { error: '说明最多 2000 字（本地限制）' }
   if (['message', 'escalate'].includes(action) && !text) return { error: '请填写说明内容' }
@@ -333,43 +339,92 @@ export function buildReturnRequest(row: ReturnRecord, action: ReturnAction, draf
       body.partialRefundAmount = amount
     }
     if (['approve', 'offerReturn'].includes(action)) body.keepOriginalItem = draft.keepOriginalItem
-    if (action === 'provideRma' || (action === 'approve' && !draft.keepOriginalItem && draft.rmaNumber.trim())) { if (!draft.rmaNumber.trim()) return { error: '请填写退货授权编号' }; body.RMANumber = draft.rmaNumber.trim(); body.rMAProvided = true }
+    if (action === 'provideRma' || (action === 'approve' && !draft.keepOriginalItem && draft.rmaNumber.trim())) { if (!draft.rmaNumber.trim()) return { error: '请填写退货授权编号' }; if (Array.from(draft.rmaNumber.trim()).length > 100) return { error: '退货授权编号最多 100 个字符' }; body.RMANumber = draft.rmaNumber.trim(); body.rMAProvided = true }
   }
   return { error: '', request: { method: 'POST', path, body } }
 }
 function sourceSignature(row: ReturnRecord): string {
   const detail = getReturnDetail(row)
-  return JSON.stringify([row.shopId, row.id, row.buyerId, row.orderNo, row.marketplaceId, row.currency, row.state, row.status, row.options, row.returnType, detail.currentType, row.quantity, detail.summaryQuantity, detail.fullQuantity, detail.quantityConflict, row.eligibilityKnown, row.escalation, row.keepItem, row.received, detail.keepItemInfo, detail.eligibilityVersion, detail.readStatus.summary.status, detail.readStatus.detail.status, detail.refund, detail.rmaRequired, detail.rmaNumber, detail.files.map(item => [item.fileId, item.fileStatus, item.filePurpose, item.submitter])])
+  return JSON.stringify([row.shopId, row.id, row.buyerId, row.orderNo, row.marketplaceId, row.currency, row.state, row.status, row.options, row.returnType, detail.currentType, row.quantity, detail.summaryQuantity, detail.fullQuantity, detail.quantityConflict, row.eligibilityKnown, row.escalation, row.keepItem, row.received, detail.keepItemInfo, detail.eligibilityVersion, detail.readStatus.summary.status, detail.readStatus.detail.status, detail.refund, detail.rmaRequired, detail.rmaNumber, detail.rmaGraphql, detail.files.map(item => [item.fileId, item.fileStatus, item.filePurpose, item.submitter])])
 }
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+const preparedIntegrity = (prepared: PreparedReturnAction) => JSON.stringify([prepared.confirmationId, prepared.action, prepared.request, prepared.draft, prepared.identity, prepared.sourceSignature, prepared.preparedAt])
+function findPreparedSubmission(row: ReturnRecord, prepared: PreparedReturnAction) {
+  return row.submissionAttempts?.find(attempt => attempt.confirmationId === prepared.confirmationId)
+}
 export function prepareReturnAction(row: ReturnRecord, action: ReturnAction, draft: ReturnActionDraft, now = new Date().toISOString()): { error: string; prepared?: PreparedReturnAction } {
   const error = getReturnBlockedReason(row, action, now); if (error) return { error }
+  // provideRmaNumber 没有 comments；隐藏的旧说明不进入请求、确认或日志。
+  if (action === 'provideRma' && usesRmaGraphql(row)) draft = { ...draft, text: '' }
   const built = buildReturnRequest(row, action, draft); if (!built.request) return { error: built.error }
-  const prepared: PreparedReturnAction = { action, request: clone(built.request), draft: clone(draft), identity: JSON.stringify([returnKey(row), row.buyerId, row.orderNo]), sourceSignature: sourceSignature(row), integrity: '', preparedAt: now }
-  prepared.integrity = JSON.stringify([prepared.action, prepared.request, prepared.draft, prepared.identity, prepared.sourceSignature])
+  const prepared: PreparedReturnAction = { action, request: clone(built.request), draft: clone(draft), identity: JSON.stringify([returnKey(row), row.buyerId, row.orderNo]), sourceSignature: sourceSignature(row), integrity: '', preparedAt: now, confirmationId: crypto.randomUUID() }
+  prepared.integrity = preparedIntegrity(prepared)
   return { error: '', prepared }
 }
 export function validatePreparedReturnAction(row: ReturnRecord, prepared: PreparedReturnAction, now = new Date().toISOString()): string {
-  if (prepared.integrity !== JSON.stringify([prepared.action, prepared.request, prepared.draft, prepared.identity, prepared.sourceSignature])) return '确认内容已变化，请重新确认'
+  const permissionError = getReturnWritePermissionError(row)
+  if (permissionError) return permissionError
+  if (!prepared.confirmationId || prepared.integrity !== preparedIntegrity(prepared)) return '确认内容已变化，请重新确认'
+  if (prepared.identity !== JSON.stringify([returnKey(row), row.buyerId, row.orderNo])) return '申请身份已变化，请刷新后重新确认'
+  const existing = findPreparedSubmission(row, prepared)
+  if (existing) return existing.confirmationIntegrity === prepared.integrity ? '' : '此确认已用于其他提交内容，请重新确认'
   if (prepared.identity !== JSON.stringify([returnKey(row), row.buyerId, row.orderNo]) || prepared.sourceSignature !== sourceSignature(row)) return '申请资格或金额资料已变化，请刷新后重新确认'
   const error = getReturnBlockedReason(row, prepared.action, now); if (error) return error
   const built = buildReturnRequest(row, prepared.action, prepared.draft)
   if (!built.request || JSON.stringify(built.request) !== JSON.stringify(prepared.request)) return built.error || '请求内容已变化，请重新确认'
+  if (row.mock?.saveFailure) return '本次执行记录保存失败，未发送，请重试'
   return ''
 }
 export function submitPreparedReturnAction(row: ReturnRecord, prepared: PreparedReturnAction, now = new Date().toISOString()): string {
   const error = validatePreparedReturnAction(row, prepared, now)
   if (error) return error
+  if (findPreparedSubmission(row, prepared)) return ''
   // 关联仅属于本次提交。无售后单的免寄回决定不能接收上一笔退货的回执。
   row.afterSaleSubmission = undefined
   row.pendingAction = prepared.action; row.pendingText = prepared.draft.text.trim(); row.pendingAmount = prepared.action === 'partial' ? Number(prepared.draft.partialAmount) : null; row.pendingRequest = clone(prepared.request); row.pendingDraft = clone(prepared.draft); row.submissionError = ''
   row.outcome = row.mock?.submit === 'failed' ? 'failed' : row.mock?.submit === 'unknown' ? 'unknown' : 'pending'
   if (row.outcome === 'failed') { row.submissionError = row.mock?.error || '平台明确拒绝：当前申请资格发生变化，请刷新后核对'; row.pendingAction = null; if (row.mock) row.mock.submit = 'accepted' }
   startReturnSubmission(row, actionNames[prepared.action])
-  recordReturnOperation(row, '提交' + actionNames[prepared.action], `本次请求快照已保存${prepared.draft.text.trim() ? `；含${prepared.action === 'message' ? '退货留言' : '对外处理说明'}（${prepared.draft.text.trim().length}字）` : ''}`, row.outcome === 'failed' ? '明确失败' : row.outcome === 'unknown' ? '结果待核查，禁止重提' : '已提交，待回查', now, row.lastSubmission!.operator, true)
+  Object.assign(row.lastSubmission!, { confirmationId: prepared.confirmationId, confirmationIntegrity: prepared.integrity, identity: prepared.identity, requestSnapshot: clone(prepared.request), submittedAt: now, outcome: row.outcome })
+  ;(row.submissionAttempts ??= []).push(row.lastSubmission!)
+  recordReturnOperation(row, '提交' + actionNames[prepared.action], `本次请求快照已保存${prepared.request.api === 'return-graphql' ? prepared.draft.rmaNumber.trim() ? '；提供退货授权编号' : '；本次免除退货授权编号要求' : ''}${prepared.draft.text.trim() ? `；含${prepared.action === 'message' ? '退货留言' : '对外处理说明'}（${prepared.draft.text.trim().length}字）` : ''}`, row.outcome === 'failed' ? '明确失败' : row.outcome === 'unknown' ? '结果待核查，禁止重提' : '已提交，待回查', now, row.lastSubmission!.operator, true)
+  if (prepared.action === 'refund' && row.mock?.issueRefundResponse !== undefined) {
+    applyIssueRefundResponse(row, row.mock.issueRefundResponse, { shopId: row.shopId, returnId: row.id, submissionId: row.lastSubmission!.id, httpStatus: row.mock.issueRefundHttpStatus ?? 200, request: prepared.request }, now)
+  }
   return ''
 }
+
+/** issue_refund 的响应只有 refundStatus；身份及尝试由受控请求上下文绑定，不从金额或旧详情推断。 */
+export function applyIssueRefundResponse(row: ReturnRecord, payload: unknown, context: IssueRefundResponseContext, now = new Date().toISOString()): { outcome: 'confirmed' | 'pending' | 'unknown'; error: string } {
+  const attempt = row.submissionAttempts?.find(item => item.id === context.submissionId)
+  const expectedPath = `/post-order/v2/return/${encodeURIComponent(row.id)}/issue_refund`
+  const request = attempt?.requestSnapshot
+  if (!context.shopId || context.shopId !== row.shopId || context.returnId !== row.id || !attempt || attempt.identity !== JSON.stringify([returnKey(row), row.buyerId, row.orderNo]) || !request || request.method !== 'POST' || request.path !== expectedPath || request.api || JSON.stringify(request) !== JSON.stringify(context.request)) {
+    return { outcome: 'unknown', error: '退款回执与当前申请或执行尝试不一致，请核查原请求' }
+  }
+  const previous = row.refundEvidence?.find(item => item.shopId === row.shopId && item.returnId === row.id && item.submissionId === attempt.id && item.status === 'SUCCESS')
+  const response = object(payload), errors = response.errors
+  const hasErrors = errors !== undefined && (!Array.isArray(errors) || errors.length > 0)
+  const success = context.httpStatus >= 200 && context.httpStatus < 300 && !hasErrors && response.refundStatus === 'SUCCESS'
+  if (success && !previous) {
+    ;(row.refundEvidence ??= []).push({ shopId: row.shopId, returnId: row.id, submissionId: attempt.id, status: 'SUCCESS', observedAt: now, source: 'issue_refund' })
+    recordReturnOperation({ ...row, lastSubmission: attempt }, '读取退款回执', '已确认本次退款资金成功；实际金额继续按独立来源核实', '退款成功，实际金额待核实', now, '系统', true, true)
+  }
+  const confirmed = success || !!previous
+  const pending = !confirmed && context.httpStatus >= 200 && context.httpStatus < 300 && !hasErrors && ['PENDING', 'REQUESTED'].includes(String(response.refundStatus))
+  const outcome = confirmed ? 'confirmed' : pending ? 'pending' : 'unknown'
+  const error = confirmed ? '' : pending ? '' : '退款结果待核查，请保留原请求，勿重复退款'
+  attempt.outcome = outcome
+  // 迟到回执可补原尝试；不能改变另一笔正在办理的表单和提交状态。
+  if (row.lastSubmission?.id === attempt.id) {
+    row.outcome = outcome; row.submissionError = error
+    if (confirmed) row.pendingAction = null
+  }
+  return { outcome, error }
+}
 export function uploadReturnAttachment(row: ReturnRecord, input: { fileName: string; filePurpose: 'ITEM_RELATED' | 'LABEL_RELATED' | 'REFUND_RELATED'; data: string; fileFormat: string }, now = new Date().toISOString()): { error: string; file?: ReturnAttachment; request?: ReturnApiRequest } {
+  const permissionError = getReturnWritePermissionError(row)
+  if (permissionError) return { error: permissionError }
   if (row.outcome === 'pending' || row.outcome === 'unknown') return { error: '上次处理尚未确认，请先核查' }
   if (!row.shopId || !row.id || isReturnClosed(row) || isEscalated(row)) return { error: '当前申请不允许在本地继续上传' }
   const format = input.fileFormat.toUpperCase(), allowed = input.filePurpose === 'LABEL_RELATED' ? ['PNG', 'JPEG', 'JPG', 'GIF', 'BMP', 'PDF'] : ['PNG', 'JPEG', 'JPG', 'GIF', 'BMP']
@@ -421,6 +476,7 @@ export function updateReturnKeepItemInfo(row: ReturnRecord): void {
   row.keepItem = detail.keepItemInfo.value === true
 }
 export function applyReturnSummary(row: ReturnRecord, payload: unknown, now = new Date().toISOString()): void {
+  if (row.detail?.rmaGraphql) row.detail.rmaGraphql.readStatus = 'unknown'
   const source = parseReturnSummary(payload)
   if (!source.returnId || source.returnId !== row.id || (row.orderNo && source.orderId && row.orderNo !== source.orderId)) rejectSource(row, 'summary', 'Return或关联订单身份不一致，拒绝合并', now)
   verifyItemIdentity(row, source, 'summary', now)
@@ -437,6 +493,7 @@ export function applyReturnSummary(row: ReturnRecord, payload: unknown, now = ne
   if (source.itemId && source.transactionId) delete detail.identityConflicts?.summary
 }
 export function applyReturnFull(row: ReturnRecord, payload: unknown, now = new Date().toISOString(), requestContext?: { shopId: string; returnId: string }): void {
+  if (row.detail?.rmaGraphql) row.detail.rmaGraphql.readStatus = 'unknown'
   if (requestContext && (requestContext.shopId !== row.shopId || requestContext.returnId !== row.id)) rejectSource(row, 'detail', 'FULL请求上下文与当前申请身份不一致，拒绝合并', now)
   const source = parseReturnFull(payload), detail = getReturnDetail(row)
   verifyItemIdentity(row, source, 'detail', now)

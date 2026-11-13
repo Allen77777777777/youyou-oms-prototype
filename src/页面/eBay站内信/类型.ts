@@ -8,10 +8,18 @@ export type MailBusinessSourceKind = 'cancel' | 'return' | 'INR_REQUEST' | 'EBAY
 export interface MessageAttachment { id: string; name: string; size: number; type: string; source?: 'local' | 'url'; url?: string }
 export interface MailMessage {
   id: string; kind: 'incoming' | 'outgoing' | 'note'; sender: string; body: string; at: string
+  /** 当前消息的可靠订单集合。旧会话的订单集合不能代替消息级证据。 */
+  orderAssociation?: { state: 'confirmed' | 'pending' | 'none'; orderIds: string[]; source?: string }
+  /** 发送时固定本次回复来源与订单，不随后续阅读切换。 */
+  replyToMessageId?: string
+  replyOrderId?: string
+  incomingMessageIds?: string[]
+  /** 历史补采只补正文，不参与新来信处理状态判断。 */
+  historical?: boolean
   /** 从售后或纠纷发起的站内信，保留原业务对象的类型及店铺。 */
   originApplication?: { kind: MailBusinessSourceKind; applicationId: string; shopId: string; orderNo: string }
   subject?: string; bodyHtml?: string; notice?: NoticeBody
-  translation?: string; delivery?: DeliveryStatus; failureReason?: string; attachments?: MessageAttachment[]; forwardedTo?: string
+  translation?: string; delivery?: DeliveryStatus; failureReason?: string; attachments?: MessageAttachment[]
   /** 兼容镜像：来信取所在会话的阅读状态，不作为独立逐封状态或买家已读回执。 */
   unread?: boolean; sendSource?: 'manual' | 'automation'; automationRuleName?: string
   markProcessedOnSuccess?: boolean

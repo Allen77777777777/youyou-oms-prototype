@@ -2,12 +2,21 @@ import { ref } from 'vue'
 import { 创建规则样例, 按规则优先级排序, 有效规则优先级, type 订单规则, type 规则类型 } from './规则逻辑'
 
 const 补充规则: 订单规则[] = [
+  { id: 'RULE-MERGE-BASIC', name: '综合店 · 美国订单入池', type: '合单规则', enabled: true, priority: 10, mode: '全部满足', conditions: [{ field: 'platformCode', operator: '等于', value: 'eBay' }, { field: 'countryCode', operator: '等于', value: 'US' }, { field: 'storeId', operator: '等于', value: 'demo-merge-basic', values: ['demo-merge-basic'] }], action: '进入合单池', version: 1, updatedAt: '2026-11-13 09:00:00 UTC+8', note: '筛选综合店符合条件的美国订单进入公共合单池。' },
+  { id: 'RULE-MERGE-READY', name: '家居店 · 美国订单入池', type: '合单规则', enabled: true, priority: 20, mode: '全部满足', conditions: [{ field: 'platformCode', operator: '等于', value: 'eBay' }, { field: 'countryCode', operator: '等于', value: 'US' }, { field: 'storeId', operator: '等于', value: 'demo-merge-ready', values: ['demo-merge-ready'] }], action: '进入合单池', version: 1, updatedAt: '2026-11-13 09:05:00 UTC+8', note: '筛选家居店符合条件的美国订单进入公共合单池。' },
+  { id: 'RULE-MERGE-SCHEDULED', name: '户外店 · 美国订单入池', type: '合单规则', enabled: true, priority: 30, mode: '全部满足', conditions: [{ field: 'platformCode', operator: '等于', value: 'eBay' }, { field: 'countryCode', operator: '等于', value: 'US' }, { field: 'storeId', operator: '等于', value: 'demo-merge-scheduled', values: ['demo-merge-scheduled'] }], action: '进入合单池', version: 1, updatedAt: '2026-11-13 09:10:00 UTC+8', note: '筛选户外店符合条件的美国订单进入公共合单池。' },
   { id: 'RULE-REVIEW-GB-AUTO', name: '英国未履约订单自动审核', type: '审单规则', enabled: true, priority: 30, mode: '全部满足', conditions: [{ field: 'platformCode', operator: '等于', value: 'eBay' }, { field: 'countryCode', operator: '等于', value: 'GB' }, { field: 'platformOrderStatus', operator: '等于', value: 'NOT_STARTED' }], action: '自动审核', version: 1, updatedAt: '2026-11-04 09:00:00 UTC+8', note: '' },
   { id: 'RULE-REVIEW-PARTIAL', name: 'eBay 部分履约订单人工核对', type: '审单规则', enabled: true, priority: 5, mode: '全部满足', conditions: [{ field: 'platformCode', operator: '等于', value: 'eBay' }, { field: 'platformOrderStatus', operator: '等于', value: 'IN_PROGRESS' }], action: '留在待审核', version: 1, updatedAt: '2026-10-16 09:00:00 UTC+8', note: '' },
   { id: 'RULE-REVIEW-EU', name: '欧洲自配送订单审核建议', type: '审单规则', enabled: false, priority: 20, mode: '全部满足', conditions: [{ field: 'platformCode', operator: '等于', value: 'eBay' }, { field: 'countryCode', operator: '等于', value: 'DE' }], action: '留在待审核', version: 1, updatedAt: '2026-10-16 09:05:00 UTC+8', note: '' },
   { id: 'RULE-CONFIRM-MANUAL', name: '英国订单无需标发', type: '订单标发规则', enabled: false, priority: 20, mode: '全部满足', conditions: [{ field: 'countryCode', operator: '等于', value: 'GB' }], action: '无需标发', version: 1, updatedAt: '2026-10-16 09:10:00 UTC+8', note: '' },
 ]
-export const 共享规则 = ref([...创建规则样例(), ...补充规则])
+// 本地评审样例，不代表优优生产配置；新建和复制仍默认停用。
+const 收件规则样例: 订单规则[] = [
+  { id: 'RULE-RECIPIENT-US', name: '美国订单 · 首组数字解析', type: '收件信息规则', enabled: true, priority: 10, mode: '全部满足', conditions: [{ field: 'countryCode', operator: '等于', value: 'US' }], action: '门牌号解析', recipientAction: { sourceOrder: 'address1-address2', method: 'firstNumber', tokenMode: 'alphanumeric', addressMode: 'keep' }, version: 1, updatedAt: '2026-11-13 10:00:00 UTC+8', note: '从第一个数字开始解析，详细地址保留门牌。' },
+  { id: 'RULE-RECIPIENT-DE', name: '德国订单 · 末组数字解析', type: '收件信息规则', enabled: true, priority: 20, mode: '全部满足', conditions: [{ field: 'countryCode', operator: '等于', value: 'DE' }], action: '门牌号解析', recipientAction: { sourceOrder: 'address1-address2', method: 'lastNumber', tokenMode: 'alphanumeric', addressMode: 'remove' }, version: 1, updatedAt: '2026-11-13 10:00:00 UTC+8', note: '从最后一个数字开始解析，从处理后的详细地址中移除。' },
+  { id: 'RULE-RECIPIENT-GB', name: '英国订单 · 门牌号在前', type: '收件信息规则', enabled: false, priority: 30, mode: '全部满足', conditions: [{ field: 'countryCode', operator: '等于', value: 'GB' }], action: '门牌号解析', recipientAction: { sourceOrder: 'address1', method: 'leadingNumber', tokenMode: 'digits', addressMode: 'keep' }, version: 1, updatedAt: '2026-11-13 10:00:00 UTC+8', note: '仅识别地址 1 行首的纯数字门牌。' },
+]
+export const 共享规则 = ref([...创建规则样例(), ...补充规则, ...收件规则样例])
 export type 规则操作 = '新增' | '编辑' | '复制' | '启用' | '停用' | '调整优先级' | '删除'
 export interface 规则操作日志 { time: string; text: string; ruleId?: string; ruleName?: string; action?: 规则操作; operator?: string }
 export const 共享规则日志 = ref<规则操作日志[]>([])

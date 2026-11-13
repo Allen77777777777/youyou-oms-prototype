@@ -8,6 +8,7 @@ import { resetReviewSession, reviewSession } from './会话'
 import { draftKey, mailSession, resetMailSession } from '../eBay站内信/会话'
 import { mailboxEntries } from '../eBay站内信/邮箱模型'
 import { MAX_REPLY_BODY_LENGTH } from '../eBay站内信/模型'
+import { applyManualHandlers } from '../eBay站内信/会话处理人'
 import {
   discardReviewContactDraft, getReviewContactBlockedReason, getReviewContactConversation, getReviewContactDraft, getReviewContactEditorConversation, getReviewContactIdentity,
   isReviewContactSending, resetReviewContactSession, sendReviewContact,
@@ -35,6 +36,7 @@ describe('评价联系买家与邮箱共享发送记录', () => {
     const before = currentHandlerId.value
     try {
       currentHandlerId.value = 'staff-02'
+      applyManualHandlers(getReviewContactConversation(existingId)!, ['staff-02'], '客服01')
       prepare()
       const pending = sendReviewContact(existingId, getReviewContactIdentity(existingId))
       currentHandlerId.value = 'staff-03'
@@ -89,7 +91,8 @@ describe('评价联系买家与邮箱共享发送记录', () => {
     delete reviewSession.reviews.find(r => r.id === existingId)!.conversationId
     prepare()
     expect((await finish()).ok).toBe(true)
-    expect(getReviewContactConversation(existingId)).toMatchObject({ association: 'confirmed', relatedOrderIds: ['order-01'] })
+    const c = getReviewContactConversation(existingId)!
+    expect(c.messages[c.messages.length - 1]?.orderAssociation).toMatchObject({ state: 'confirmed', orderIds: ['order-01'] })
   })
 
   it('双击只产生一条待发送记录，发送完成不会重复提交', async () => {

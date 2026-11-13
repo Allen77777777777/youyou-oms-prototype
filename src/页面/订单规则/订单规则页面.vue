@@ -1,12 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, VideoPlay, Document, CopyDocument, InfoFilled, ArrowDown } from '@element-plus/icons-vue'
 import { ElButton, ElIcon, ElTag, ElTable, ElTableColumn, ElDrawer, ElDropdown, ElDropdownItem, ElDropdownMenu, ElSelect, ElOption, ElPagination, ElSwitch, ElEmpty, ElMessage, ElMessageBox, ElTimeline, ElTimelineItem, ElAlert } from 'element-plus'
 import MultiSelectFilter from '@/组件/筛选/多选筛选.vue'
 import FieldSearch from '@/组件/筛选/字段搜索.vue'
 import ConditionSummary from './规则条件摘要.vue'
 import PricingResult from './比价试算结果.vue'
+import MergeSettings from './合单统一设置.vue'
+import RecipientSimulation from './收件信息规则试算.vue'
+import { 收件信息动作摘要 } from './收件信息规则模型'
+import { 收件信息标注 } from './收件信息规则标注'
+import SplitSimulation from './拆单试算结果.vue'
+import MergeSimulation from './合单试算抽屉.vue'
+import { 确认合单规则退出 } from './合单规则影响'
+import { 初始化合单规则演示 } from '../订单处理/自动合单会话'
+import SplitActionSummary from './拆单动作摘要.vue'
+import { 拆单配置摘要 } from './拆单配置展示'
+import { 校验拆单遗留配置 } from './拆单规则模型'
+import { 初始化拆单规则演示 } from './拆单规则会话'
+import { 拆单标注 } from './拆单规则标注'
 import { 创建模拟运费报价, 比价费用说明 } from './比价分仓'
 import { 共享订单 } from '../订单处理/演示会话'
 import { 共享规则, 共享规则日志, 移动规则优先级, 记录规则操作 } from './演示会话'
@@ -24,10 +37,17 @@ import { 规则基础选项 } from './规则基础选项'
 import { 中台比价汇率快照 } from './比价汇率资料'
 import './规则样式.css'
 
-const 类型列表: 规则类型[] = ['审单规则', '分仓规则', '订单标发规则']
-const router = useRouter()
+if (当前规则分类.value === '拆单规则') 初始化拆单规则演示()
+const 拆单试算打开 = ref(false), 拆单试算轮次 = ref(0)
+const 合单试算打开 = ref(false)
+const 收件试算打开 = ref(false)
+// 仅调整页签展示顺序；默认及返回时的选中分类继续由规则编辑会话与原路由参数决定。
+const 类型列表: 规则类型[] = ['拆单规则', '合单规则', '分仓规则', '审单规则', '收件信息规则', '订单标发规则']
+const router = useRouter(), route = useRoute()
+watch(() => route.query.type, value => { if (value === 'recipient') { 当前规则分类.value = '收件信息规则' } else if (value === 'split') { 初始化拆单规则演示(); 当前规则分类.value = '拆单规则' } else if (value === 'merge') { 初始化合单规则演示(); 当前规则分类.value = '合单规则' } }, { immediate: true })
+watch(当前规则分类, value => { if (value === '合单规则') 初始化合单规则演示() }, { immediate: true })
 const 当前类型 = 当前规则分类
-const 类型说明: Record<规则类型, string> = { 审单规则: '按优先级从上往下检查启用规则，首条命中即停止。全部未匹配时，订单进入异常。', 分仓规则: '根据订单条件分配发货仓库和物流渠道，供待审核订单确定发货方案。', 订单标发规则: '命中后按配置安排标发，或无需由 OMS 回传发货信息。' }
+const 类型说明: Record<规则类型, string> = { 收件信息规则: '在对外运费试算、物流下单或推仓前解析本次请求的门牌号，保留原始资料。按优先级采用首条命中规则。', 合单规则: '规则只筛选订单进入公共合单池，重复命中只入池一次；等单、放单和合并限制统一设置，放单后继续分仓与审单。', 拆单规则: '按优先级匹配拆单规则；可配置拆分后的包裹继续匹配后续规则。实际拆分只跳过合单，仍须逐包分仓、审单及系统默认审单。', 审单规则: '按优先级从上往下检查启用规则，首条命中即停止。全部未匹配时，订单进入异常。', 分仓规则: '根据订单条件分配发货仓库和物流渠道，供待审核订单确定发货方案。', 订单标发规则: '命中后按配置安排标发，或无需由 OMS 回传发货信息。' }
 const 规则 = 共享规则
 const 筛选 = reactive(默认规则筛选()), 已应用 = reactive(默认规则筛选())
 const 状态选项 = [{ value: 'true', label: '启用' }, { value: 'false', label: '停用' }]
@@ -50,14 +70,14 @@ let 拖动会话: { id: string; snapshot: string; context: string; x: number; y:
 const 试算打开 = ref(false), 试算订单 = ref(''), 试算类型 = ref<规则类型>('审单规则')
 const 试算结果 = ref<ReturnType<typeof 试算规则>>(), 试算快照 = ref(''), 试算订单快照 = ref(''), 试算渠道快照 = ref(''), 试算汇率快照 = ref('')
 const 试算来源 = computed(() => 共享订单.value.find(项 => 项.systemOrderNo === 试算订单.value))
-const 试算依赖渠道 = computed(() => 试算类型.value === '分仓规则' || 规则.value.some(项 => 项.type === 试算类型.value && 项.conditions.some(条件 => 条件.field === 'shippingWarehouse')))
+const 试算依赖渠道 = computed(() => 试算类型.value === '分仓规则' || 规则.value.some(项 => 项.type === 试算类型.value && 项.conditions.some(条件 => ['shippingWarehouse', 'shippingChannel'].includes(条件.field))))
 const 试算依赖汇率 = computed(() => 试算结果.value?.pricing !== undefined)
 const 试算过期 = computed(() => !!试算结果.value && (试算快照.value !== JSON.stringify(规则.value) || 试算订单快照.value !== JSON.stringify(试算来源.value) || (试算依赖渠道.value && 试算渠道快照.value !== JSON.stringify(渠道会话.value)) || (试算依赖汇率.value && 试算汇率快照.value !== JSON.stringify(中台比价汇率快照.value ?? null))))
 function 时间() { return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) + ' UTC+8' }
 function 清勾选() { 勾选.value = []; 表格.value?.clearSelection() }
 function 查询() { const 错误 = 校验规则筛选(筛选); if (错误) return void ElMessage.warning(错误); Object.assign(已应用, JSON.parse(JSON.stringify(筛选))); 当前页.value = 1; 清勾选() }
 function 重置筛选() { Object.assign(筛选, 默认规则筛选()); Object.assign(已应用, 默认规则筛选()); 当前页.value = 1; 清勾选() }
-function 切规则组(type: 规则类型) { 当前类型.value = type; 重置筛选() }
+function 切规则组(type: 规则类型) { if (type === '拆单规则') 初始化拆单规则演示(); 当前类型.value = type; 重置筛选() }
 watch(试算订单, () => { 试算结果.value = undefined })
 watch(() => 列表.value.length, () => { 当前页.value = Math.min(当前页.value, Math.max(1, Math.ceil(列表.value.length / 每页.value))) })
 function 打开编辑(项?: 订单规则) { const mode = 项 ? 'edit' : 'new'; const session = 创建规则草稿(项?.type || 当前类型.value, 规则.value, mode, 项); if (session) void router.push({ name: `oms-order-rule-${mode}`, params: { sessionId: session.id } }) }
@@ -65,8 +85,17 @@ function 复制规则(项: 订单规则) { const session = 创建规则草稿(�
 async function 批量启停(enabled: boolean, target = 勾选.value) {
   const 快照 = target.map(项 => ({ id: 项.id, version: 项.version, type: 项.type })), 待变更 = target.filter(项 => 项.enabled !== enabled)
   if (!待变更.length) return void ElMessage.info(`所选规则均已${enabled ? '启用' : '停用'}`)
+  if (enabled) {
+    const 旧拆单规则 = 待变更.find(项 => 项.type === '拆单规则' && 校验拆单遗留配置(项))
+    if (旧拆单规则) return void ElMessage.error(`规则“${旧拆单规则.name}”不能启用：${校验拆单遗留配置(旧拆单规则)}`)
+  }
   const 跳过数 = target.length - 待变更.length
-  try { await ElMessageBox.confirm(`已选 ${target.length} 条${当前类型.value}，将${enabled ? '启用' : '停用'} ${待变更.length} 条，跳过已处于该状态的 ${跳过数} 条。将影响后续${当前类型.value === '审单规则' ? '审单规则执行及试算' : '规则试算'}。`, `${enabled ? '启用' : '停用'}规则`, { confirmButtonText: `确认${enabled ? '启用' : '停用'}`, cancelButtonText: '取消', type: 'warning' }) } catch { return }
+  const 提示 = `已选 ${target.length} 条${当前类型.value}，将${enabled ? '启用' : '停用'} ${待变更.length} 条，跳过已处于该状态的 ${跳过数} 条。将影响后续${当前类型.value === '收件信息规则' ? '新建订单的收件信息处理及试算' : 当前类型.value === '审单规则' ? '审单规则执行及试算' : 当前类型.value === '拆单规则' ? '拆单规则执行及试算' : 当前类型.value === '合单规则' ? '公共合单池的订单筛选及试算' : '规则试算'}。`
+  if (当前类型.value === '合单规则' && !enabled) {
+    if (!await 确认合单规则退出(待变更.map(项 => 项.id), { message: 提示, title: '停用合单规则', confirmButtonText: '停用并结束相关等待' })) return
+  } else {
+    try { await ElMessageBox.confirm(提示, `${enabled ? '启用' : '停用'}规则`, { confirmButtonText: `确认${enabled ? '启用' : '停用'}`, cancelButtonText: '取消', type: 'warning' }) } catch { return }
+  }
   if (快照.some(项 => { const 当前 = 规则.value.find(条 => 条.id === 项.id); return !当前 || 当前.version !== 项.version || 当前.type !== 项.type })) return void ElMessage.warning('所选规则已变化，请重新选择')
   const timestamp = 时间()
   待变更.forEach(项 => { 项.enabled = enabled; 项.version++; 项.updatedAt = timestamp; 记录规则操作(项, enabled ? '启用' : '停用', `${enabled ? '启用' : '停用'}规则「${项.name}」`, timestamp) })
@@ -120,7 +149,7 @@ function 条件值(条件: 规则条件) {
   if (是否多选条件字段(条件.field)) {
     if (条件.field === 'siteCode' && 条件.values === undefined) return `原站点条件待重选：${条件.value}`
     const options = 规则基础选项(条件.field, 共享订单.value, 渠道会话.value)
-    return 读取条件多选值(条件).map(value => options.find(项 => 项.value === value)?.label || (条件.field === 'shippingWarehouse' ? '已失效仓库（请重新选择）' : `已失效选项（${value}）`)).join('、')
+    return 读取条件多选值(条件).map(value => options.find(项 => 项.value === value)?.label || (条件.field === 'shippingWarehouse' ? '已失效仓库（请重新选择）' : 条件.field === 'shippingChannel' ? '已失效渠道（请重新选择）' : `已失效选项（${value}）`)).join('、')
   }
   if (条件.field === 'platformOrderStatus') { const name = ({ NOT_STARTED: '未履约', IN_PROGRESS: '部分履约', FULFILLED: '全部履约' } as Record<string,string>)[条件.value]; return name ? `${name}（${条件.value}）` : 条件.value }
   return 格式化条件值(条件)
@@ -155,7 +184,11 @@ function 更多操作(command: unknown, 项: 订单规则) {
 }
 async function 删除规则(项: 订单规则) {
   const snapshot = { id: 项.id, version: 项.version, type: 项.type, name: 项.name }
-  try { await ElMessageBox.confirm(`确定删除规则“${snapshot.name}”？删除后不再参与后续匹配，已产生的订单事实不受影响。`, '删除规则', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }) } catch { return }
+  if (snapshot.type === '合单规则') {
+    if (!await 确认合单规则退出([snapshot.id], { message: `确定删除规则“${snapshot.name}”？删除后不再参与新订单入池筛选，已有出库与平台事实保留。`, title: '删除合单规则', confirmButtonText: '删除并结束相关等待' })) return
+  } else {
+    try { await ElMessageBox.confirm(`确定删除规则“${snapshot.name}”？删除后不再参与后续匹配，已产生的订单事实不受影响。`, '删除规则', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }) } catch { return }
+  }
   const index = 规则.value.findIndex(条 => 条.id === snapshot.id && 条.version === snapshot.version && 条.type === snapshot.type)
   if (index < 0) return void ElMessage.warning('规则已变化，请重新确认删除')
   记录规则操作(规则.value[index]!, '删除', `删除规则「${snapshot.name}」`)
@@ -166,7 +199,7 @@ async function 删除规则(项: 订单规则) {
   if (详情Id.value === snapshot.id) 详情打开.value = false
   清勾选(); ElMessage.success('规则已删除')
 }
-function 开始试算() { 试算类型.value = 当前类型.value; 试算订单.value ||= 共享订单.value.find(项 => 项.processingStatus === '待审核')?.systemOrderNo || 共享订单.value[0]?.systemOrderNo || ''; 试算结果.value = undefined; 试算打开.value = true }
+function 开始试算() { if (当前类型.value === '收件信息规则') { 收件试算打开.value = true; return }; if (当前类型.value === '合单规则') { 合单试算打开.value = true; return }; if (当前类型.value === '拆单规则') { 拆单试算轮次.value++; 拆单试算打开.value = true; return }; 试算类型.value = 当前类型.value; 试算订单.value ||= 共享订单.value.find(项 => 项.processingStatus === '待审核')?.systemOrderNo || 共享订单.value[0]?.systemOrderNo || ''; 试算结果.value = undefined; 试算打开.value = true }
 function 执行试算() {
   if (!试算来源.value) return
   试算渠道快照.value = JSON.stringify(渠道会话.value)
@@ -182,11 +215,15 @@ function 执行试算() {
 
 <template>
   <main class="订单规则页面">
-    <section class="规则工作台" v-prototype="规则标注('overview', '订单规则工作台')">
+    <MergeSimulation v-model="合单试算打开" />
+    <RecipientSimulation v-model="收件试算打开" :rules="规则" :orders="共享订单" />
+    <section class="规则工作台" v-prototype="当前类型 === '收件信息规则' ? 收件信息标注('overview', '收件信息规则工作台') : 当前类型 === '拆单规则' ? 拆单标注('workbench', '拆单规则工作台') : 规则标注('overview', '订单规则工作台')">
       <div class="类型栏" v-prototype="规则标注('categories', '规则分类')"><div class="规则页签" role="tablist" aria-label="规则类型"><button v-for="类型 in 类型列表" :key="类型" role="tab" :aria-selected="当前类型 === 类型" :class="{ active: 当前类型 === 类型 }" @click="切规则组(类型)">{{ 类型 }}</button></div><div class="顶栏操作"><ElButton link :icon="Document" @click="默认打开 = true">系统默认审定规则</ElButton></div></div>
+      <MergeSettings v-if="当前类型 === '合单规则'" />
+      <div v-if="当前类型 === '合单规则'" class="合单规则列表说明"><strong>订单池筛选规则</strong><span>符合任一启用规则的订单进入同一合单池</span></div>
       <div class="搜索栏" v-prototype="规则标注('filters', '规则查询')"><FieldSearch v-model="筛选.keyword" v-model:field="筛选.searchType" v-model:mode="筛选.searchMatch" :fields="规则搜索字段" aria-prefix="订单规则" @search="查询" /><MultiSelectFilter v-model="筛选.enabled" :options="状态选项" placeholder="规则状态" /><ElButton type="primary" @click="查询">查询</ElButton><ElButton @click="重置筛选">重置</ElButton></div>
       <div class="规则工具栏"><div class="左工具"><ElButton type="primary" :icon="Plus" @click="打开编辑()">新增规则</ElButton><ElButton :icon="VideoPlay" @click="开始试算">规则试算</ElButton><span class="批量工具" v-prototype="规则标注('batch', '批量启停规则')"><ElButton :disabled="!勾选.length" @click="批量启停(true)">批量启用</ElButton><ElButton :disabled="!勾选.length" @click="批量启停(false)">批量停用</ElButton></span><span v-if="勾选.length" class="勾选数量">已选 {{ 勾选.length }} 条</span></div></div>
-      <div class="优先级提示" v-prototype="规则标注('priority', '优先级与匹配顺序')"><ElIcon><InfoFilled /></ElIcon><span>{{ 当前类型 === '审单规则' ? 类型说明.审单规则 : '同类规则按优先级从小到大试算，首条命中作为候选；规则命中后仍需检查发货条件。' }}</span></div>
+      <div class="优先级提示" v-prototype="规则标注('priority', '优先级与匹配顺序')"><ElIcon><InfoFilled /></ElIcon><span>{{ 当前类型 === '审单规则' || 当前类型 === '拆单规则' || 当前类型 === '合单规则' || 当前类型 === '收件信息规则' ? 类型说明[当前类型] : '同类规则按优先级从小到大试算，首条命中作为候选；规则命中后仍需检查发货条件。' }}</span></div>
       <div class="规则表格容器"><ElTable ref="表格" :data="分页列表" :row-class-name="排序行样式" row-key="id" @selection-change="勾选 = $event" class="规则表格"><ElTableColumn type="selection" width="44" />
         <ElTableColumn label="优先级" width="108" align="center">
           <template #default="{ row }">
@@ -201,10 +238,10 @@ function 执行试算() {
             </div>
           </template>
         </ElTableColumn>
-        <ElTableColumn label="规则名称" min-width="225"><template #default="{ row }"><ElButton link type="primary" class="规则名称" @click="打开详情(row as 订单规则)">{{ row.name }}</ElButton><div v-if="row.note?.trim()" class="规则副文 规则说明">{{ row.note }}</div></template></ElTableColumn><ElTableColumn label="匹配条件" min-width="270"><template #default="{ row }"><div v-prototype="规则标注('condition-summary', '匹配条件摘要与全文')"><ConditionSummary :lines="条件全文(row as 订单规则)" /></div></template></ElTableColumn><ElTableColumn label="执行动作" min-width="185"><template #default="{ row }"><template v-if="row.type === '分仓规则'"><ConditionSummary :lines="路由配置行(row as 订单规则)" /></template><template v-else><div class="动作摘要">{{ row.type === '订单标发规则' ? 格式化标发动作(row as 订单规则) : 读取审单动作(row.action) || row.action }}</div><div class="规则副文">{{ row.type === '审单规则' ? 审单去向(row.action) : row.action === '无需标发' ? '不回传平台发货信息' : row.action === '物流下单后标发' ? '获取跟踪号后安排标发' : '有效出库且订单已发货' }}</div></template></template></ElTableColumn><ElTableColumn label="状态" width="95"><template #default="{ row }"><ElSwitch :model-value="row.enabled" :aria-label="`${row.name}状态`" @change="批量启停(!row.enabled, [row as 订单规则])" /></template></ElTableColumn><ElTableColumn label="更新时间" width="155"><template #default="{ row }"><span class="更新时间">{{ row.updatedAt.replace(' UTC+8', '') }}</span></template></ElTableColumn><ElTableColumn label="操作" width="116" fixed="right"><template #default="{ row }"><div class="规则行操作"><ElButton link type="primary" @click="打开编辑(row as 订单规则)">编辑</ElButton><ElDropdown trigger="click" placement="bottom-end" @command="更多操作($event, row as 订单规则)"><ElButton link type="primary" :aria-label="`${row.name}更多操作`" v-prototype="规则标注('row-more', '更多规则操作')">更多<ElIcon><ArrowDown /></ElIcon></ElButton><template #dropdown><ElDropdownMenu class="规则更多菜单"><ElDropdownItem command="copy">复制</ElDropdownItem><ElDropdownItem command="logs"><span v-prototype="规则标注('logs', '单条规则操作日志')">操作日志</span></ElDropdownItem><ElDropdownItem command="delete" divided class="危险菜单项"><span v-prototype="规则标注('delete', '删除规则')">删除</span></ElDropdownItem></ElDropdownMenu></template></ElDropdown></div></template></ElTableColumn><template #empty><ElEmpty description="暂无符合条件的规则" :image-size="70"><ElButton @click="重置筛选">清空筛选</ElButton><ElButton type="primary" @click="打开编辑()">新增规则</ElButton></ElEmpty></template></ElTable></div>
+        <ElTableColumn label="规则名称" min-width="225"><template #default="{ row }"><ElButton link type="primary" class="规则名称" @click="打开详情(row as 订单规则)">{{ row.name }}</ElButton><div v-if="row.note?.trim()" class="规则副文 规则说明">{{ row.note }}</div></template></ElTableColumn><ElTableColumn label="匹配条件" min-width="270"><template #default="{ row }"><div v-prototype="规则标注('condition-summary', '匹配条件摘要与全文')"><ConditionSummary :lines="条件全文(row as 订单规则)" /></div></template></ElTableColumn><ElTableColumn label="执行动作" min-width="185"><template #default="{ row }"><template v-if="row.type === '收件信息规则'"><div class="动作摘要">门牌号解析</div><div class="规则副文">{{ 收件信息动作摘要(row.recipientAction) }}</div></template><template v-else-if="row.type === '合单规则'"><div class="动作摘要">进入合单池</div><div class="规则副文">使用统一等单与放单设置</div></template><template v-else-if="row.type === '拆单规则'"><SplitActionSummary :action="row.splitAction" :channels="渠道会话" /></template><template v-else-if="row.type === '分仓规则'"><ConditionSummary :lines="路由配置行(row as 订单规则)" /></template><template v-else><div class="动作摘要">{{ row.type === '订单标发规则' ? 格式化标发动作(row as 订单规则) : 读取审单动作(row.action) || row.action }}</div><div class="规则副文">{{ row.type === '审单规则' ? 审单去向(row.action) : row.action === '无需标发' ? '不回传平台发货信息' : row.action === '物流下单后标发' ? '获取跟踪号后安排标发' : '有效出库且订单已发货' }}</div></template></template></ElTableColumn><ElTableColumn label="状态" width="95"><template #default="{ row }"><ElSwitch :model-value="row.enabled" :aria-label="`${row.name}状态`" @change="批量启停(!row.enabled, [row as 订单规则])" /></template></ElTableColumn><ElTableColumn label="更新时间" width="155"><template #default="{ row }"><span class="更新时间">{{ row.updatedAt.replace(' UTC+8', '') }}</span></template></ElTableColumn><ElTableColumn label="操作" width="116" fixed="right"><template #default="{ row }"><div class="规则行操作"><ElButton link type="primary" @click="打开编辑(row as 订单规则)">编辑</ElButton><ElDropdown trigger="click" placement="bottom-end" @command="更多操作($event, row as 订单规则)"><ElButton link type="primary" :aria-label="`${row.name}更多操作`" v-prototype="规则标注('row-more', '更多规则操作')">更多<ElIcon><ArrowDown /></ElIcon></ElButton><template #dropdown><ElDropdownMenu class="规则更多菜单"><ElDropdownItem command="copy">复制</ElDropdownItem><ElDropdownItem command="logs"><span v-prototype="规则标注('logs', '单条规则操作日志')">操作日志</span></ElDropdownItem><ElDropdownItem command="delete" divided class="危险菜单项"><span v-prototype="规则标注('delete', '删除规则')">删除</span></ElDropdownItem></ElDropdownMenu></template></ElDropdown></div></template></ElTableColumn><template #empty><ElEmpty description="暂无符合条件的规则" :image-size="70"><ElButton @click="重置筛选">清空筛选</ElButton><ElButton type="primary" @click="打开编辑()">新增规则</ElButton></ElEmpty></template></ElTable></div>
       <footer class="列表底栏"><span>共 {{ 列表.length }} 条规则，{{ 列表.filter(项 => 项.enabled).length }} 条启用</span><ElPagination v-model:current-page="当前页" v-model:page-size="每页" :page-sizes="[10,20,50]" :total="列表.length" layout="prev, pager, next, sizes" @current-change="清勾选" @size-change="当前页 = 1; 清勾选()" /></footer>
     </section>
-    <ElDrawer v-model="详情打开" title="规则详情" size="min(760px, calc(100vw - 80px))" class="订单规则附属抽屉" append-to-body><div v-if="详情" v-prototype="规则标注('details', '只读规则详情')"><div class="详情题头"><h2>{{ 详情.name }}</h2><ElTag :type="详情.enabled ? 'success' : 'info'">{{ 详情.enabled ? '启用' : '停用' }}</ElTag></div><dl class="详情信息"><div><dt>规则类型</dt><dd>{{ 详情.type }}</dd></div><div><dt>优先级</dt><dd>{{ 详情.priority }}</dd></div><div><dt>当前版本</dt><dd>v{{ 详情.version }}</dd></div><div><dt>更新时间</dt><dd>{{ 详情.updatedAt }}</dd></div></dl><section class="详情分区"><h3>规则条件 <small>{{ 详情.mode === '全部满足' ? '全部满足' : '旧匹配方式待核查' }}</small></h3><div v-for="(条件, index) in 详情.conditions" :key="index" class="详情条件"><span>{{ 条件字段名[条件.field] }}</span><i v-if="条件比较(条件)">{{ 条件比较(条件) }}</i><strong>{{ 条件值(条件) }}</strong></div></section><section class="详情分区"><h3>执行动作</h3><template v-if="详情.type === '分仓规则'"><p v-for="行 in 路由配置行(详情)" :key="行">{{ 行 }}</p><p v-if="详情.warehouseAction?.mode === 'price'" class="辅助文字">{{ 比价费用说明 }}</p></template><template v-else-if="详情.type === '订单标发规则'"><p>{{ 格式化标发动作(详情) }}</p><p class="辅助文字">{{ 标发动作说明(详情) }}</p></template><template v-else><p>{{ 读取审单动作(详情.action) || 详情.action }}</p><p class="辅助文字">{{ 审单去向(详情.action) }}</p></template><template v-if="详情.type === '审单规则' && 详情.orderNote?.trim()"><h4>{{ 读取审单动作(详情.action) === '自动审核' ? '人工截留备注（仅人工审核时追加）' : '订单备注' }}</h4><p class="订单备注正文">{{ 详情.orderNote }}</p></template></section><section v-if="详情.note?.trim()" class="详情分区"><h3>规则说明</h3><p>{{ 详情.note }}</p></section></div><template #footer><ElButton @click="详情打开 = false">关闭</ElButton><ElButton v-if="详情" :icon="CopyDocument" @click="详情打开 = false; 复制规则(详情)">复制规则</ElButton><ElButton v-if="详情" type="primary" @click="详情打开 = false; 打开编辑(详情)">编辑规则</ElButton></template></ElDrawer>
+    <ElDrawer v-model="详情打开" title="规则详情" size="min(760px, calc(100vw - 80px))" class="订单规则附属抽屉" append-to-body><div v-if="详情" v-prototype="规则标注('details', '只读规则详情')"><div class="详情题头"><h2>{{ 详情.name }}</h2><ElTag :type="详情.enabled ? 'success' : 'info'">{{ 详情.enabled ? '启用' : '停用' }}</ElTag></div><dl class="详情信息"><div><dt>规则类型</dt><dd>{{ 详情.type }}</dd></div><div><dt>优先级</dt><dd>{{ 详情.priority }}</dd></div><div><dt>当前版本</dt><dd>v{{ 详情.version }}</dd></div><div><dt>更新时间</dt><dd>{{ 详情.updatedAt }}</dd></div></dl><section class="详情分区"><h3>规则条件 <small>{{ 详情.mode === '全部满足' ? '全部满足' : '旧匹配方式待核查' }}</small></h3><div v-for="(条件, index) in 详情.conditions" :key="index" class="详情条件"><span>{{ 条件字段名[条件.field] }}</span><i v-if="条件比较(条件)">{{ 条件比较(条件) }}</i><strong>{{ 条件值(条件) }}</strong></div></section><section class="详情分区"><h3>执行动作</h3><template v-if="详情.type === '收件信息规则'"><p>{{ 收件信息动作摘要(详情.recipientAction) }}</p><p class="辅助文字">在对外运费试算、物流下单或推仓前执行；已有独立门牌保留，仅处理本次请求副本。</p></template><template v-else-if="详情.type === '合单规则'"><p>进入合单池</p><p class="辅助文字">本规则仅筛选订单。处理模式、等单、放单及合并限制使用合单规则页上方的统一设置。</p></template><template v-else-if="详情.type === '拆单规则'"><p v-for="(行,index) in 拆单配置摘要(详情.splitAction, 渠道会话)" :key="index">{{ 行 }}</p></template><template v-else-if="详情.type === '分仓规则'"><p v-for="行 in 路由配置行(详情)" :key="行">{{ 行 }}</p><p v-if="详情.warehouseAction?.mode === 'price'" class="辅助文字">{{ 比价费用说明 }}</p></template><template v-else-if="详情.type === '订单标发规则'"><p>{{ 格式化标发动作(详情) }}</p><p class="辅助文字">{{ 标发动作说明(详情) }}</p></template><template v-else><p>{{ 读取审单动作(详情.action) || 详情.action }}</p><p class="辅助文字">{{ 审单去向(详情.action) }}</p></template><template v-if="详情.type === '审单规则' && 详情.orderNote?.trim()"><h4>{{ 读取审单动作(详情.action) === '自动审核' ? '人工截留备注（仅人工审核时追加）' : '订单备注' }}</h4><p class="订单备注正文">{{ 详情.orderNote }}</p></template></section><section v-if="详情.note?.trim()" class="详情分区"><h3>规则说明</h3><p>{{ 详情.note }}</p></section></div><template #footer><ElButton @click="详情打开 = false">关闭</ElButton><ElButton v-if="详情" :icon="CopyDocument" @click="详情打开 = false; 复制规则(详情)">复制规则</ElButton><ElButton v-if="详情" type="primary" @click="详情打开 = false; 打开编辑(详情)">编辑规则</ElButton></template></ElDrawer>
     <ElDrawer v-model="默认打开" title="系统默认审定规则" size="min(820px, calc(100vw - 80px))" class="订单规则附属抽屉" append-to-body><section v-prototype="规则标注('default-checks', '系统默认审核拦截规则')"><div class="默认说明">命中以下任意一条规则，订单审核不通过。</div><section v-for="组 in 默认审单分组" :key="组.title" class="默认分组"><h3>{{ 组.title }}<small>{{ 组.items.length }} 项</small></h3><div v-for="项 in 组.items" :key="项.no" class="默认检查项"><span>{{ String(项.no).padStart(2,'0') }}</span><div><strong>{{ 项.name }}</strong></div></div></section></section><template #footer><ElButton @click="默认打开 = false">关闭</ElButton></template></ElDrawer>
     <ElDrawer v-model="试算打开" title="规则试算" size="min(800px, calc(100vw - 80px))" class="订单规则附属抽屉" append-to-body><section v-prototype="规则标注('simulation', '只读规则试算与命中轨迹')"><div class="试算提示"><ElIcon><InfoFilled /></ElIcon><span>{{ 试算类型 === '审单规则' ? '试算显示全部规则的匹配轨迹，正式执行时只采用首条命中。' : '试算只预览匹配建议。' }}</span></div><label class="试算标签">选择订单 <ElTag size="small" type="info">{{ 试算类型 }}</ElTag></label><div class="试算选择"><ElSelect v-model="试算订单" filterable aria-label="选择试算订单"><ElOption v-for="订单 in 共享订单" :key="订单.systemOrderNo" :label="`${订单.systemOrderNo} · ${订单.platformCode} · ${订单.processingStatus || '未进入处理'}`" :value="订单.systemOrderNo" /></ElSelect><ElButton type="primary" @click="执行试算">开始试算</ElButton></div><div v-if="试算来源" class="订单快照"><span>平台<strong>{{ 试算来源.platformCode }}</strong></span><span>店铺<strong>{{ 试算来源.storeName }}</strong></span><span>国家<strong>{{ 试算来源.address.countryCode || '—' }}</strong></span><span>处理状态<strong>{{ 试算来源.processingStatus || '未进入处理' }}</strong></span></div>
       <template v-if="试算结果"><ElAlert v-if="试算过期" title="配置或订单已变化，请重新试算" type="warning" :closable="false" class="过期提示" /><div class="试算结论"><small>{{ 试算结果.blockedRule ? '需核实的规则' : 试算类型 === '审单规则' ? '预计生效规则' : '候选结果' }}</small><h2>{{ 试算结果.blockedRule?.rule.name || 试算结果.hit?.name || '未命中启用规则' }}</h2>
@@ -215,6 +252,11 @@ function 执行试算() {
           <p v-if="试算结果.gates.length" class="辅助文字">当前订单有执行条件需处理，见下方说明。</p>
         </template>
         <template v-else-if="试算类型 === '分仓规则' && 试算结果.hit"><p>分仓模式：{{ 格式化分仓策略(试算结果.hit) }}</p><p>发货仓库：{{ 试算结果.route?.warehouse || (试算结果.aging || 试算结果.pricing ? '尚未确定' : '配置待核查') }}</p><p>物流渠道：{{ 试算结果.route?.name || (试算结果.aging || 试算结果.pricing ? '随匹配仓库确定' : '配置待核查') }}</p><template v-if="试算结果.aging"><p v-for="行 in 路由配置行(试算结果.hit).slice(1)" :key="行" class="辅助文字">{{ 行 }}</p><p v-for="仓 in 试算结果.aging.skipped" :key="`skipped-${仓.id}`" class="辅助文字">{{ 仓.warehouse }}：分仓后剩余库存不满足要求，已跳过</p><p v-for="项 in 试算结果.aging.ranked" :key="项.route.id">{{ 项.route.warehouse }}：库龄合计 {{ 项.ageDays }} 天 · {{ 项.ageDetails.length }} 个 SKU · 快照 {{ 项.snapshotDate }}</p></template></template><p v-else>{{ 试算结果.hit?.type === '订单标发规则' ? 格式化标发动作(试算结果.hit) : 试算结果.hit?.action || '请调整条件，或交由人工核对' }}</p><p v-if="试算结果.hit?.type === '订单标发规则'" class="辅助文字">{{ 标发动作说明(试算结果.hit) }} 当前仅预览配置，不安排实际标发任务。</p><p v-if="试算类型 === '审单规则' && 试算结果.hit && 读取审单动作(试算结果.hit.action) === '人工审核' && 试算结果.hit.orderNote?.trim()" class="订单备注正文">订单备注：{{ 试算结果.hit.orderNote }}</p><span v-if="试算结果.hit">v{{ 试算结果.hit.version }} · 优先级 {{ 试算结果.hit.priority }}</span></div><PricingResult v-if="试算结果.pricing" :result="试算结果.pricing" /><div class="门禁结果"><h3>执行条件</h3><p v-if="试算结果.gates.length" class="门禁阻断">{{ 试算结果.gates.length }} 项条件需处理</p><ul v-if="试算结果.gates.length"><li v-for="gate in 试算结果.gates" :key="gate">{{ gate }}</li></ul><p v-else class="辅助文字">提交时按当前订单资料校验发货条件及操作资格。</p><p v-if="试算结果.unknownFields.length" class="资料未知">条件资料未知：{{ 试算结果.unknownFields.join('、') }}。相关规则不作为可执行结论。</p></div><h3 class="轨迹标题">匹配轨迹 <span>{{ 试算结果.trace.length }} 条规则</span></h3><ElTimeline><ElTimelineItem v-for="条 in 试算结果.trace" :key="条.rule.id" :type="!条.rule.enabled ? 'info' : 条.matched ? 'primary' : 'info'" :hollow="!条.matched"><div class="轨迹标题行"><strong>{{ 条.rule.name }}</strong><ElTag size="small" :type="!条.rule.enabled ? 'info' : 条.configError || 条.unknownFields.length ? 'warning' : 条.matched ? 'success' : 'info'">{{ 轨迹标签(条) }}</ElTag></div><p v-if="条.configError" class="资料未知">{{ 条.configError }}</p><p class="轨迹元数据"><template v-if="试算类型 === '审单规则'">{{ 读取审单动作(条.rule.action) || 条.rule.action }} · </template>优先级 {{ 条.rule.priority }} · v{{ 条.rule.version }} · {{ 条.rule.mode === '全部满足' ? '全部满足' : '旧匹配方式待核查' }}</p><p class="轨迹条件" v-for="(条件,index) in 条.rule.conditions" :key="index">{{ 条件字段名[条件.field] }} {{ 条件比较(条件) }} {{ 条件值(条件) }}</p></ElTimelineItem></ElTimeline></template><ElEmpty v-else description="选择订单后，点击开始试算查看匹配结果" :image-size="85" /></section></ElDrawer>
+    <ElDrawer v-model="拆单试算打开" title="拆单规则试算" size="min(1120px, calc(100vw - 100px))" class="拆单规则试算抽屉" append-to-body destroy-on-close><SplitSimulation :key="拆单试算轮次" @close="拆单试算打开 = false" /></ElDrawer>
     <ElDrawer v-model="日志打开" title="操作日志" size="min(900px, calc(100vw - 80px))" class="订单规则附属抽屉" append-to-body><section class="规则日志" v-prototype="规则标注('logs', '单条规则操作日志')"><div class="日志题头"><h2>{{ 日志规则?.name }}</h2><ElTag size="small" type="info">{{ 日志规则?.type }}</ElTag></div><ElTable class="规则操作日志表" :data="当前规则日志" empty-text="暂无操作日志"><ElTableColumn label="操作时间" width="170"><template #default="{ row }">{{ row.time.replace(' UTC+8', '') }}</template></ElTableColumn><ElTableColumn prop="operator" label="操作人" width="100" /><ElTableColumn prop="action" label="操作" width="110" /><ElTableColumn prop="text" label="操作内容" min-width="250" /></ElTable></section></ElDrawer>
   </main>
 </template>
+
+<style scoped>
+.合单规则列表说明{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:18px 20px 0}.合单规则列表说明 strong{font-size:14px;font-weight:600;color:var(--yy-text-heading)}.合单规则列表说明 span{font-size:12px;color:var(--yy-text-secondary)}
+</style>

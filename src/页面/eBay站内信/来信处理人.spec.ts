@@ -82,4 +82,39 @@ describe('本地新来信与有效处理人', () => {
     expect(getConversationHandlerIds(thread)).toEqual(['staff-02'])
     expect(thread.operationLogs?.filter(log => log.action === '匹配处理人')).toHaveLength(2)
   })
+
+  it('可信新增重开已处理并保护旧发送回执，忽略期间仅收信且暂停会话规则', () => {
+    const rows: Conversation[] = [], c = collectNextMail(rows)!
+    c.status = 'processed'
+    const revision = c.statusRevision ?? 0
+    collectNextMail(rows)
+    expect(c.status).toBe('pending')
+    expect(c.statusRevision).toBeGreaterThan(revision)
+    configure(true)
+    c.status = 'ignored'
+    const people = [...getConversationHandlerIds(c)], logs = c.operationLogs?.length ?? 0
+    collectNextMail(rows)
+    expect(c.status).toBe('ignored')
+    expect(c.unread).toBe(true)
+    expect(getConversationHandlerIds(c)).toEqual(people)
+    expect(c.operationLogs?.length ?? 0).toBe(logs)
+    expect(c.tags ?? []).not.toContain('return')
+  })
+
+  it('历史首次采集须有可信迁移状态，历史补页和晚到消息不重开现有状态', () => {
+    const rows: Conversation[] = [], c = collectNextMail(rows)!
+    c.status = 'processed'
+    const revision = c.statusRevision
+    const receipt = {
+      shopId: c.shopId, shopName: c.shopName, conversationId: c.id, buyerId: c.buyerId, subject: c.subject,
+      message: { ...c.messages[0]!, id: 'old-page', at: '2026-09-01T00:00:00Z' }, facts: {}, historical: true,
+    }
+    receiveNewMail(rows, receipt)
+    expect(c.status).toBe('processed')
+    expect(c.statusRevision).toBe(revision)
+    expect(receiveNewMail([], { ...receipt, conversationId: 'old-unclassified' })).toBeUndefined()
+    const history: Conversation[] = []
+    receiveNewMail(history, { ...receipt, conversationId: 'old-confirmed', historicalStatus: 'processed' })
+    expect(history[0]?.status).toBe('processed')
+  })
 })

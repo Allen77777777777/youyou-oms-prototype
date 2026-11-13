@@ -11,7 +11,8 @@ function 商品名称(orderNo: string, externalLineId: string) {
 
 <template>
   <div class="拆合方案只读">
-    <div class="方案摘要"><ElTag size="small">{{ plan.kind }}</ElTag><span>{{ plan.orderNos.length }} 张来源订单</span><span>{{ plan.packages.length }} 个包裹</span></div>
+    <div class="方案摘要"><ElTag size="small">{{ plan.kind }}</ElTag><ElTag v-if="plan.createdByRule" size="small" type="info">来源：拆单规则</ElTag><span>{{ plan.orderNos.length }} 张来源订单</span><span>{{ plan.packages.length }} 个包裹</span></div>
+    <div v-if="plan.createdByRule" class="规则来源">{{ plan.createdByRule.rules.map(rule => `${rule.name} · v${rule.version}`).join('；') }}</div>
     <article v-for="(parcel, index) in plan.packages" :key="parcel.key" class="包裹预览">
       <header><strong>包裹 {{ index + 1 }}</strong><span>{{ parcel.items.reduce((sum, item) => sum + item.quantity, 0) }} 件</span></header>
       <div class="路由预览"><strong>{{ parcel.route.warehouse || '未选择仓库' }}</strong><span>{{ parcel.route.shippingChannel || '未选择物流渠道' }}</span><small>{{ parcel.route.warehouseProvider || '—' }} · {{ parcel.route.warehouseAccount || '—' }} · {{ parcel.route.labelMode || '—' }}</small></div>
@@ -27,5 +28,6 @@ function 商品名称(orderNo: string, externalLineId: string) {
 </template>
 
 <style scoped>
+.规则来源{font-size:12px;color:#63758e;line-height:1.6;overflow-wrap:anywhere}
 .拆合方案只读{display:flex;flex-direction:column;gap:12px;min-width:0}.方案摘要{display:flex;gap:14px;align-items:center;color:#738197;font-size:12px}.包裹预览{border:1px solid #e5eaf1;border-radius:5px;overflow:hidden}.包裹预览>header{display:flex;justify-content:space-between;padding:10px 13px;background:#f7f9fc;font-size:12px;color:#63758e}.包裹预览>header strong{color:var(--yy-text-heading)}.路由预览{display:flex;align-items:center;flex-wrap:wrap;gap:8px 18px;padding:12px 13px;font-size:12px}.路由预览 strong{font-weight:500;color:var(--yy-text-heading)}.路由预览 small{width:100%;color:#7d8ba1;font-size:11px}.商品预览{display:flex;flex-direction:column;gap:3px;line-height:1.6;overflow-wrap:anywhere}.商品预览 small{color:#8491a4}.预览商品表 :deep(.el-table__cell){vertical-align:top}.预览商品表 :deep(th.el-table__cell){color:var(--yy-text-heading)}.原因预览{display:grid;grid-template-columns:68px minmax(0,1fr);gap:10px;font-size:12px;line-height:1.7;color:#7b899c}.原因预览 p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#3c506b}
 </style>

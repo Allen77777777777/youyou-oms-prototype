@@ -26,7 +26,7 @@ function registered(id: string) {
 }
 
 describe('站内信实际DOM标注锚点', () => {
-  it('真实菜单、发送按钮与弹窗body注册read/send/batchReply/forward，不把指令挂在非元素组件root', async () => {
+  it('真实菜单、发送按钮与弹窗body注册read/send/batchReply，不把指令挂在非元素组件root', async () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
     // 保留真实ElDropdownItem与ElDialog：壳组件stub会掩盖非元素root导致指令失效的问题。
     const wrapper = mount(MailPage, { attachTo: document.body, global: { directives: { prototype: 原型标注指令 } } })
@@ -54,13 +54,6 @@ describe('站内信实际DOM标注锚点', () => {
     expect(batch.元素.textContent).toContain('正文中的变量分别按每位买家的资料替换')
     expect(batch.标注.数据来源?.join('')).toContain('没有平台批量发送端点')
 
-    const cancel = Array.from(batch.元素.closest('.el-dialog')!.querySelectorAll('button')).find(button => button.textContent?.trim() === '取消')!
-    cancel.click(); await flushPromises(); await nextTick()
-    const forwardItem = Array.from(read.元素.closest('ul')!.querySelectorAll('li')).find(item => item.textContent?.trim() === '转发站内信')!
-    forwardItem.click(); await flushPromises(); await nextTick()
-    const forward = registered('forward')
-    expect(forward.元素.classList.contains('mail-forward-dialog-body')).toBe(true)
-    expect(forward.元素.closest('.el-dialog')).not.toBeNull()
     expect(warnings.mock.calls.flat().map(String).filter(message => /Runtime directive used on component with non-element root/.test(message))).toEqual([])
   })
 
