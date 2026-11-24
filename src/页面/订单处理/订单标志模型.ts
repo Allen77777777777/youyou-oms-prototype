@@ -1,7 +1,8 @@
 import type { 全渠道订单 } from '../全渠道订单/类型'
 import { 是手工订单 } from '../手工订单/来源规则'
+import type { eBay订单 } from '../eBay订单/类型'
 
-export type 订单标志代码 = 'REFUND' | 'CANCEL' | 'EBAY_MESSAGE' | 'BUYER_NOTE' | 'MANUAL_ORDER' | 'MERGED' | 'SPLIT'
+export type 订单标志代码 = 'REFUND' | 'CANCEL' | 'EBAY_MESSAGE' | 'BUYER_NOTE' | 'MANUAL_ORDER' | 'AD_SALE' | 'MERGED' | 'SPLIT'
 export interface 订单标志 {
   code: 订单标志代码
   text: string
@@ -57,10 +58,11 @@ export const 订单标志定义: Record<订单标志代码, Pick<订单标志, '
   EBAY_MESSAGE: { text: '信', name: 'eBay 站内信', tone: 'orange' },
   BUYER_NOTE: { text: '言', name: '买家留言', tone: 'orange' },
   MANUAL_ORDER: { text: '手', name: '手工订单', tone: 'blue' },
+  AD_SALE: { text: '广', name: '广告销售', tone: 'blue' },
   MERGED: { text: '合', name: '合并履约', tone: 'blue' },
   SPLIT: { text: '拆', name: '拆分发货', tone: 'blue' },
 }
-export const 订单标志顺序: 订单标志代码[] = ['REFUND', 'CANCEL', 'EBAY_MESSAGE', 'BUYER_NOTE', 'MANUAL_ORDER', 'MERGED', 'SPLIT']
+export const 订单标志顺序: 订单标志代码[] = ['REFUND', 'CANCEL', 'EBAY_MESSAGE', 'BUYER_NOTE', 'MANUAL_ORDER', 'AD_SALE', 'MERGED', 'SPLIT']
 // 对应 PRD 各标志的短释义；界面提示不展示命中证据或来源订单编号。
 export const 订单标志短释义: Record<订单标志代码, string> = {
   REFUND: '订单有退款中或已退款事实',
@@ -68,6 +70,7 @@ export const 订单标志短释义: Record<订单标志代码, string> = {
   EBAY_MESSAGE: '订单有明确关联的 eBay 买家站内信',
   BUYER_NOTE: '收件信息中有买家下单留言',
   MANUAL_ORDER: '该订单为手工订单',
+  AD_SALE: '订单含广告成交商品',
   MERGED: '本订单与其他系统订单共用履约单',
   SPLIT: '本订单存在拆分发货操作产生的有效方案',
 }
@@ -108,7 +111,7 @@ function 当前退款事实(rows: 标志退款证据[]): 标志退款证据[] {
 }
 
 /** 仅生成当前页面的展示投影，不写 order_tag、tags、日志或处理状态。 */
-export function 计算订单标志(order: 全渠道订单, evidences: 订单标志证据[] = []): 订单标志[] {
+export function 计算订单标志(order: 全渠道订单, evidences: 订单标志证据[] = [], ebayOrders: readonly eBay订单[] = []): 订单标志[] {
   const plan = order.manualShippingPlan
   const manualCode = plan?.id && plan.orderNos.includes(order.systemOrderNo) ? plan.kind === '拆分发货' && plan.packages.length > 1 ? 'SPLIT' : plan.kind === '合并发货' && plan.orderNos.length > 1 ? 'MERGED' : undefined : undefined
   const flags: 订单标志[] = []
@@ -123,6 +126,13 @@ export function 计算订单标志(order: 全渠道订单, evidences: 订单标�
     return flags
   }
   const identity = { systemOrderNo: order.systemOrderNo, storeId: order.storeId, platformOrderId: order.platformOrderId ?? '' }
+  const professionalOrder = order.professionalOrder
+  if (order.fulfillmentMode === '自配送' && order.processingStatus && !order.initialReviewPending
+    && professionalOrder?.sellerId && professionalOrder.orderId === order.platformOrderId) {
+    const source = ebayOrders.find(candidate => candidate.sellerId === professionalOrder.sellerId
+      && candidate.orderId === professionalOrder.orderId && candidate.oms.systemOrderNo === order.systemOrderNo)
+    if (source?.items.some(item => item.soldViaAdCampaign === true)) add('AD_SALE', ['本订单含 eBay 广告成交商品行'])
+  }
   const evidence = 当前可靠证据(identity, evidences)
   if (evidence) {
     const refundReasons: string[] = []

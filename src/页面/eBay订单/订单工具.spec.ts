@@ -29,6 +29,25 @@ describe('eBay订单专业列表', () => {
     expect(结果.some((订单) => 订单.orderId === '21-09741-66320')).toBe(true)
   })
 
+  it('仅广告订单查完整商品行，覆盖两种履约方式并与店铺条件合用', () => {
+    const 自配送 = eBay订单模拟数据[0]!
+    const 平台履约 = eBay订单模拟数据.find(订单 => 订单.oms.fulfillmentMode === '平台履约')!
+    const 非首项命中 = {
+      ...自配送,
+      items: 自配送.items.map((商品, 索引) => ({ ...商品, soldViaAdCampaign: 索引 === 1 })),
+    }
+    const 无标志 = {
+      ...非首项命中,
+      orderId: '未归因订单',
+      items: 非首项命中.items.map(商品 => ({ ...商品, soldViaAdCampaign: undefined })),
+    }
+    const 数据 = [非首项命中, 平台履约, 无标志]
+    const 条件 = { ...默认条件(), adSalesOnly: true }
+    expect(筛选eBay订单(数据, 条件)).toEqual([非首项命中, 平台履约])
+    expect(筛选eBay订单(数据, { ...条件, store: [平台履约.store] })).toEqual([平台履约])
+    expect(筛选eBay订单(数据, 默认条件())).toEqual(数据)
+  })
+
   it('站点使用受控字典显示国家或地区二字码，未知值保留原值', () => {
     expect(格式化eBay站点('EBAY_US')).toBe('US')
     expect(格式化eBay站点('EBAY_GB')).toBe('GB')

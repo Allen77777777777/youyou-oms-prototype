@@ -14,6 +14,7 @@ import {
 } from '@element-plus/icons-vue'
 import {
   ElButton,
+  ElCheckbox,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
@@ -38,6 +39,7 @@ import TimeRange from '@/组件/筛选/时间范围.vue'
 import ListSort from '@/组件/筛选/列表排序.vue'
 import 手机商品占位图 from '@/资源/eBay订单/旗舰手机商品占位-概念图.png'
 import eBay订单详情 from './eBay订单详情.vue'
+import AdOrderBadge from './广告订单标签.vue'
 import EbayTimezoneSwitch from './时区切换.vue'
 import { 当前eBay时区 } from './时区偏好'
 import { 获取显示时区, 转换eBay时间 } from './时间工具'
@@ -49,6 +51,7 @@ import {
   获取状态说明,
   计算商品单价,
   金额非零,
+  含广告成交商品,
   筛选eBay订单,
   eBay搜索字段,
   校验eBay订单筛选,
@@ -71,6 +74,7 @@ const 创建默认筛选条件 = () => ({
   dateRange: null as string[] | null,
   paymentStatus: [] as string[],
   cancelStatus: [] as string[],
+  adSalesOnly: false,
   omsStatus: [] as string[],
   syncStatus: [] as string[],
 })
@@ -128,7 +132,7 @@ const 有生效筛选 = computed(() => Boolean([
   已应用筛选条件.cancelStatus,
   已应用筛选条件.omsStatus,
   已应用筛选条件.syncStatus,
-].filter(值 => 值.length).length || 已应用筛选条件.dateRange?.length))
+].filter(值 => 值.length).length || 已应用筛选条件.dateRange?.length || 已应用筛选条件.adSalesOnly))
 
 const 标注 = (
   id: string,
@@ -163,7 +167,7 @@ const 筛选标注 = 标注(
     前置条件: ['用户已进入 OMS → 销售订单 → eBay订单，且只看到有权限访问的店铺数据。'],
     触发方式: ['选择分类、搜索字段/模式、日期，点击查询或 Enter 提交；多行弹层应用后直接精确查询。', '排序弹层确定立即重排已应用结果，取消不提交。'],
     系统动作: ['仅在本地 eBay 专业订单投影执行筛选；分类同字段 OR，字段之间 AND。查询逐个复制数组快照。', '付款、取消与履约仍是三项独立状态；日期范围按当前北京／每单可靠站点当地墙钟匹配并包含起止秒。', '站点模式仅单选可靠站点启用按该 IANA 今日计算的快捷日期；多站/未选仍可中文手动选择。', '按已有下单或最晚发货的绝对瞬间排序；排序不提交未查询草稿，不改变业务状态。'],
-    成功结果: ['列表刷新为匹配结果，分页回到第 1 页。', '清空日期范围后不再附加日期条件。'],
+    成功结果: ['列表刷新为匹配结果，分页回到第 1 页。', '勾选「仅广告订单」并查询，保留任一商品行广告成交的订单，适用于自配送和平台履约。'],
     异常处理: ['非法、倒置或不完整时间、超过1000项精确输入阻断；站点缺失/冲突、非法或无时区来源有日期条件时不命中。', '无匹配时保留筛选条件并展示空态；不得把“暂无订单”误判为接口无数据。'],
     数据来源: ['本地 eBay 专业订单投影；字段口径见文档/集成/eBay/eBay订单功能与字段接入说明.md。'],
     权限与审计: ['店铺、平台和敏感字段遵循访问者数据范围；查询条件不得绕过权限范围。'],
@@ -184,9 +188,9 @@ const 表格标注 = 标注(
     系统动作: ['按 sellerId + orderId 定位专业订单；打开详情时通过系统内部页签路由承载。'],
     成功结果: ['订单专业事实、OMS 关联信息和 eBay 数据更新状态按各自维度展示。'],
     异常处理: ['未关联 OMS 时保留 eBay 订单并展示“暂无关联单据”；未知枚举保留原值并标记待核查。'],
-    数据来源: ['eBay order、shipping_fulfillment 本地投影；OMS 关联单据只读读取。'],
+    数据来源: ['eBay order、shipping_fulfillment 本地投影；商品行读取 soldViaAdCampaign，OMS 关联单据只读读取。'],
     权限与审计: ['只允许访问授权店铺；跨模块跳转不得扩大数据范围。'],
-    验收要点: ['验证多商品、未配对系统 SKU、未关联 OMS、未知状态、平台履约和系统外履约样例。'],
+    验收要点: ['任一商品行命中即在订单号旁显示「广告订单」，快览和详情逐行核对，自配送和平台履约使用同一规则。', '验证多商品、未配对系统 SKU、未关联 OMS、未知状态和系统外履约。'],
   },
 )
 
@@ -215,7 +219,7 @@ const 多商品快览标注 = 标注(
     前置条件: ['订单包含 2 个及以上商品行。'],
     触发方式: ['点击“共 N 个商品行”按钮；标注模式关闭时不拦截该按钮的正常打开行为。'],
     系统动作: ['打开当前订单商品行的本地快览，不改变订单状态和筛选条件。'],
-    成功结果: ['显示每个商品行的平台 SKU、Item ID、系统 SKU、数量、单价、行金额和履约状态。'],
+    成功结果: ['显示每个商品行的平台 SKU、Item ID、系统 SKU、数量、单价、行金额和履约状态；仅在命中商品的 Item ID 旁显示「广告订单」。'],
     异常处理: ['完整字段缺失时显示对应占位，不隐藏其他商品行；需要完整属性时进入详情。'],
     验收要点: ['快览可关闭；“查看完整详情”进入当前订单详情页签；不触发整行双击。'],
   },
@@ -446,6 +450,7 @@ function 执行查询() {
           <MultiFilter v-model="筛选条件.fulfillmentStatus" :options="履约状态选项" placeholder="eBay履约状态" :width="140" />
           <MultiFilter v-model="筛选条件.paymentStatus" :options="付款状态选项" placeholder="eBay付款状态" :width="140" />
           <MultiFilter v-model="筛选条件.cancelStatus" :options="取消状态选项" placeholder="eBay取消状态" :width="140" />
+          <ElCheckbox v-model="筛选条件.adSalesOnly" border>仅广告订单</ElCheckbox>
           <FieldSearch v-model="筛选条件.keyword" v-model:field="筛选条件.searchType" v-model:mode="筛选条件.searchMatch" :fields="eBay搜索字段" aria-prefix="eBay订单" @search="执行查询" />
           <div class="日期筛选组合">
             <ElSelect v-model="筛选条件.dateType" aria-label="eBay订单日期类型" class="日期类型选择">
@@ -511,6 +516,7 @@ function 执行查询() {
             <div class="订单复合列">
               <div class="订单编号行">
                 <button v-prototype="打开详情标注" type="button" @click="打开详情(row)">{{ row.orderId }}</button>
+                <AdOrderBadge :sold-via-ad-campaign="含广告成交商品(row as eBay订单)" title="订单含广告成交商品" />
                 <span v-if="row.salesRecordReference">销售记录 {{ row.salesRecordReference }}</span>
               </div>
               <div class="买家行"><span>买家</span><strong><BuyerLink :shop-id="row.sellerId" :buyer-id="row.buyerUsername" /></strong></div>
@@ -549,7 +555,10 @@ function 执行查询() {
                         <img class="快览商品图" :src="手机商品占位图" :alt="`第 ${Number(索引) + 1} 个原型商品占位图`" />
                         <div class="快览商品信息">
                           <strong>{{ 商品.title || '商品标题未返回' }}</strong>
-                          <span>平台 SKU {{ 商品.platformSku || '—' }} · Item {{ 商品.itemId || '—' }}</span>
+                          <div class="刊登信息">
+                            <span>平台 SKU {{ 商品.platformSku || '—' }} · Item {{ 商品.itemId || '—' }}</span>
+                            <AdOrderBadge :sold-via-ad-campaign="商品.soldViaAdCampaign" />
+                          </div>
                           <span>{{ 商品.systemSku ? `系统SKU ${商品.systemSku}` : '未配对系统SKU' }}</span>
                         </div>
                         <div class="快览商品结果">
@@ -936,6 +945,13 @@ function 执行查询() {
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.刊登信息 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .商品摘要 .异常文字 {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { 全渠道订单, 订单路由 } from '../全渠道订单/类型'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
+import { eBay订单模拟数据 } from '../eBay订单/模拟数据'
 import type { 作业行 } from './展示工具'
 import type { 订单标志 } from './订单标志模型'
 import { 计算订单标志 } from './订单标志模型'
@@ -81,6 +82,21 @@ describe('统一查询输入与 1000 条上限', () => {
 })
 
 describe('多选分类与共享来源隔离', () => {
+  it('广筛选只命中带广告销售标志的自配送来源，合单条件不跨来源拼接', () => {
+    const 普通单 = 订单(), 履约 = 履约行(普通单)
+    const 广告单 = structuredClone(全渠道订单模拟数据[0]!)
+    广告单.fulfillmentOrders = structuredClone(普通单.fulfillmentOrders)
+    const 平台单 = { ...广告单, fulfillmentMode: '平台履约' } as const
+    const flags = (单: 全渠道订单) => 计算订单标志(单, [], eBay订单模拟数据)
+    const 按广 = { flag: ['AD_SALE'] }
+
+    expect(命中(订单行(广告单), 按广, 上下文([广告单], { flags }))).toBe(true)
+    expect(命中(订单行(平台单), 按广, 上下文([平台单], { flags }))).toBe(false)
+    const 两个来源 = 上下文([普通单, 广告单], { flags })
+    expect(命中(履约, { ...按广, store: [广告单.storeId] }, 两个来源)).toBe(true)
+    expect(命中(履约, { ...按广, store: [普通单.storeId] }, 两个来源)).toBe(false)
+  })
+
   it('手工订单标志筛选读取本单来源，排除普通单和无标志选项', () => {
     const 手工 = 订单({ orderType: '手工订单', platformCode: '手工', platformOrderId: undefined, platformOrderNo: '' })
     const 行 = 订单行(手工), 环境 = 上下文([手工], { flags: 计算订单标志 })

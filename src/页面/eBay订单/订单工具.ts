@@ -151,6 +151,10 @@ export function 订单商品数量(订单: eBay订单): number {
   return 订单.items.reduce((总数, 商品) => 总数 + 商品.quantity, 0)
 }
 
+export function 含广告成交商品(订单: Pick<eBay订单, 'items'>): boolean {
+  return 订单.items.some(商品 => 商品.soldViaAdCampaign === true)
+}
+
 export function 筛选eBay订单(订单列表: eBay订单[], 条件: eBay订单筛选条件, 时区模式: eBay时区模式 = 'site'): eBay订单[] {
   if (校验eBay订单筛选(条件)) return []
   const 搜索字段 = 条件.searchType ?? 'platformOrderNo'
@@ -167,6 +171,7 @@ export function 筛选eBay订单(订单列表: eBay订单[], 条件: eBay订单�
     }
     if (!命中多选(条件.paymentStatus, 订单.paymentStatus)) return false
     if (!命中多选(条件.cancelStatus, 订单.cancelStatus)) return false
+    if (条件.adSalesOnly && !含广告成交商品(订单)) return false
     if (!命中多选(条件.omsStatus, 订单.oms.processingStatus)) return false
     if (!命中多选(条件.syncStatus, 订单.sync.status)) return false
     if (条件.keyword.trim() && ['platformSku', 'systemSku', 'itemId', 'lineItemId', 'title'].includes(搜索字段)) {

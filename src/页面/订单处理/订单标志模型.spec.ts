@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { 全渠道订单模拟数据 } from '../全渠道订单/模拟数据'
+import { eBay订单模拟数据 } from '../eBay订单/模拟数据'
 import { 计算订单标志, 合并来源订单标志, type 订单标志证据 } from './订单标志模型'
 
 function order() { return structuredClone(全渠道订单模拟数据[0]!) }
@@ -10,6 +11,33 @@ function evidence(changes: Partial<订单标志证据> = {}): 订单标志证据
 const codes = (flags: ReturnType<typeof 计算订单标志>) => flags.map(flag => flag.code)
 
 describe('订单标志的同源只读投影', () => {
+  it('仅凭本单已关联的商品行打广，次项命中和多项命中都只显示一个', () => {
+    const source = order()
+    const ebay = structuredClone(eBay订单模拟数据[0]!)
+    delete ebay.items[0]!.soldViaAdCampaign
+    expect(codes(计算订单标志(source, [], [ebay]))).not.toContain('AD_SALE')
+
+    ebay.items[1]!.soldViaAdCampaign = true
+    const flags = 计算订单标志(source, [], [ebay])
+    expect(flags.find(flag => flag.code === 'AD_SALE')).toMatchObject({ text: '广', sourceOrderNos: [source.systemOrderNo] })
+
+    ebay.items[0]!.soldViaAdCampaign = true
+    expect(codes(计算订单标志(source, [], [ebay])).filter(code => code === 'AD_SALE')).toEqual(['AD_SALE'])
+    expect(codes(计算订单标志(source, [], [{ ...ebay, sellerId: 'other-seller' }]))).not.toContain('AD_SALE')
+  })
+
+  it('平台履约、尚未准入和手工订单不使用 eBay 广告证据打标', () => {
+    const source = order()
+    for (const change of [
+      { fulfillmentMode: '平台履约' },
+      { processingStatus: undefined },
+      { initialReviewPending: true },
+      { orderType: '手工订单' },
+    ] as const) {
+      expect(codes(计算订单标志({ ...source, ...change }, [], eBay订单模拟数据))).not.toContain('AD_SALE')
+    }
+  })
+
   it('手按本单类型跨全部处理阶段显示，不要求平台身份，也不继承关联原单标志', () => {
     const original = order()
     const source = order()

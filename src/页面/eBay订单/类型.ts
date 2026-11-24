@@ -21,7 +21,7 @@ export interface eBay订单商品 {
   purchaseMarketplaceId: string
   listingMarketplaceId: string
   soldFormat: string
-  soldViaAdCampaign: boolean
+  soldViaAdCampaign?: boolean
   variations: string[]
   compatibility: string[]
   lineCost: 金额
@@ -158,6 +158,7 @@ export interface eBay订单筛选条件 {
   dateRange: string[] | null
   paymentStatus: string | string[]
   cancelStatus: string | string[]
+  adSalesOnly?: boolean
   omsStatus: string | string[]
   syncStatus: string | string[]
 }

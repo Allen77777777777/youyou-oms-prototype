@@ -44,6 +44,7 @@ import ListSort from '@/组件/筛选/列表排序.vue'
 import type { 列表排序条件, 搜索字段 } from '@/组件/筛选/筛选工具'
 import { 计算订单标志, 合并来源订单标志 } from './订单标志模型'
 import { 订单标志演示证据 } from './订单标志演示'
+import { ebayOrderSession } from '../eBay订单/会话'
 import { 获取平台状态说明 } from '../全渠道订单/订单工具'
 import { 订单备注字数上限 } from './订单备注模型'
 import { 获取作业处理人, 获取作业处理人缺失原因, 订单处理人筛选选项, 处理人姓名 } from './处理人模型'
@@ -73,9 +74,10 @@ const 标发说明 = (行: 作业行) => [...new Set(行标发记录(行).map(�
 const 标发承运商 = (行: 作业行) => [...new Set(行标发记录(行).map(单 => 单.carrier).filter(Boolean))].join(' / ')
 const 有标发失败 = (行: 作业行) => 行标发记录(行).some(单 => 单.status === '标发失败')
 function 查看标发详情(单: 标发单) { router.push({ path: '/oms/self-fulfillment/shipping-confirmation', query: { shippingConfirmationNo: 单.no } }) }
+const 本单标志 = (订单: 全渠道订单) => 计算订单标志(订单, 订单标志演示证据, ebayOrderSession.value)
 function 行标志(行: 作业行) {
   const 来源 = 行.fulfillment ? 共享订单.value.filter(订单 => 订单.fulfillmentOrders.some(履约 => 履约.isActive && 履约.fulfillmentOrderNo === 行.fulfillment!.fulfillmentOrderNo)) : [行.order]
-  return 合并来源订单标志(来源.map(订单 => 计算订单标志(订单, 订单标志演示证据)))
+  return 合并来源订单标志(来源.map(本单标志))
 }
 const 阶段任务: Record<订单处理状态, string> = { 待审核: '校验商品 · 分仓选物流', 待推单: '提交仓库 · 核查接单', 待发货: '跟踪仓库 · 核对出库', 已发货: '核对物流 · 跟进标发', 异常: '停止发货 · 人工复核', 不发货: '核对终止原因与证据' }
 const 关注配置: Record<订单处理状态, 作业关注[]> = { 待审核: ['全部', '可审核', '审核待处理'], 待推单: ['全部', '可推仓', '结果待核查', '下单失败'], 待发货: ['全部', '待出库', '部分出库', '出库异常', '取消中'], 已发货: ['全部', '待标发', '标发中', '标发失败', '标发成功', '无需标发', '无标发记录'], 异常: ['全部', '发货审核失败'], 不发货: ['全部'] }
@@ -93,7 +95,15 @@ const 搜索类型选项: 搜索字段[] = [
 ]
 const 日期类型选项 = [{ value: 'orderedAt', label: '下单时间' }, { value: 'paidAt', label: '付款时间' }, { value: 'shipByAt', label: '最晚发货' }, { value: 'lastSyncedAt', label: '最近同步' }]
 const 平台选项 = [{ value: 'eBay', label: 'eBay' }, { value: 'Temu', label: 'Temu' }, { value: 'Mercado Libre', label: '美客多' }, { value: 'Coupang', label: 'Coupang' }, { value: 'OZON', label: 'OZON' }, { value: 'TikTok Shop', label: 'TikTok Shop' }, { value: 'Rakuten', label: '乐天' }]
-const 标志选项 = [{ value: 'REFUND', label: '退款（退）' }, { value: 'CANCEL', label: '取消（消）' }, { value: 'EBAY_MESSAGE', label: 'eBay 站内信（信）' }, { value: 'BUYER_NOTE', label: '买家留言（言）' }, { value: 'MANUAL_ORDER', label: '手工订单（手）' }, { value: 'NONE', label: '当前无标志' }]
+const 标志选项 = [
+  { value: 'REFUND', label: '退款（退）' },
+  { value: 'CANCEL', label: '取消（消）' },
+  { value: 'EBAY_MESSAGE', label: 'eBay 站内信（信）' },
+  { value: 'BUYER_NOTE', label: '买家留言（言）' },
+  { value: 'MANUAL_ORDER', label: '手工订单（手）' },
+  { value: 'AD_SALE', label: '广告销售（广）' },
+  { value: 'NONE', label: '当前无标志' },
+]
 const 更多条件数量 = computed(() => [筛选.inventory, 筛选.remainingShippingTime].filter(值 => 值.length).length)
 const 条件已修改 = computed(() => JSON.stringify(筛选) !== JSON.stringify(已应用筛选))
 const 排序 = ref<列表排序条件>({ field: 'orderedAt', direction: 'desc' })
@@ -146,9 +156,9 @@ const 列表库存 = computed<Record<string, '充足' | '不足' | '结果未知
   const 结果 = 查询人工方案库存(单.manualShippingPlan, 共享订单.value)
   return [单.systemOrderNo, !结果.rows.length || 结果.rows.some(行 => 行.status === '待核实') ? '结果未知' : 结果.rows.some(行 => 行.status === '不足') ? '不足' : 结果.reasons.length ? '结果未知' : '充足']
 })))
-const 命中筛选 = (行: 作业行) => 命中订单处理筛选(行, 已应用筛选, { orders: 共享订单.value, executions: 仓库执行记录.value, inventory: 列表库存.value, flags: 订单 => 计算订单标志(订单, 订单标志演示证据), now: 查询时刻.value })
+const 命中筛选 = (行: 作业行) => 命中订单处理筛选(行, 已应用筛选, { orders: 共享订单.value, executions: 仓库执行记录.value, inventory: 列表库存.value, flags: 本单标志, now: 查询时刻.value })
 function 匹配来源订单(行: 作业行) {
-  return 获取作业来源订单(行, 共享订单.value).filter(订单 => 命中订单处理筛选({ ...行, order: 订单 }, 已应用筛选, { orders: [订单], executions: 仓库执行记录.value, inventory: 列表库存.value, flags: 项 => 计算订单标志(项, 订单标志演示证据), now: 查询时刻.value }))
+  return 获取作业来源订单(行, 共享订单.value).filter(订单 => 命中订单处理筛选({ ...行, order: 订单 }, 已应用筛选, { orders: [订单], executions: 仓库执行记录.value, inventory: 列表库存.value, flags: 本单标志, now: 查询时刻.value }))
 }
 const 共享履约行 = (行: 作业行) => !!行.fulfillment && 获取作业来源订单(行, 共享订单.value).length > 1
 const 筛选后作业 = computed(() => 全部作业.value.filter(命中筛选))

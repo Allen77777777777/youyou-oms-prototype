@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BuyerLink from '@/组件/买家/买家链接.vue'
+import AdOrderBadge from './广告订单标签.vue'
 import { computed, ref } from 'vue'
 import {
   CopyDocument,
@@ -189,10 +190,10 @@ const 商品标注 = 标注(
   [],
   {
     系统动作: ['按 lineItemId 渲染商品行；商品单价使用折扣前 lineItemCost ÷ quantity 的 Decimal 口径。'],
-    成功结果: ['平台 SKU、系统 SKU、Item ID、变体/适配属性、数量、行金额与行级履约状态并列展示。'],
+    成功结果: ['按商品行展示 SKU、Item ID、变体/适配属性、数量、金额与履约状态；命中行在 Item ID 旁显示「广告订单」。'],
     异常处理: ['系统 SKU 未映射时只读显示“未配对系统SKU”；未知履约枚举保留原值并待核查。'],
-    数据来源: ['Order.lineItems[]；系统 SKU 只读读取现有 SKU 映射资料。'],
-    验收要点: ['验证多商品行、未配对 SKU、金额币种、数量为 0/缺失和未知行级履约状态。'],
+    数据来源: ['Order.lineItems[]；广告成交读取 properties.soldViaAdCampaign；系统 SKU 读取现有映射。'],
+    验收要点: ['验证自配送、平台履约及同单多商品混合成交；标签只显示在字段为 true 的商品行。'],
   },
 )
 
@@ -510,7 +511,7 @@ async function 前往标发中心() {
                   <div class="商品文字">
                     <strong>{{ row.title }}</strong>
                     <span>Line item {{ row.lineItemId }}</span>
-                    <span>Item ID {{ row.itemId }}<template v-if="row.variationId"> · Variation {{ row.variationId }}</template></span>
+                    <span>Item ID {{ row.itemId }}<AdOrderBadge :sold-via-ad-campaign="row.soldViaAdCampaign" /><template v-if="row.variationId"> · Variation {{ row.variationId }}</template></span>
                     <div class="属性标签">
                       <span v-for="属性 in [...row.variations, ...row.compatibility]" :key="属性">{{ 属性 }}</span>
                     </div>
