@@ -92,6 +92,7 @@ const OMS菜单: 菜单节点 = {
         页面('oms-all-orders', '全渠道订单', '/oms/orders/all', 10, '用户规划', '已确认'),
         页面('oms-ebay-orders', 'eBay订单', '/oms/orders/ebay', 20, '用户规划', '已确认'),
         页面('oms-temu-orders', 'Temu订单', '/oms/orders/temu', 30, '用户规划', '已确认'),
+        页面('oms-temu-authorization', 'Temu店铺授权', '/oms/orders/temu-authorization', 40, '用户规划', '已确认'),
       ],
     },
     {

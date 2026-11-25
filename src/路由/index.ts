@@ -14,6 +14,7 @@ import 占位页面 from '@/页面/占位页面.vue'
 const 已实现页面: Record<string, RouteRecordRaw['component']> = {
   'oms-all-orders': 全渠道订单页面,
   'oms-ebay-orders': eBay订单页面,
+  'oms-temu-authorization': () => import('@/页面/Temu店铺授权/Temu店铺授权页面.vue'),
   'oms-shipping-confirmation': () => import('@/页面/订单标发/订单标发页面.vue'),
   'oms-order-processing': () => import('@/页面/订单处理/订单处理页面.vue'),
   'oms-manual-orders': () => import('@/页面/手工订单/手工订单页面.vue'),
